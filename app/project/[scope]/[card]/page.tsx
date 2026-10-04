@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
@@ -48,19 +48,78 @@ import {
   Type,
   X,
   CheckSquare,
+  Edit3,
+  CalendarDays,
+  CheckCircle2,
 } from 'lucide-react'
 
-interface TaskItem {
+// ======================== STATUS CONFIGURATION ========================
+export type TaskStatus = 'In Queue' | 'Working on it' | 'Done' | 'Stuck'
+
+export const orderedStatusList: {
+  status: TaskStatus
+  label: string
+  bg: string
+  hoverBg: string
+  textColor: string
+  colorCode: string
+}[] = [
+  {
+    status: 'Working on it',
+    label: 'Working on it',
+    bg: 'bg-[#ea384c]',
+    hoverBg: 'hover:bg-[#d63044]',
+    textColor: 'text-white',
+    colorCode: '#ea384c',
+  },
+  {
+    status: 'Done',
+    label: 'Done',
+    bg: 'bg-[#22c55e]',
+    hoverBg: 'hover:bg-[#16a34a]',
+    textColor: 'text-white',
+    colorCode: '#22c55e',
+  },
+  {
+    status: 'In Queue',
+    label: 'In Queue',
+    bg: 'bg-[#ffa114]',
+    hoverBg: 'hover:bg-[#f59405]',
+    textColor: 'text-neutral-950',
+    colorCode: '#ffa114',
+  },
+  {
+    status: 'Stuck',
+    label: 'Stuck',
+    bg: 'bg-[#b91c1c]',
+    hoverBg: 'hover:bg-[#991b1b]',
+    textColor: 'text-white',
+    colorCode: '#b91c1c',
+  },
+]
+
+export const statusConfig: Record<TaskStatus, (typeof orderedStatusList)[0]> = {
+  'Working on it': orderedStatusList[0],
+  Done: orderedStatusList[1],
+  'In Queue': orderedStatusList[2],
+  Stuck: orderedStatusList[3],
+}
+
+// ======================== TASK & GROUP INTERFACES ========================
+export interface TaskItem {
   id: string
   title: string
   hasChevron?: boolean
+  description?: string
   personAvatars: string[]
-  status: 'In Queue' | 'Working on it' | 'Done'
+  personNames?: string[]
+  status: TaskStatus
   date: string
   checked: boolean
+  expanded?: boolean
 }
 
-interface TaskGroup {
+export interface TaskGroup {
   id: string
   title: string
   color: string
@@ -81,19 +140,25 @@ const initialGroups: TaskGroup[] = [
         id: 't-1-1',
         title: 'buat logo aqua',
         hasChevron: true,
+        description: 'Desain ulang logo Aqua dalam resolusi tinggi dengan variasi warna.',
         personAvatars: ['/images/clients/SUNDDAE.jpg'],
+        personNames: ['George'],
         status: 'In Queue',
         date: 'Mar 28, 2025',
         checked: false,
+        expanded: false,
       },
       {
         id: 't-1-2',
         title: 'apadah',
         hasChevron: true,
+        description: 'Eksplorasi konsep dan moodboard visual untuk media sosial.',
         personAvatars: ['/images/clients/CONTROVERSIAL.webp', '/images/clients/KONA.webp'],
+        personNames: ['Jordan Fufu', 'Puput Atira'],
         status: 'Working on it',
         date: 'Mar 28, 2025',
         checked: false,
+        expanded: false,
       },
     ],
   },
@@ -108,19 +173,25 @@ const initialGroups: TaskGroup[] = [
         id: 't-2-1',
         title: 'apadah',
         hasChevron: false,
+        description: 'Persiapan materi publikasi dan aset packaging.',
         personAvatars: ['/images/clients/ASIAN-MOOD.webp'],
+        personNames: ['Puput Atira'],
         status: 'In Queue',
         date: 'Mar 28, 2025',
         checked: false,
+        expanded: false,
       },
       {
         id: 't-2-2',
         title: 'logo',
         hasChevron: false,
+        description: 'Finishing logo vector SVG dan guideline brand.',
         personAvatars: ['/images/clients/SOAR.webp'],
+        personNames: ['Rahmat Sudianto'],
         status: 'Working on it',
         date: 'Mar 28, 2025',
         checked: false,
+        expanded: false,
       },
     ],
   },
@@ -135,16 +206,19 @@ const initialGroups: TaskGroup[] = [
         id: 't-3-1',
         title: 'Review Brand Assets',
         hasChevron: false,
+        description: 'Meeting review akhir bersama tim lead.',
         personAvatars: ['/images/clients/GRIZZLE.webp'],
+        personNames: ['George'],
         status: 'In Queue',
         date: 'Mar 29, 2025',
         checked: false,
+        expanded: false,
       },
     ],
   },
 ]
 
-// ======================== DOC BLOCK TYPES ========================
+// ======================== DOC BLOCK INTERFACES ========================
 export type TextStyleType = 'normal' | 'h1' | 'h2' | 'h3' | 'quote'
 export type BlockType =
   | 'paragraph'
@@ -236,8 +310,50 @@ export default function ProjectDetailPage() {
   const [groups, setGroups] = useState<TaskGroup[]>(initialGroups)
   const [activeNav, setActiveNav] = useState('Home')
   const [selectedWorkspace] = useState('2026 INVISUAL')
+
+  // ======================== MAIN TABLE FILTER & SORT STATES ========================
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearchInput, setShowSearchInput] = useState(false)
+  const [personFilter, setPersonFilter] = useState<string>('all')
+  const [showPersonFilterMenu, setShowPersonFilterMenu] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
+  const [showStatusFilterMenu, setShowStatusFilterMenu] = useState(false)
+  const [sortOption, setSortOption] = useState<'none' | 'name-asc' | 'name-desc' | 'date-asc' | 'date-desc'>('none')
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const [showMoreTableMenu, setShowMoreTableMenu] = useState(false)
+
+  // Floating Status Picker state (Which row opened it)
+  const [activeStatusPicker, setActiveStatusPicker] = useState<{
+    groupId: string
+    taskId: string
+  } | null>(null)
+
+  // Row Assignee Picker state
+  const [activeAssigneePicker, setActiveAssigneePicker] = useState<{
+    groupId: string
+    taskId: string
+  } | null>(null)
+
+  // Row Date Picker state
+  const [activeDatePicker, setActiveDatePicker] = useState<{
+    groupId: string
+    taskId: string
+  } | null>(null)
+
+  // Inline editing task title
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+
+  // New Item Dialog modal
+  const [showNewItemModal, setShowNewItemModal] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskGroup, setNewTaskGroup] = useState<string>('group-1')
+  const [newTaskAssignee, setNewTaskAssignee] = useState<string>(teamMembers[0].name)
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('In Queue')
+  const [newTaskDate, setNewTaskDate] = useState<string>('Mar 28, 2025')
+
+  // Add column modal
+  const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
+  const [extraColumns, setExtraColumns] = useState<string[]>([])
 
   // ======================== DOC TAB STATE & HISTORY ========================
   const [docBlocks, setDocBlocks] = useState<DocBlock[]>(initialDocBlocks)
@@ -246,28 +362,308 @@ export default function ProjectDetailPage() {
   const [activeBlockId, setActiveBlockId] = useState<string>('block-1')
   const [lastUpdated, setLastUpdated] = useState('Apr 13, 2026, 22:43')
 
-  // Toolbars dropdown states
+  // Doc toolbars dropdown states
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showTextStyleDropdown, setShowTextStyleDropdown] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showMentionMenu, setShowMentionMenu] = useState(false)
 
-  // Helper to commit changes to history
+  // ======================== MAIN TABLE FUNCTIONS ========================
+
+  // Select a status from the ordered dropdown list
+  const setTaskStatus = (groupId: string, taskId: string, newStatus: TaskStatus) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
+        }
+      })
+    )
+    setActiveStatusPicker(null)
+  }
+
+  // Toggle assignee membership on a task
+  const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof teamMembers)[0]) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => {
+            if (t.id !== taskId) return t
+            const names = t.personNames || []
+            const avatars = t.personAvatars || []
+            const exists = names.includes(member.name)
+            let newNames: string[]
+            let newAvatars: string[]
+            if (exists) {
+              newNames = names.filter((n) => n !== member.name)
+              newAvatars = avatars.filter((a) => a !== member.avatar)
+            } else {
+              newNames = [...names, member.name]
+              newAvatars = [...avatars, member.avatar]
+            }
+            return {
+              ...t,
+              personNames: newNames.length > 0 ? newNames : [member.name],
+              personAvatars: newAvatars.length > 0 ? newAvatars : [member.avatar],
+            }
+          }),
+        }
+      })
+    )
+  }
+
+  // Set task date
+  const setTaskDate = (groupId: string, taskId: string, newDate: string) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => (t.id === taskId ? { ...t, date: newDate } : t)),
+        }
+      })
+    )
+    setActiveDatePicker(null)
+  }
+
+  // Toggle task checkbox
+  const toggleTaskCheck = (groupId: string, taskId: string) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => (t.id === taskId ? { ...t, checked: !t.checked } : t)),
+        }
+      })
+    )
+  }
+
+  // Toggle all checkboxes in a group
+  const toggleAllGroupTasks = (groupId: string) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        const allChecked = g.items.every((t) => t.checked)
+        return {
+          ...g,
+          items: g.items.map((t) => ({ ...t, checked: !allChecked })),
+        }
+      })
+    )
+  }
+
+  // Toggle expand subpanel
+  const toggleTaskExpand = (groupId: string, taskId: string) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) =>
+            t.id === taskId ? { ...t, expanded: !t.expanded } : t
+          ),
+        }
+      })
+    )
+  }
+
+  // Toggle group collapse
+  const toggleGroupCollapse = (groupId: string) => {
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g))
+    )
+  }
+
+  // Submit new task from modal
+  const handleCreateNewTask = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newTaskTitle.trim()) return
+
+    const selectedMember = teamMembers.find((m) => m.name === newTaskAssignee) || teamMembers[0]
+
+    const newItem: TaskItem = {
+      id: `task-${Date.now()}`,
+      title: newTaskTitle.trim(),
+      hasChevron: true,
+      description: 'Tugas baru dibuat via toolbar New Item.',
+      personAvatars: [selectedMember.avatar],
+      personNames: [selectedMember.name],
+      status: newTaskStatus,
+      date: newTaskDate,
+      checked: false,
+      expanded: false,
+    }
+
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== newTaskGroup) return g
+        return { ...g, items: [...g.items, newItem] }
+      })
+    )
+
+    setNewTaskTitle('')
+    setShowNewItemModal(false)
+  }
+
+  // Inline rename task
+  const updateTaskTitle = (groupId: string, taskId: string, newTitle: string) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => (t.id === taskId ? { ...t, title: newTitle } : t)),
+        }
+      })
+    )
+  }
+
+  // Bulk actions count
+  const allTasks = groups.flatMap((g) => g.items)
+  const selectedTasks = allTasks.filter((t) => t.checked)
+
+  // Bulk delete
+  const handleBulkDelete = () => {
+    if (!confirm(`Delete ${selectedTasks.length} selected tasks?`)) return
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        items: g.items.filter((t) => !t.checked),
+      }))
+    )
+  }
+
+  // Bulk set status
+  const handleBulkSetStatus = (status: TaskStatus) => {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        items: g.items.map((t) => (t.checked ? { ...t, status } : t)),
+      }))
+    )
+  }
+
+  // Expand / collapse all groups
+  const expandAllGroups = () => {
+    setGroups((prev) => prev.map((g) => ({ ...g, collapsed: false })))
+    setShowMoreTableMenu(false)
+  }
+
+  const collapseAllGroups = () => {
+    setGroups((prev) => prev.map((g) => ({ ...g, collapsed: true })))
+    setShowMoreTableMenu(false)
+  }
+
+  // Add new group
+  const handleAddNewGroup = () => {
+    const groupName = prompt('Enter new group name:', 'Tugas Baru')
+    if (!groupName) return
+    const colors = ['text-[#6c7ff5]', 'text-[#ea384c]', 'text-[#22c55e]', 'text-[#f59e0b]', 'text-[#ec4899]']
+    const newGroup: TaskGroup = {
+      id: `group-${Date.now()}`,
+      title: groupName,
+      color: colors[groups.length % colors.length],
+      collapsed: false,
+      dateRange: 'Mar 28 - 29',
+      items: [],
+    }
+    setGroups([...groups, newGroup])
+    setShowMoreTableMenu(false)
+  }
+
+  // Export to CSV
+  const exportToCSV = () => {
+    const rows = [['Group', 'Item', 'Assignees', 'Status', 'Date']]
+    groups.forEach((g) => {
+      g.items.forEach((item) => {
+        rows.push([
+          g.title,
+          item.title,
+          (item.personNames || ['George']).join('; '),
+          item.status,
+          item.date,
+        ])
+      })
+    })
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n')
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement('a')
+    link.setAttribute('href', encodedUri)
+    link.setAttribute('download', `${cardTitle.toLowerCase()}-tasks.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setShowMoreTableMenu(false)
+  }
+
+  // Add custom column
+  const handleAddColumn = (colName: string) => {
+    if (!extraColumns.includes(colName)) {
+      setExtraColumns([...extraColumns, colName])
+    }
+    setShowAddColumnMenu(false)
+  }
+
+  // Filtered and sorted tasks for rendering
+  const processedGroups = useMemo(() => {
+    return groups.map((group) => {
+      let items = group.items.filter((item) => {
+        // Search query
+        if (
+          searchQuery &&
+          !item.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
+          !(item.description || '').toLowerCase().includes(searchQuery.toLowerCase())
+        ) {
+          return false
+        }
+        // Person filter
+        if (personFilter !== 'all') {
+          const names = item.personNames || ['George']
+          if (!names.includes(personFilter)) return false
+        }
+        // Status filter
+        if (statusFilter !== 'all') {
+          if (item.status !== statusFilter) return false
+        }
+        return true
+      })
+
+      // Sorting
+      if (sortOption === 'name-asc') {
+        items = [...items].sort((a, b) => a.title.localeCompare(b.title))
+      } else if (sortOption === 'name-desc') {
+        items = [...items].sort((a, b) => b.title.localeCompare(a.title))
+      } else if (sortOption === 'date-asc') {
+        items = [...items].sort((a, b) => a.date.localeCompare(b.date))
+      } else if (sortOption === 'date-desc') {
+        items = [...items].sort((a, b) => b.date.localeCompare(a.date))
+      }
+
+      return {
+        ...group,
+        items,
+      }
+    })
+  }, [groups, searchQuery, personFilter, statusFilter, sortOption])
+
+  // ======================== DOC TAB HELPERS ========================
   const commitBlocksChange = (newBlocks: DocBlock[]) => {
     setDocBlocks(newBlocks)
     const newHistory = history.slice(0, historyIndex + 1)
     newHistory.push(newBlocks)
     setHistory(newHistory)
     setHistoryIndex(newHistory.length - 1)
-
-    // Update timestamp
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     setLastUpdated(`Today, ${timeStr}`)
   }
 
-  // Undo / Redo
   const canUndo = historyIndex > 0
   const canRedo = historyIndex < history.length - 1
 
@@ -285,10 +681,8 @@ export default function ProjectDetailPage() {
     setDocBlocks(history[nextIdx])
   }
 
-  // Active block reference
   const activeBlock = docBlocks.find((b) => b.id === activeBlockId) || docBlocks[0]
 
-  // Text Style options
   const textStyleOptions: {
     type: TextStyleType
     short: string
@@ -313,7 +707,6 @@ export default function ProjectDetailPage() {
       ? 'quote'
       : 'normal'
 
-  // Apply Text Style (T, H1, H2, H3, <>)
   const applyTextStyle = (style: TextStyleType) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
@@ -328,7 +721,6 @@ export default function ProjectDetailPage() {
     setShowTextStyleDropdown(false)
   }
 
-  // Apply Alignment
   const applyAlignment = (align: 'left' | 'center' | 'right' | 'justify') => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
@@ -338,7 +730,6 @@ export default function ProjectDetailPage() {
     setShowAlignMenu(false)
   }
 
-  // Apply Character Styles (Bold, Italic, Underline, Strikethrough, Color, Bg)
   const toggleStyle = (styleKey: keyof NonNullable<DocBlock['styles']>, value?: any) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
@@ -354,14 +745,10 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  // Convert/Insert Lists
   const applyListType = (type: 'bullet-list' | 'numbered-list' | 'checklist') => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
-      if (b.type === type) {
-        // Toggle back to paragraph
-        return { ...b, type: 'paragraph', items: undefined }
-      }
+      if (b.type === type) return { ...b, type: 'paragraph', items: undefined }
       const existingItems =
         b.items ||
         (b.content
@@ -378,22 +765,18 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  // Insert Mention
   const insertMention = (member: (typeof teamMembers)[0]) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
-      const append = ` @${member.name} `
-      return { ...b, content: (b.content || '') + append }
+      return { ...b, content: (b.content || '') + ` @${member.name} ` }
     })
     commitBlocksChange(updated)
     setShowMentionMenu(false)
   }
 
-  // Add New Block from "+ Add"
   const insertNewBlock = (type: BlockType) => {
     let newBlock: DocBlock
     const id = `block-${Date.now()}`
-
     switch (type) {
       case 'h1':
         newBlock = { id, type: 'h1', content: 'Judul Baru', align: 'left', styles: {} }
@@ -481,13 +864,11 @@ export default function ProjectDetailPage() {
         }
         break
     }
-
     commitBlocksChange([...docBlocks, newBlock])
     setActiveBlockId(newBlock.id)
     setShowAddMenu(false)
   }
 
-  // Delete Block
   const deleteBlock = (blockId: string) => {
     if (docBlocks.length <= 1) {
       alert('Dokumen minimal memiliki satu blok konten.')
@@ -495,18 +876,14 @@ export default function ProjectDetailPage() {
     }
     const updated = docBlocks.filter((b) => b.id !== blockId)
     commitBlocksChange(updated)
-    if (activeBlockId === blockId) {
-      setActiveBlockId(updated[0]?.id || '')
-    }
+    if (activeBlockId === blockId) setActiveBlockId(updated[0]?.id || '')
   }
 
-  // Update block content
   const updateBlockContent = (blockId: string, content: string) => {
     const updated = docBlocks.map((b) => (b.id === blockId ? { ...b, content } : b))
     commitBlocksChange(updated)
   }
 
-  // Update list item
   const updateListItem = (blockId: string, itemId: string, text: string) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== blockId || !b.items) return b
@@ -518,7 +895,6 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  // Toggle checklist item
   const toggleChecklistItem = (blockId: string, itemId: string) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== blockId || !b.items) return b
@@ -530,7 +906,6 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  // Add item to list
   const addListItem = (blockId: string) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== blockId) return b
@@ -543,72 +918,8 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  // Group collapse & Task actions
-  const toggleGroupCollapse = (groupId: string) => {
-    setGroups((prev) =>
-      prev.map((g) => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g))
-    )
-  }
-
-  const toggleTaskCheck = (groupId: string, taskId: string) => {
-    setGroups((prev) =>
-      prev.map((g) => {
-        if (g.id !== groupId) return g
-        return {
-          ...g,
-          items: g.items.map((t) => (t.id === taskId ? { ...t, checked: !t.checked } : t)),
-        }
-      })
-    )
-  }
-
-  const cycleStatus = (groupId: string, taskId: string) => {
-    setGroups((prev) =>
-      prev.map((g) => {
-        if (g.id !== groupId) return g
-        return {
-          ...g,
-          items: g.items.map((t) => {
-            if (t.id !== taskId) return t
-            const nextStatus: Record<TaskItem['status'], TaskItem['status']> = {
-              'In Queue': 'Working on it',
-              'Working on it': 'Done',
-              Done: 'In Queue',
-            }
-            return { ...t, status: nextStatus[t.status] }
-          }),
-        }
-      })
-    )
-  }
-
-  const handleAddNewItem = () => {
-    const targetGroup = groups.find((g) => !g.collapsed) || groups[0]
-    const newItemTitle = prompt('Enter new task title:')
-    if (!newItemTitle || !newItemTitle.trim()) return
-
-    setGroups((prev) =>
-      prev.map((g) => {
-        if (g.id !== targetGroup.id) return g
-        const newItem: TaskItem = {
-          id: `task-${Date.now()}`,
-          title: newItemTitle.trim(),
-          hasChevron: true,
-          personAvatars: ['/images/clients/CONTROVERSIAL.webp'],
-          status: 'In Queue',
-          date: 'Mar 28, 2025',
-          checked: false,
-        }
-        return { ...g, items: [...g.items, newItem] }
-      })
-    )
-  }
-
-  // Build CSS classes for block text
   const getBlockStyleClasses = (block: DocBlock) => {
     const classes: string[] = []
-
-    // Type styling
     switch (block.type) {
       case 'h1':
         classes.push('text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug')
@@ -628,14 +939,11 @@ export default function ProjectDetailPage() {
         classes.push('text-sm text-neutral-300 leading-relaxed font-normal')
         break
     }
-
-    // Alignment
     if (block.align === 'center') classes.push('text-center')
     else if (block.align === 'right') classes.push('text-right')
     else if (block.align === 'justify') classes.push('text-justify')
     else classes.push('text-left')
 
-    // Formatting styles
     if (block.styles?.bold) classes.push('font-bold')
     if (block.styles?.italic) classes.push('italic')
     if (block.styles?.underline) classes.push('underline underline-offset-4')
@@ -784,7 +1092,7 @@ export default function ProjectDetailPage() {
         </aside>
 
         {/* Main Content Pane */}
-        <main className="flex-1 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11]">
+        <main className="flex-1 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11] relative">
           {/* Outer Rounded Board Card */}
           <div className="w-full bg-[#141517] border border-neutral-800/80 rounded-2xl p-6 lg:p-8 min-h-[calc(100vh-7rem)] flex flex-col shadow-2xl">
             {/* Breadcrumb Header */}
@@ -858,6 +1166,7 @@ export default function ProjectDetailPage() {
                 {/* Add Tab */}
                 <button
                   type="button"
+                  onClick={() => alert('Add custom view (Kanban, Gantt, Chart)')}
                   className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
                   aria-label="Add tab"
                 >
@@ -871,18 +1180,19 @@ export default function ProjectDetailPage() {
               <>
                 {/* Action Toolbar for Main Table */}
                 <div className="flex flex-wrap items-center gap-3 mb-6">
-                  {/* New item button */}
+                  {/* + New item button with split options */}
                   <div className="inline-flex rounded-md shadow-sm">
                     <button
                       type="button"
-                      onClick={handleAddNewItem}
+                      onClick={() => setShowNewItemModal(true)}
                       className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
                     >
+                      <Plus size={14} strokeWidth={2.5} />
                       <span>New item</span>
                     </button>
                     <button
                       type="button"
-                      onClick={handleAddNewItem}
+                      onClick={() => setShowNewItemModal(true)}
                       className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
                       aria-label="More new item options"
                     >
@@ -890,89 +1200,393 @@ export default function ProjectDetailPage() {
                     </button>
                   </div>
 
-                  {/* Search Toggle */}
-                  {showSearchInput ? (
-                    <div className="relative">
-                      <Search
-                        size={14}
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400"
-                      />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search tasks..."
-                        autoFocus
-                        onBlur={() => !searchQuery && setShowSearchInput(false)}
-                        className="h-8 pl-8 pr-3 bg-[#191a1e] border border-neutral-700 rounded-md text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  ) : (
+                  {/* Search Input / Toggle */}
+                  <div className="relative">
+                    {showSearchInput ? (
+                      <div className="relative flex items-center">
+                        <Search
+                          size={14}
+                          className="absolute left-2.5 text-neutral-400 pointer-events-none"
+                        />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search tasks..."
+                          autoFocus
+                          className="h-8 pl-8 pr-7 bg-[#191a1e] border border-blue-500/70 rounded-md text-xs text-white placeholder:text-neutral-500 focus:outline-none w-48 sm:w-60 transition"
+                        />
+                        {searchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-2 text-neutral-400 hover:text-white"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowSearchInput(true)}
+                        className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs transition cursor-pointer ${
+                          searchQuery
+                            ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                            : 'text-neutral-300 hover:text-white hover:bg-neutral-800/60'
+                        }`}
+                      >
+                        <Search size={14} />
+                        <span>{searchQuery ? `"${searchQuery}"` : 'Search'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Person Filter Dropdown */}
+                  <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setShowSearchInput(true)}
-                      className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                      onClick={() => setShowPersonFilterMenu(!showPersonFilterMenu)}
+                      className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs transition cursor-pointer ${
+                        personFilter !== 'all'
+                          ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                          : 'text-neutral-300 hover:text-white hover:bg-neutral-800/60'
+                      }`}
                     >
-                      <Search size={14} />
-                      <span>Search</span>
+                      <UserIcon size={14} />
+                      <span>{personFilter === 'all' ? 'Person' : personFilter}</span>
+                      <ChevronDown size={12} className="text-neutral-400" />
+                    </button>
+
+                    {showPersonFilterMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowPersonFilterMenu(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                            Filter by Assignee
+                          </div>
+                          <div className="space-y-0.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPersonFilter('all')
+                                setShowPersonFilterMenu(false)
+                              }}
+                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                personFilter === 'all'
+                                  ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                  : 'text-neutral-300 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <span>All Members</span>
+                              {personFilter === 'all' && <Check size={14} />}
+                            </button>
+                            {teamMembers.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => {
+                                  setPersonFilter(m.name)
+                                  setShowPersonFilterMenu(false)
+                                }}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                  personFilter === m.name
+                                    ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                    : 'text-neutral-300 hover:bg-neutral-800'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                                    <Image
+                                      src={m.avatar}
+                                      alt={m.name}
+                                      width={20}
+                                      height={20}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                  <span>{m.name}</span>
+                                </div>
+                                {personFilter === m.name && <Check size={14} />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Status Filter Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowStatusFilterMenu(!showStatusFilterMenu)}
+                      className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs transition cursor-pointer ${
+                        statusFilter !== 'all'
+                          ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                          : 'text-neutral-300 hover:text-white hover:bg-neutral-800/60'
+                      }`}
+                    >
+                      <Filter size={14} />
+                      <span>{statusFilter === 'all' ? 'Filter' : statusFilter}</span>
+                      <ChevronDown size={12} className="text-neutral-400" />
+                    </button>
+
+                    {showStatusFilterMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowStatusFilterMenu(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                            Filter by Status
+                          </div>
+                          <div className="space-y-0.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusFilter('all')
+                                setShowStatusFilterMenu(false)
+                              }}
+                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                statusFilter === 'all'
+                                  ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                  : 'text-neutral-300 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <span>All Statuses</span>
+                              {statusFilter === 'all' && <Check size={14} />}
+                            </button>
+                            {orderedStatusList.map((s) => (
+                              <button
+                                key={s.status}
+                                type="button"
+                                onClick={() => {
+                                  setStatusFilter(s.status)
+                                  setShowStatusFilterMenu(false)
+                                }}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                  statusFilter === s.status
+                                    ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                    : 'text-neutral-300 hover:bg-neutral-800'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full"
+                                    style={{ backgroundColor: s.colorCode }}
+                                  />
+                                  <span>{s.label}</span>
+                                </div>
+                                {statusFilter === s.status && <Check size={14} />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Sort Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowSortMenu(!showSortMenu)}
+                      className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs transition cursor-pointer ${
+                        sortOption !== 'none'
+                          ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                          : 'text-neutral-300 hover:text-white hover:bg-neutral-800/60'
+                      }`}
+                    >
+                      <ArrowUpDown size={14} />
+                      <span>Sort</span>
+                    </button>
+
+                    {showSortMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowSortMenu(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                            Sort By
+                          </div>
+                          <div className="space-y-0.5 mt-1">
+                            {[
+                              { id: 'none', label: 'Default Order' },
+                              { id: 'name-asc', label: 'Name (A to Z)' },
+                              { id: 'name-desc', label: 'Name (Z to A)' },
+                              { id: 'date-asc', label: 'Date (Earliest)' },
+                              { id: 'date-desc', label: 'Date (Latest)' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setSortOption(opt.id as any)
+                                  setShowSortMenu(false)
+                                }}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                  sortOption === opt.id
+                                    ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                    : 'text-neutral-300 hover:bg-neutral-800'
+                                }`}
+                              >
+                                <span>{opt.label}</span>
+                                {sortOption === opt.id && <Check size={14} />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* More Table Options Menu */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreTableMenu(!showMoreTableMenu)}
+                      className="inline-flex items-center justify-center h-8 w-8 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                      aria-label="More actions"
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+
+                    {showMoreTableMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowMoreTableMenu(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                          <button
+                            type="button"
+                            onClick={expandAllGroups}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <ChevronDown size={14} />
+                            <span>Expand All Groups</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={collapseAllGroups}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <ChevronRight size={14} />
+                            <span>Collapse All Groups</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAddNewGroup}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <Plus size={14} />
+                            <span>Add New Group</span>
+                          </button>
+                          <div className="w-full h-px bg-neutral-800 my-1" />
+                          <button
+                            type="button"
+                            onClick={exportToCSV}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <Download size={14} />
+                            <span>Export Table to CSV</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Reset Filters button if active */}
+                  {(personFilter !== 'all' || statusFilter !== 'all' || sortOption !== 'none' || searchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPersonFilter('all')
+                        setStatusFilter('all')
+                        setSortOption('none')
+                        setSearchQuery('')
+                        setShowSearchInput(false)
+                      }}
+                      className="text-xs text-neutral-400 hover:text-blue-400 transition cursor-pointer underline ml-auto"
+                    >
+                      Clear all filters
                     </button>
                   )}
-
-                  {/* Person button */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                  >
-                    <UserIcon size={14} />
-                    <span>Person</span>
-                  </button>
-
-                  {/* Filter button */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                  >
-                    <Filter size={14} />
-                    <span>Filter</span>
-                    <ChevronDown size={12} className="text-neutral-400" />
-                  </button>
-
-                  {/* Sort button */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                  >
-                    <ArrowUpDown size={14} />
-                    <span>Sort</span>
-                  </button>
-
-                  {/* More button */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center h-8 w-8 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                    aria-label="More actions"
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
                 </div>
+
+                {/* Bulk Actions Floating Bar (when tasks are checked) */}
+                {selectedTasks.length > 0 && (
+                  <div className="mb-4 p-2.5 px-4 bg-[#1b1d22] border border-blue-500/50 rounded-xl shadow-xl flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-white">
+                      <span className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-[11px]">
+                        {selectedTasks.length}
+                      </span>
+                      <span>Tasks selected</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-neutral-400 mr-1">Set Status:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkSetStatus('Working on it')}
+                        className="px-2 py-1 bg-[#ea384c] text-white text-[11px] font-semibold rounded hover:brightness-105 transition"
+                      >
+                        Working on it
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkSetStatus('Done')}
+                        className="px-2 py-1 bg-[#22c55e] text-white text-[11px] font-semibold rounded hover:brightness-105 transition"
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkSetStatus('In Queue')}
+                        className="px-2 py-1 bg-[#ffa114] text-neutral-950 text-[11px] font-semibold rounded hover:brightness-105 transition"
+                      >
+                        In Queue
+                      </button>
+
+                      <div className="w-px h-4 bg-neutral-700 mx-2" />
+
+                      <button
+                        type="button"
+                        onClick={handleBulkDelete}
+                        className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Task Groups Table Container */}
                 <div className="space-y-8 flex-1">
-                  {groups.map((group) => {
-                    const filteredItems = group.items.filter((item) =>
-                      item.title.toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-
+                  {processedGroups.map((group) => {
                     const totalItems = group.items.length || 1
                     const inQueueCount = group.items.filter((i) => i.status === 'In Queue').length
                     const workingCount = group.items.filter(
                       (i) => i.status === 'Working on it'
                     ).length
                     const doneCount = group.items.filter((i) => i.status === 'Done').length
+                    const stuckCount = group.items.filter((i) => i.status === 'Stuck').length
 
                     const inQueuePct = (inQueueCount / totalItems) * 100
                     const workingPct = (workingCount / totalItems) * 100
                     const donePct = (doneCount / totalItems) * 100
+                    const stuckPct = (stuckCount / totalItems) * 100
+
+                    const allGroupChecked =
+                      group.items.length > 0 && group.items.every((i) => i.checked)
 
                     return (
                       <div key={group.id} className="space-y-2">
@@ -995,6 +1609,9 @@ export default function ProjectDetailPage() {
                           <span className={`text-sm font-semibold tracking-wide ${group.color}`}>
                             {group.title}
                           </span>
+                          <span className="text-[11px] text-neutral-500 font-normal ml-1">
+                            ({group.items.length})
+                          </span>
                         </div>
 
                         {/* Table View (When Expanded) */}
@@ -1006,7 +1623,18 @@ export default function ProjectDetailPage() {
                                 <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-normal">
                                   {/* Selection Checkbox */}
                                   <th className="w-12 px-3 py-2 text-center border-r border-neutral-800/80">
-                                    <div className="w-4 h-4 rounded border border-neutral-600 mx-auto" />
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleAllGroupTasks(group.id)}
+                                      className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
+                                        allGroupChecked
+                                          ? 'bg-blue-600 border-blue-500 text-white'
+                                          : 'border-neutral-600 hover:border-neutral-400'
+                                      }`}
+                                      title={allGroupChecked ? 'Deselect all' : 'Select all'}
+                                    >
+                                      {allGroupChecked && <Check size={12} strokeWidth={3} />}
+                                    </button>
                                   </th>
                                   <th className="px-4 py-2 border-r border-neutral-800/80 font-normal min-w-[260px]">
                                     Item
@@ -1020,96 +1648,354 @@ export default function ProjectDetailPage() {
                                   <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
                                     Date
                                   </th>
-                                  <th className="w-12 px-2 py-2 text-center">
-                                    <Plus size={14} className="mx-auto text-neutral-400" />
+                                  {extraColumns.map((col) => (
+                                    <th
+                                      key={col}
+                                      className="w-36 px-4 py-2 border-r border-neutral-800/80 font-normal text-center"
+                                    >
+                                      {col}
+                                    </th>
+                                  ))}
+                                  {/* Add Column Button */}
+                                  <th className="w-12 px-2 py-2 text-center relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAddColumnMenu(!showAddColumnMenu)}
+                                      className="p-1 hover:text-white rounded transition cursor-pointer"
+                                      title="Add column"
+                                    >
+                                      <Plus size={14} className="mx-auto text-neutral-400" />
+                                    </button>
+
+                                    {showAddColumnMenu && (
+                                      <>
+                                        <div
+                                          className="fixed inset-0 z-20"
+                                          onClick={() => setShowAddColumnMenu(false)}
+                                        />
+                                        <div className="absolute right-0 top-full mt-1 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
+                                          <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                                            Add Column
+                                          </div>
+                                          {['Priority', 'Timeline', 'Files', 'Notes'].map((col) => (
+                                            <button
+                                              key={col}
+                                              type="button"
+                                              onClick={() => handleAddColumn(col)}
+                                              className="w-full px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 rounded transition cursor-pointer text-left"
+                                            >
+                                              + {col}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </>
+                                    )}
                                   </th>
                                 </tr>
                               </thead>
 
                               {/* Table Body */}
                               <tbody>
-                                {filteredItems.map((item) => (
-                                  <tr
-                                    key={item.id}
-                                    className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/row"
-                                  >
-                                    {/* Checkbox */}
-                                    <td className="px-3 py-2.5 text-center border-r border-neutral-800/80">
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleTaskCheck(group.id, item.id)}
-                                        className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
-                                          item.checked
-                                            ? 'bg-blue-600 border-blue-500 text-white'
-                                            : 'border-neutral-600 hover:border-neutral-400'
-                                        }`}
-                                      >
-                                        {item.checked && <Check size={12} strokeWidth={3} />}
-                                      </button>
-                                    </td>
+                                {group.items.map((item) => {
+                                  const currentStatusConf =
+                                    statusConfig[item.status] || statusConfig['In Queue']
+                                  const isStatusPickerOpen =
+                                    activeStatusPicker?.groupId === group.id &&
+                                    activeStatusPicker?.taskId === item.id
+                                  const isAssigneePickerOpen =
+                                    activeAssigneePicker?.groupId === group.id &&
+                                    activeAssigneePicker?.taskId === item.id
+                                  const isDatePickerOpen =
+                                    activeDatePicker?.groupId === group.id &&
+                                    activeDatePicker?.taskId === item.id
 
-                                    {/* Item Name */}
-                                    <td className="px-4 py-2.5 border-r border-neutral-800/80">
-                                      <div className="flex items-center gap-2">
-                                        {item.hasChevron && (
-                                          <ChevronRight
-                                            size={14}
-                                            className="text-neutral-500 shrink-0"
-                                          />
-                                        )}
-                                        <span className="text-xs text-neutral-200 font-medium">
-                                          {item.title}
-                                        </span>
-                                      </div>
-                                    </td>
+                                  return (
+                                    <tr
+                                      key={item.id}
+                                      className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/row"
+                                    >
+                                      {/* Checkbox */}
+                                      <td className="px-3 py-2.5 text-center border-r border-neutral-800/80">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleTaskCheck(group.id, item.id)}
+                                          className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
+                                            item.checked
+                                              ? 'bg-blue-600 border-blue-500 text-white'
+                                              : 'border-neutral-600 hover:border-neutral-400'
+                                          }`}
+                                        >
+                                          {item.checked && <Check size={12} strokeWidth={3} />}
+                                        </button>
+                                      </td>
 
-                                    {/* Person Avatars */}
-                                    <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center">
-                                      <div className="flex items-center justify-center -space-x-1.5">
-                                        {item.personAvatars.map((av, idx) => (
-                                          <div
-                                            key={idx}
-                                            className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
+                                      {/* Item Name (Editable + Expandable) */}
+                                      <td className="px-4 py-2.5 border-r border-neutral-800/80">
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleTaskExpand(group.id, item.id)}
+                                            className="text-neutral-500 hover:text-neutral-300 transition cursor-pointer p-0.5"
+                                            title="Expand task details"
                                           >
-                                            <Image
-                                              src={av}
-                                              alt="Assignee"
-                                              width={24}
-                                              height={24}
-                                              className="w-full h-full object-cover"
+                                            <ChevronRight
+                                              size={14}
+                                              className={`transition-transform duration-200 ${
+                                                item.expanded ? 'rotate-90 text-blue-400' : ''
+                                              }`}
                                             />
+                                          </button>
+
+                                          {editingTaskId === item.id ? (
+                                            <input
+                                              type="text"
+                                              value={item.title}
+                                              onChange={(e) =>
+                                                updateTaskTitle(group.id, item.id, e.target.value)
+                                              }
+                                              onBlur={() => setEditingTaskId(null)}
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter') setEditingTaskId(null)
+                                              }}
+                                              autoFocus
+                                              className="bg-[#191a1e] border border-blue-500/70 rounded px-1.5 py-0.5 text-xs text-white outline-none w-full"
+                                            />
+                                          ) : (
+                                            <span
+                                              onClick={() => setEditingTaskId(item.id)}
+                                              className="text-xs text-neutral-200 font-medium cursor-pointer hover:text-white hover:underline transition"
+                                              title="Click to rename"
+                                            >
+                                              {item.title}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Expanded sub-details */}
+                                        {item.expanded && (
+                                          <div className="mt-2 pl-6 text-[11px] text-neutral-400 italic border-l border-neutral-700/60 ml-1 py-1 space-y-1">
+                                            <p>{item.description || 'Tidak ada deskripsi tambahan.'}</p>
+                                            <p className="text-[10px] text-neutral-500">
+                                              Assignees: {(item.personNames || ['George']).join(', ')}
+                                            </p>
                                           </div>
-                                        ))}
-                                      </div>
-                                    </td>
+                                        )}
+                                      </td>
 
-                                    {/* Status Badge */}
-                                    <td className="p-0 border-r border-neutral-800/80">
-                                      <button
-                                        type="button"
-                                        onClick={() => cycleStatus(group.id, item.id)}
-                                        title="Click to cycle status"
-                                        className={`w-full h-full py-2.5 px-3 text-center text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center ${
-                                          item.status === 'In Queue'
-                                            ? 'bg-[#ffa114] text-neutral-950 hover:brightness-105'
-                                            : item.status === 'Working on it'
-                                            ? 'bg-[#ea384c] text-white hover:brightness-105'
-                                            : 'bg-[#22c55e] text-white hover:brightness-105'
-                                        }`}
-                                      >
-                                        {item.status}
-                                      </button>
-                                    </td>
+                                      {/* Person Avatars (Interactive Assignee Picker) */}
+                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center relative">
+                                        <div
+                                          onClick={() =>
+                                            setActiveAssigneePicker(
+                                              isAssigneePickerOpen
+                                                ? null
+                                                : { groupId: group.id, taskId: item.id }
+                                            )
+                                          }
+                                          className="flex items-center justify-center -space-x-1.5 cursor-pointer hover:opacity-80 transition"
+                                          title="Click to change assignee"
+                                        >
+                                          {item.personAvatars.map((av, idx) => (
+                                            <div
+                                              key={idx}
+                                              className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
+                                            >
+                                              <Image
+                                                src={av}
+                                                alt="Assignee"
+                                                width={24}
+                                                height={24}
+                                                className="w-full h-full object-cover"
+                                              />
+                                            </div>
+                                          ))}
+                                        </div>
 
-                                    {/* Date */}
-                                    <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300">
-                                      {item.date}
-                                    </td>
+                                        {/* Assignee Popover */}
+                                        {isAssigneePickerOpen && (
+                                          <>
+                                            <div
+                                              className="fixed inset-0 z-20"
+                                              onClick={() => setActiveAssigneePicker(null)}
+                                            />
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
+                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                                Assign Members
+                                              </div>
+                                              <div className="space-y-1">
+                                                {teamMembers.map((m) => {
+                                                  const isAssigned = (item.personNames || []).includes(
+                                                    m.name
+                                                  )
+                                                  return (
+                                                    <button
+                                                      key={m.id}
+                                                      type="button"
+                                                      onClick={() =>
+                                                        toggleTaskAssignee(group.id, item.id, m)
+                                                      }
+                                                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                                                    >
+                                                      <div className="flex items-center gap-2">
+                                                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                                                          <Image
+                                                            src={m.avatar}
+                                                            alt={m.name}
+                                                            width={20}
+                                                            height={20}
+                                                            className="w-full h-full object-cover"
+                                                          />
+                                                        </div>
+                                                        <span className="text-neutral-200 text-xs">
+                                                          {m.name}
+                                                        </span>
+                                                      </div>
+                                                      <div
+                                                        className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                                          isAssigned
+                                                            ? 'bg-blue-600 border-blue-500 text-white'
+                                                            : 'border-neutral-600'
+                                                        }`}
+                                                      >
+                                                        {isAssigned && (
+                                                          <Check size={11} strokeWidth={3} />
+                                                        )}
+                                                      </div>
+                                                    </button>
+                                                  )
+                                                })}
+                                              </div>
+                                            </div>
+                                          </>
+                                        )}
+                                      </td>
 
-                                    {/* Extra column */}
-                                    <td className="px-2 py-2.5 text-center text-neutral-600"></td>
-                                  </tr>
-                                ))}
+                                      {/* Status Badge with ORDERED STATUS DROPDOWN PICKER */}
+                                      <td className="p-0 border-r border-neutral-800/80 relative">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setActiveStatusPicker(
+                                              isStatusPickerOpen
+                                                ? null
+                                                : { groupId: group.id, taskId: item.id }
+                                            )
+                                          }
+                                          title="Click to select status"
+                                          className={`w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 ${currentStatusConf.bg} ${currentStatusConf.textColor} ${currentStatusConf.hoverBg}`}
+                                        >
+                                          <span>{item.status}</span>
+                                          <ChevronDown size={12} className="opacity-70" />
+                                        </button>
+
+                                        {/* Status Picker Popover (Displaying statuses in clean order) */}
+                                        {isStatusPickerOpen && (
+                                          <>
+                                            <div
+                                              className="fixed inset-0 z-20"
+                                              onClick={() => setActiveStatusPicker(null)}
+                                            />
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 space-y-1">
+                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                                Select Status
+                                              </div>
+
+                                              {/* Ordered List of Statuses */}
+                                              {orderedStatusList.map((st) => {
+                                                const isSelected = item.status === st.status
+                                                return (
+                                                  <button
+                                                    key={st.status}
+                                                    type="button"
+                                                    onClick={() =>
+                                                      setTaskStatus(group.id, item.id, st.status)
+                                                    }
+                                                    className={`w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm ${st.bg} ${st.textColor} ${st.hoverBg}`}
+                                                  >
+                                                    <span>{st.label}</span>
+                                                    {isSelected && (
+                                                      <Check size={14} strokeWidth={2.5} />
+                                                    )}
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
+                                          </>
+                                        )}
+                                      </td>
+
+                                      {/* Date (Interactive Date Picker) */}
+                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300 relative">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setActiveDatePicker(
+                                              isDatePickerOpen
+                                                ? null
+                                                : { groupId: group.id, taskId: item.id }
+                                            )
+                                          }
+                                          className="hover:text-white hover:underline transition cursor-pointer"
+                                          title="Click to change date"
+                                        >
+                                          {item.date}
+                                        </button>
+
+                                        {isDatePickerOpen && (
+                                          <>
+                                            <div
+                                              className="fixed inset-0 z-20"
+                                              onClick={() => setActiveDatePicker(null)}
+                                            />
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
+                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                                Select Date
+                                              </div>
+                                              <div className="space-y-1">
+                                                {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map(
+                                                  (d) => (
+                                                    <button
+                                                      key={d}
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setTaskDate(group.id, item.id, d)
+                                                      }
+                                                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer ${
+                                                        item.date === d
+                                                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                                          : 'text-neutral-200'
+                                                      }`}
+                                                    >
+                                                      <span>{d}</span>
+                                                      {item.date === d && <Check size={13} />}
+                                                    </button>
+                                                  )
+                                                )}
+                                              </div>
+                                            </div>
+                                          </>
+                                        )}
+                                      </td>
+
+                                      {/* Extra Columns Values */}
+                                      {extraColumns.map((col) => (
+                                        <td
+                                          key={col}
+                                          className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
+                                        >
+                                          {col === 'Priority'
+                                            ? 'Medium'
+                                            : col === 'Timeline'
+                                            ? '2 Days'
+                                            : '-'}
+                                        </td>
+                                      ))}
+
+                                      {/* Extra Column cell */}
+                                      <td className="px-2 py-2.5 text-center text-neutral-600"></td>
+                                    </tr>
+                                  )
+                                })}
 
                                 {/* Summary / Progress Bar Footer Row */}
                                 <tr className="border-b border-neutral-800/80 bg-transparent">
@@ -1117,28 +2003,34 @@ export default function ProjectDetailPage() {
                                   <td className="border-r border-neutral-800/80 py-2"></td>
                                   <td className="border-r border-neutral-800/80 py-2"></td>
 
-                                  {/* Dual-color Progress Bar */}
+                                  {/* Dynamic Multi-color Progress Bar */}
                                   <td className="p-1 border-r border-neutral-800/80">
-                                    <div className="h-6 w-full rounded flex overflow-hidden">
+                                    <div
+                                      className="h-6 w-full rounded flex overflow-hidden cursor-help shadow-sm"
+                                      title={`In Queue: ${inQueueCount}, Working on it: ${workingCount}, Done: ${doneCount}, Stuck: ${stuckCount}`}
+                                    >
                                       {inQueuePct > 0 && (
                                         <div
                                           style={{ width: `${inQueuePct}%` }}
                                           className="bg-[#ffa114] h-full transition-all duration-300"
-                                          title={`In Queue: ${inQueueCount}`}
                                         />
                                       )}
                                       {workingPct > 0 && (
                                         <div
                                           style={{ width: `${workingPct}%` }}
                                           className="bg-[#ea384c] h-full transition-all duration-300"
-                                          title={`Working on it: ${workingCount}`}
                                         />
                                       )}
                                       {donePct > 0 && (
                                         <div
                                           style={{ width: `${donePct}%` }}
                                           className="bg-[#22c55e] h-full transition-all duration-300"
-                                          title={`Done: ${doneCount}`}
+                                        />
+                                      )}
+                                      {stuckPct > 0 && (
+                                        <div
+                                          style={{ width: `${stuckPct}%` }}
+                                          className="bg-[#b91c1c] h-full transition-all duration-300"
                                         />
                                       )}
                                     </div>
@@ -1150,6 +2042,13 @@ export default function ProjectDetailPage() {
                                       {group.dateRange}
                                     </div>
                                   </td>
+
+                                  {extraColumns.map((col) => (
+                                    <td
+                                      key={col}
+                                      className="border-r border-neutral-800/80 py-2"
+                                    ></td>
+                                  ))}
 
                                   <td></td>
                                 </tr>
@@ -1164,7 +2063,7 @@ export default function ProjectDetailPage() {
               </>
             )}
 
-            {/* TAB 2: DOC (CLIENT BRIEF) - REAL WORD / DOC APPLICATION */}
+            {/* TAB 2: DOC (CLIENT BRIEF) */}
             {activeTab === 'Doc' && (
               <div className="flex-1 flex flex-col">
                 {/* Real Docs Full Feature Toolbar */}
@@ -1508,7 +2407,7 @@ export default function ProjectDetailPage() {
 
                   <div className="w-px h-4 bg-neutral-800 mx-1" />
 
-                  {/* Functional Style Popover (Bold, Italic, Underline, Color, Highlight) */}
+                  {/* Style Popover */}
                   <div className="relative">
                     <button
                       type="button"
@@ -1522,7 +2421,7 @@ export default function ProjectDetailPage() {
                           ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
                           : 'hover:text-white hover:bg-neutral-800/60 text-neutral-300'
                       }`}
-                      title="Text styling (Bold, Italic, Underline, Colors)"
+                      title="Text styling"
                     >
                       <Sparkles size={13} />
                       <span>Style</span>
@@ -1535,7 +2434,6 @@ export default function ProjectDetailPage() {
                           onClick={() => setShowStyleMenu(false)}
                         />
                         <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-3 z-30 animate-in fade-in zoom-in-95 duration-100 space-y-3">
-                          {/* Font Styles: B, I, U, S */}
                           <div>
                             <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">
                               Character Format
@@ -1592,7 +2490,6 @@ export default function ProjectDetailPage() {
                             </div>
                           </div>
 
-                          {/* Text Colors */}
                           <div>
                             <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">
                               Text Color
@@ -1619,7 +2516,6 @@ export default function ProjectDetailPage() {
                             </div>
                           </div>
 
-                          {/* Highlight Background Tint */}
                           <div>
                             <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">
                               Highlight
@@ -1650,13 +2546,13 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
 
-                  {/* Functional Mention @ Popover */}
+                  {/* Mention @ */}
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() => setShowMentionMenu(!showMentionMenu)}
                       className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer text-neutral-300"
-                      title="Mention team member (@)"
+                      title="Mention member (@)"
                     >
                       <AtSign size={15} />
                     </button>
@@ -1669,7 +2565,7 @@ export default function ProjectDetailPage() {
                         />
                         <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl py-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
                           <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
-                            Mention Team Member
+                            Mention Member
                           </div>
                           <div className="p-1 space-y-0.5">
                             {teamMembers.map((member) => (
@@ -1713,9 +2609,7 @@ export default function ProjectDetailPage() {
                       Doc
                     </h1>
 
-                    {/* Metadata Header */}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
-                      {/* Creator */}
                       <div className="flex items-center gap-2">
                         <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 bg-neutral-800 shrink-0">
                           <Image
@@ -1731,20 +2625,17 @@ export default function ProjectDetailPage() {
                         </span>
                       </div>
 
-                      {/* Created Date */}
                       <div className="flex items-center gap-1.5 text-neutral-400">
                         <span>Created</span>
                         <span className="text-neutral-200">Apr 13, 2026, 20:56</span>
                       </div>
 
-                      {/* Last Updated */}
                       <div className="flex items-center gap-1.5 text-neutral-400">
                         <Clock size={13} className="text-neutral-500" />
                         <span>Last updated</span>
                         <span className="text-neutral-200">{lastUpdated}</span>
                       </div>
 
-                      {/* Auto-saved badge */}
                       <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400/90 font-medium ml-1">
                         <Check size={12} />
                         <span>Saved</span>
@@ -1767,7 +2658,6 @@ export default function ProjectDetailPage() {
                               : 'hover:bg-white/[0.01]'
                           }`}
                         >
-                          {/* Block Delete Action Button on Hover */}
                           <div className="absolute right-2 -top-2 opacity-0 group-hover/block:opacity-100 transition-opacity flex items-center gap-1 z-10">
                             <button
                               type="button"
@@ -1782,7 +2672,6 @@ export default function ProjectDetailPage() {
                             </button>
                           </div>
 
-                          {/* Block: Paragraph / Headings / Quote */}
                           {(block.type === 'paragraph' ||
                             block.type === 'h1' ||
                             block.type === 'h2' ||
@@ -1801,7 +2690,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Bullet List */}
                           {block.type === 'bullet-list' && (
                             <div className="space-y-1.5 pl-2">
                               {block.items?.map((item) => (
@@ -1830,7 +2718,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Numbered List */}
                           {block.type === 'numbered-list' && (
                             <div className="space-y-1.5 pl-2">
                               {block.items?.map((item, idx) => (
@@ -1859,7 +2746,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Interactive Checklist / Tasks */}
                           {block.type === 'checklist' && (
                             <div className="space-y-2 pl-2">
                               {block.items?.map((item) => (
@@ -1900,7 +2786,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Attached Word Document */}
                           {block.type === 'file' && block.fileData && (
                             <div className="w-56 rounded-xl overflow-hidden border border-neutral-800 bg-[#16171b] hover:border-neutral-700 hover:shadow-lg transition-all cursor-pointer group">
                               <div className="h-28 bg-[#3b82f6] flex items-center justify-center relative group-hover:brightness-105 transition">
@@ -1931,7 +2816,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Image Preview */}
                           {block.type === 'image' && block.imageUrl && (
                             <div className="space-y-1.5">
                               <div className="w-64 h-40 rounded-xl overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
@@ -1951,7 +2835,6 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Block: Divider */}
                           {block.type === 'divider' && (
                             <div className="py-2">
                               <div className="w-full h-px bg-neutral-800" />
@@ -2001,6 +2884,131 @@ export default function ProjectDetailPage() {
           </div>
         </main>
       </div>
+
+      {/* ======================== NEW ITEM MODAL DIALOG ======================== */}
+      {showNewItemModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/75 backdrop-blur-xs"
+            onClick={() => setShowNewItemModal(false)}
+          />
+          <div className="relative w-full max-w-md bg-[#16171a] border border-neutral-700/80 rounded-2xl shadow-2xl p-6 z-10 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800 mb-5">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Plus size={16} className="text-blue-500" />
+                <span>Create New Task</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowNewItemModal(false)}
+                className="text-neutral-400 hover:text-white transition p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNewTask} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                  Task Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Buat wireframe landing page"
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  autoFocus
+                  className="w-full h-9 px-3 bg-[#1e2025] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                    Target Group
+                  </label>
+                  <select
+                    value={newTaskGroup}
+                    onChange={(e) => setNewTaskGroup(e.target.value)}
+                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                    Assignee
+                  </label>
+                  <select
+                    value={newTaskAssignee}
+                    onChange={(e) => setNewTaskAssignee(e.target.value)}
+                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {teamMembers.map((m) => (
+                      <option key={m.id} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={newTaskStatus}
+                    onChange={(e) => setNewTaskStatus(e.target.value as TaskStatus)}
+                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {orderedStatusList.map((s) => (
+                      <option key={s.status} value={s.status}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                    Date
+                  </label>
+                  <input
+                    type="text"
+                    value={newTaskDate}
+                    onChange={(e) => setNewTaskDate(e.target.value)}
+                    className="w-full h-9 px-3 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setShowNewItemModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+                >
+                  Create Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
