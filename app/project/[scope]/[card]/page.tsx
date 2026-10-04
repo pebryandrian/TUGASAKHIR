@@ -143,8 +143,45 @@ export default function ProjectDetailPage() {
   const [showSearchInput, setShowSearchInput] = useState(false)
 
   // Doc tab state
+  type TextStyleType = 'normal' | 'h1' | 'h2' | 'h3' | 'quote'
+
+  const textStyleOptions: {
+    type: TextStyleType
+    short: string
+    label: string
+    description: string
+  }[] = [
+    { type: 'normal', short: 'T', label: 'Normal Text', description: 'Normal Text' },
+    { type: 'h1', short: 'H1', label: 'Large Title', description: 'Large Title' },
+    { type: 'h2', short: 'H2', label: 'Medium Text', description: 'Medium Text' },
+    { type: 'h3', short: 'H3', label: 'Small Text', description: 'Small Text' },
+    { type: 'quote', short: '<>', label: 'Quote', description: 'Quote' },
+  ]
+
+  const [selectedTextStyle, setSelectedTextStyle] = useState<TextStyleType>('normal')
+  const [showTextStyleDropdown, setShowTextStyleDropdown] = useState(false)
+  const [docParagraph, setDocParagraph] = useState(
+    'Platform ini dirancang untuk membantu mengelola pekerjaan secara lebih terstruktur dan efisien. Dengan fitur yang intuitif, pengguna dapat mengatur tugas, berkolaborasi dengan tim, serta memantau perkembangan proyek dalam satu tempat yang terintegrasi.'
+  )
+  const [isEditingParagraph, setIsEditingParagraph] = useState(false)
   const [docNotes, setDocNotes] = useState('')
   const [isEditingDocNotes, setIsEditingDocNotes] = useState(false)
+
+  const getTextStyleClasses = (style: TextStyleType) => {
+    switch (style) {
+      case 'h1':
+        return 'text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug'
+      case 'h2':
+        return 'text-xl sm:text-2xl font-bold text-white tracking-normal leading-snug'
+      case 'h3':
+        return 'text-base sm:text-lg font-semibold text-neutral-200 leading-normal'
+      case 'quote':
+        return 'text-sm sm:text-base italic text-neutral-300 pl-4 py-2.5 border-l-4 border-blue-500 bg-[#16171b]/80 rounded-r-lg leading-relaxed shadow-sm'
+      case 'normal':
+      default:
+        return 'text-sm text-neutral-300 leading-relaxed font-normal'
+    }
+  }
 
   // Toggle group collapse
   const toggleGroupCollapse = (groupId: string) => {
@@ -755,14 +792,70 @@ export default function ProjectDetailPage() {
 
                   <div className="w-px h-4 bg-neutral-800 mx-1" />
 
-                  {/* Normal Text Dropdown */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 px-2 py-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer text-xs"
-                  >
-                    <span>Normal text</span>
-                    <ChevronDown size={13} className="text-neutral-500" />
-                  </button>
+                  {/* Text Style Dropdown: T=Normal Text, H1=Large Title, H2=Medium Text, H3=Small Text, <>=Quote */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowTextStyleDropdown(!showTextStyleDropdown)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 hover:text-white hover:bg-neutral-800/60 rounded-md transition cursor-pointer text-xs font-medium border border-transparent hover:border-neutral-700/60"
+                      title="Change text size / style"
+                    >
+                      <span className="w-4 h-4 rounded bg-neutral-800 text-blue-400 font-bold text-[10px] flex items-center justify-center">
+                        {textStyleOptions.find(o => o.type === selectedTextStyle)?.short}
+                      </span>
+                      <span>{textStyleOptions.find(o => o.type === selectedTextStyle)?.label}</span>
+                      <ChevronDown size={13} className="text-neutral-500" />
+                    </button>
+
+                    {showTextStyleDropdown && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowTextStyleDropdown(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl py-1.5 z-30 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-3 py-1.5 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                            Format Text
+                          </div>
+                          <div className="p-1 space-y-0.5">
+                            {textStyleOptions.map((opt) => {
+                              const isSelected = selectedTextStyle === opt.type
+                              return (
+                                <button
+                                  key={opt.type}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTextStyle(opt.type)
+                                    setShowTextStyleDropdown(false)
+                                  }}
+                                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition cursor-pointer hover:bg-neutral-800/80 ${
+                                    isSelected
+                                      ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                      : 'text-neutral-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="w-6 h-6 rounded bg-[#202227] border border-neutral-700/80 text-blue-400 font-bold text-[11px] flex items-center justify-center shrink-0">
+                                      {opt.short}
+                                    </span>
+                                    <div>
+                                      <p className="font-medium text-xs leading-none">
+                                        {opt.label}
+                                      </p>
+                                      <p className="text-[10px] text-neutral-500 mt-0.5">
+                                        {opt.short} &bull; {opt.description}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {isSelected && <Check size={14} className="text-blue-500" />}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
 
                   {/* Alignment Dropdown */}
                   <button
@@ -860,12 +953,47 @@ export default function ProjectDetailPage() {
                     </div>
                   </div>
 
-                  {/* Client Brief Main Paragraph */}
-                  <div className="text-neutral-300 text-sm leading-relaxed font-normal">
-                    Platform ini dirancang untuk membantu mengelola pekerjaan secara lebih
-                    terstruktur dan efisien. Dengan fitur yang intuitif, pengguna dapat mengatur
-                    tugas, berkolaborasi dengan tim, serta memantau perkembangan proyek dalam satu
-                    tempat yang terintegrasi.
+                  {/* Client Brief Main Paragraph (Styled dynamically by selectedTextStyle: T, H1, H2, H3, <>) */}
+                  <div className="group relative">
+                    {isEditingParagraph ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={docParagraph}
+                          onChange={(e) => setDocParagraph(e.target.value)}
+                          rows={4}
+                          autoFocus
+                          className="w-full p-3 bg-[#191a1e] border border-neutral-700 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 transition"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingParagraph(false)}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-md transition cursor-pointer"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingParagraph(false)}
+                            className="px-3 py-1.5 text-neutral-400 hover:text-white text-xs transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => setIsEditingParagraph(true)}
+                        title="Click to edit text, or change size via dropdown above (T, H1, H2, H3, <>)"
+                        className={`${getTextStyleClasses(selectedTextStyle)} cursor-pointer rounded-lg p-1.5 -ml-1.5 hover:bg-white/[0.03] transition group`}
+                      >
+                        {selectedTextStyle === 'quote' ? (
+                          <blockquote>&ldquo;{docParagraph}&rdquo;</blockquote>
+                        ) : (
+                          docParagraph
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Attached Word Document Card */}
