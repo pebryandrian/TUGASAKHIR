@@ -19,13 +19,23 @@ import {
   Filter,
   ArrowUpDown,
   Check,
+  Undo2,
+  Redo2,
+  AlignLeft,
+  List,
+  ListOrdered,
+  ListTodo,
+  AtSign,
+  Clock,
+  Download,
+  Calendar as CalendarIcon,
 } from 'lucide-react'
 
 interface TaskItem {
   id: string
   title: string
   hasChevron?: boolean
-  personAvatars: string[] // image urls or identifiers
+  personAvatars: string[]
   status: 'In Queue' | 'Working on it' | 'Done'
   date: string
   checked: boolean
@@ -34,7 +44,7 @@ interface TaskItem {
 interface TaskGroup {
   id: string
   title: string
-  color: string // Tailwind color class for title
+  color: string
   collapsed: boolean
   dateRange: string
   items: TaskItem[]
@@ -132,6 +142,10 @@ export default function ProjectDetailPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearchInput, setShowSearchInput] = useState(false)
 
+  // Doc tab state
+  const [docNotes, setDocNotes] = useState('')
+  const [isEditingDocNotes, setIsEditingDocNotes] = useState(false)
+
   // Toggle group collapse
   const toggleGroupCollapse = (groupId: string) => {
     setGroups(prev =>
@@ -164,7 +178,7 @@ export default function ProjectDetailPage() {
             const nextStatus: Record<TaskItem['status'], TaskItem['status']> = {
               'In Queue': 'Working on it',
               'Working on it': 'Done',
-              'Done': 'In Queue',
+              Done: 'In Queue',
             }
             return { ...t, status: nextStatus[t.status] }
           }),
@@ -357,6 +371,7 @@ export default function ProjectDetailPage() {
             {/* View Tabs */}
             <div className="flex items-center justify-between border-b border-neutral-800/80 mb-6">
               <div className="flex items-center gap-6">
+                {/* Main Table Tab */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('Main Table')}
@@ -367,30 +382,44 @@ export default function ProjectDetailPage() {
                   }`}
                 >
                   <span>Main Table</span>
-                  <MoreHorizontal size={14} className="text-neutral-500" />
+                  {activeTab === 'Main Table' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
                 </button>
+
+                {/* Calendar Tab */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('Calendar')}
-                  className={`pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
                     activeTab === 'Calendar'
                       ? 'border-white text-white font-semibold'
                       : 'border-transparent text-neutral-400 hover:text-neutral-200'
                   }`}
                 >
-                  Calendar
+                  <span>Calendar</span>
+                  {activeTab === 'Calendar' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
                 </button>
+
+                {/* Doc Tab */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('Doc')}
-                  className={`pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
                     activeTab === 'Doc'
                       ? 'border-white text-white font-semibold'
                       : 'border-transparent text-neutral-400 hover:text-neutral-200'
                   }`}
                 >
-                  Doc
+                  <span>Doc</span>
+                  {activeTab === 'Doc' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
                 </button>
+
+                {/* Add Tab */}
                 <button
                   type="button"
                   className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
@@ -401,285 +430,551 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            {/* Action Toolbar */}
-            <div className="flex flex-wrap items-center gap-3 mb-6">
-              {/* New item button */}
-              <div className="inline-flex rounded-md shadow-sm">
-                <button
-                  type="button"
-                  onClick={handleAddNewItem}
-                  className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
-                >
-                  <span>New item</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddNewItem}
-                  className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
-                  aria-label="More new item options"
-                >
-                  <ChevronDown size={14} />
-                </button>
-              </div>
-
-              {/* Search Toggle */}
-              {showSearchInput ? (
-                <div className="relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search tasks..."
-                    autoFocus
-                    onBlur={() => !searchQuery && setShowSearchInput(false)}
-                    className="h-8 pl-8 pr-3 bg-[#191a1e] border border-neutral-700 rounded-md text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowSearchInput(true)}
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                >
-                  <Search size={14} />
-                  <span>Search</span>
-                </button>
-              )}
-
-              {/* Person button */}
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-              >
-                <UserIcon size={14} />
-                <span>Person</span>
-              </button>
-
-              {/* Filter button */}
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-              >
-                <Filter size={14} />
-                <span>Filter</span>
-                <ChevronDown size={12} className="text-neutral-400" />
-              </button>
-
-              {/* Sort button */}
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-              >
-                <ArrowUpDown size={14} />
-                <span>Sort</span>
-              </button>
-
-              {/* More button */}
-              <button
-                type="button"
-                className="inline-flex items-center justify-center h-8 w-8 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
-                aria-label="More actions"
-              >
-                <MoreHorizontal size={16} />
-              </button>
-            </div>
-
-            {/* Task Groups Table Container */}
-            <div className="space-y-8 flex-1">
-              {groups.map((group) => {
-                const filteredItems = group.items.filter((item) =>
-                  item.title.toLowerCase().includes(searchQuery.toLowerCase())
-                )
-
-                // Calculate status distribution for progress bar
-                const totalItems = group.items.length || 1
-                const inQueueCount = group.items.filter(i => i.status === 'In Queue').length
-                const workingCount = group.items.filter(i => i.status === 'Working on it').length
-                const doneCount = group.items.filter(i => i.status === 'Done').length
-
-                const inQueuePct = (inQueueCount / totalItems) * 100
-                const workingPct = (workingCount / totalItems) * 100
-                const donePct = (doneCount / totalItems) * 100
-
-                return (
-                  <div key={group.id} className="space-y-2">
-                    {/* Group Header Title */}
-                    <div
-                      onClick={() => toggleGroupCollapse(group.id)}
-                      className="flex items-center gap-2 cursor-pointer select-none py-1 group/header w-fit"
+            {/* TAB 1: MAIN TABLE */}
+            {activeTab === 'Main Table' && (
+              <>
+                {/* Action Toolbar for Main Table */}
+                <div className="flex flex-wrap items-center gap-3 mb-6">
+                  {/* New item button */}
+                  <div className="inline-flex rounded-md shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleAddNewItem}
+                      className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
                     >
-                      {group.collapsed ? (
-                        <ChevronUp size={16} className={`${group.color} transition-transform`} />
-                      ) : (
-                        <ChevronDown size={16} className={`${group.color} transition-transform`} />
-                      )}
-                      <span className={`text-sm font-semibold tracking-wide ${group.color}`}>
-                        {group.title}
-                      </span>
+                      <span>New item</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddNewItem}
+                      className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
+                      aria-label="More new item options"
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
+
+                  {/* Search Toggle */}
+                  {showSearchInput ? (
+                    <div className="relative">
+                      <Search
+                        size={14}
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400"
+                      />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search tasks..."
+                        autoFocus
+                        onBlur={() => !searchQuery && setShowSearchInput(false)}
+                        className="h-8 pl-8 pr-3 bg-[#191a1e] border border-neutral-700 rounded-md text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                      />
                     </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowSearchInput(true)}
+                      className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                    >
+                      <Search size={14} />
+                      <span>Search</span>
+                    </button>
+                  )}
 
-                    {/* Table View (When Expanded) */}
-                    {!group.collapsed && (
-                      <div className="overflow-x-auto rounded-lg">
-                        <table className="w-full text-left border-collapse border border-neutral-800/80">
-                          {/* Table Column Headers */}
-                          <thead>
-                            <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-normal">
-                              {/* Selection Checkbox */}
-                              <th className="w-12 px-3 py-2 text-center border-r border-neutral-800/80">
-                                <div className="w-4 h-4 rounded border border-neutral-600 mx-auto" />
-                              </th>
-                              <th className="px-4 py-2 border-r border-neutral-800/80 font-normal min-w-[260px]">
-                                Item
-                              </th>
-                              <th className="w-36 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
-                                Person
-                              </th>
-                              <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
-                                Status
-                              </th>
-                              <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
-                                Date
-                              </th>
-                              <th className="w-12 px-2 py-2 text-center">
-                                <Plus size={14} className="mx-auto text-neutral-400" />
-                              </th>
-                            </tr>
-                          </thead>
+                  {/* Person button */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                  >
+                    <UserIcon size={14} />
+                    <span>Person</span>
+                  </button>
 
-                          {/* Table Body */}
-                          <tbody>
-                            {filteredItems.map((item) => (
-                              <tr
-                                key={item.id}
-                                className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/row"
-                              >
-                                {/* Checkbox */}
-                                <td className="px-3 py-2.5 text-center border-r border-neutral-800/80">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleTaskCheck(group.id, item.id)}
-                                    className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
-                                      item.checked
-                                        ? 'bg-blue-600 border-blue-500 text-white'
-                                        : 'border-neutral-600 hover:border-neutral-400'
-                                    }`}
+                  {/* Filter button */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                  >
+                    <Filter size={14} />
+                    <span>Filter</span>
+                    <ChevronDown size={12} className="text-neutral-400" />
+                  </button>
+
+                  {/* Sort button */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-2.5 text-neutral-300 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                  >
+                    <ArrowUpDown size={14} />
+                    <span>Sort</span>
+                  </button>
+
+                  {/* More button */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center h-8 w-8 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md text-xs transition cursor-pointer"
+                    aria-label="More actions"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                </div>
+
+                {/* Task Groups Table Container */}
+                <div className="space-y-8 flex-1">
+                  {groups.map((group) => {
+                    const filteredItems = group.items.filter((item) =>
+                      item.title.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+
+                    const totalItems = group.items.length || 1
+                    const inQueueCount = group.items.filter(i => i.status === 'In Queue').length
+                    const workingCount = group.items.filter(i => i.status === 'Working on it').length
+                    const doneCount = group.items.filter(i => i.status === 'Done').length
+
+                    const inQueuePct = (inQueueCount / totalItems) * 100
+                    const workingPct = (workingCount / totalItems) * 100
+                    const donePct = (doneCount / totalItems) * 100
+
+                    return (
+                      <div key={group.id} className="space-y-2">
+                        {/* Group Header Title */}
+                        <div
+                          onClick={() => toggleGroupCollapse(group.id)}
+                          className="flex items-center gap-2 cursor-pointer select-none py-1 group/header w-fit"
+                        >
+                          {group.collapsed ? (
+                            <ChevronUp size={16} className={`${group.color} transition-transform`} />
+                          ) : (
+                            <ChevronDown size={16} className={`${group.color} transition-transform`} />
+                          )}
+                          <span className={`text-sm font-semibold tracking-wide ${group.color}`}>
+                            {group.title}
+                          </span>
+                        </div>
+
+                        {/* Table View (When Expanded) */}
+                        {!group.collapsed && (
+                          <div className="overflow-x-auto rounded-lg">
+                            <table className="w-full text-left border-collapse border border-neutral-800/80">
+                              {/* Table Column Headers */}
+                              <thead>
+                                <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-normal">
+                                  {/* Selection Checkbox */}
+                                  <th className="w-12 px-3 py-2 text-center border-r border-neutral-800/80">
+                                    <div className="w-4 h-4 rounded border border-neutral-600 mx-auto" />
+                                  </th>
+                                  <th className="px-4 py-2 border-r border-neutral-800/80 font-normal min-w-[260px]">
+                                    Item
+                                  </th>
+                                  <th className="w-36 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
+                                    Person
+                                  </th>
+                                  <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
+                                    Status
+                                  </th>
+                                  <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
+                                    Date
+                                  </th>
+                                  <th className="w-12 px-2 py-2 text-center">
+                                    <Plus size={14} className="mx-auto text-neutral-400" />
+                                  </th>
+                                </tr>
+                              </thead>
+
+                              {/* Table Body */}
+                              <tbody>
+                                {filteredItems.map((item) => (
+                                  <tr
+                                    key={item.id}
+                                    className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/row"
                                   >
-                                    {item.checked && <Check size={12} strokeWidth={3} />}
-                                  </button>
-                                </td>
-
-                                {/* Item Name */}
-                                <td className="px-4 py-2.5 border-r border-neutral-800/80">
-                                  <div className="flex items-center gap-2">
-                                    {item.hasChevron && (
-                                      <ChevronRight size={14} className="text-neutral-500 shrink-0" />
-                                    )}
-                                    <span className="text-xs text-neutral-200 font-medium">
-                                      {item.title}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                {/* Person Avatars */}
-                                <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center">
-                                  <div className="flex items-center justify-center -space-x-1.5">
-                                    {item.personAvatars.map((av, idx) => (
-                                      <div
-                                        key={idx}
-                                        className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
+                                    {/* Checkbox */}
+                                    <td className="px-3 py-2.5 text-center border-r border-neutral-800/80">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleTaskCheck(group.id, item.id)}
+                                        className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
+                                          item.checked
+                                            ? 'bg-blue-600 border-blue-500 text-white'
+                                            : 'border-neutral-600 hover:border-neutral-400'
+                                        }`}
                                       >
-                                        <Image
-                                          src={av}
-                                          alt="Assignee"
-                                          width={24}
-                                          height={24}
-                                          className="w-full h-full object-cover"
-                                        />
+                                        {item.checked && <Check size={12} strokeWidth={3} />}
+                                      </button>
+                                    </td>
+
+                                    {/* Item Name */}
+                                    <td className="px-4 py-2.5 border-r border-neutral-800/80">
+                                      <div className="flex items-center gap-2">
+                                        {item.hasChevron && (
+                                          <ChevronRight
+                                            size={14}
+                                            className="text-neutral-500 shrink-0"
+                                          />
+                                        )}
+                                        <span className="text-xs text-neutral-200 font-medium">
+                                          {item.title}
+                                        </span>
                                       </div>
-                                    ))}
-                                  </div>
-                                </td>
+                                    </td>
 
-                                {/* Status Badge */}
-                                <td className="p-0 border-r border-neutral-800/80">
-                                  <button
-                                    type="button"
-                                    onClick={() => cycleStatus(group.id, item.id)}
-                                    title="Click to cycle status"
-                                    className={`w-full h-full py-2.5 px-3 text-center text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center ${
-                                      item.status === 'In Queue'
-                                        ? 'bg-[#ffa114] text-neutral-950 hover:brightness-105'
-                                        : item.status === 'Working on it'
-                                        ? 'bg-[#ea384c] text-white hover:brightness-105'
-                                        : 'bg-[#22c55e] text-white hover:brightness-105'
-                                    }`}
-                                  >
-                                    {item.status}
-                                  </button>
-                                </td>
+                                    {/* Person Avatars */}
+                                    <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center">
+                                      <div className="flex items-center justify-center -space-x-1.5">
+                                        {item.personAvatars.map((av, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
+                                          >
+                                            <Image
+                                              src={av}
+                                              alt="Assignee"
+                                              width={24}
+                                              height={24}
+                                              className="w-full h-full object-cover"
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
 
-                                {/* Date */}
-                                <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300">
-                                  {item.date}
-                                </td>
+                                    {/* Status Badge */}
+                                    <td className="p-0 border-r border-neutral-800/80">
+                                      <button
+                                        type="button"
+                                        onClick={() => cycleStatus(group.id, item.id)}
+                                        title="Click to cycle status"
+                                        className={`w-full h-full py-2.5 px-3 text-center text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center ${
+                                          item.status === 'In Queue'
+                                            ? 'bg-[#ffa114] text-neutral-950 hover:brightness-105'
+                                            : item.status === 'Working on it'
+                                            ? 'bg-[#ea384c] text-white hover:brightness-105'
+                                            : 'bg-[#22c55e] text-white hover:brightness-105'
+                                        }`}
+                                      >
+                                        {item.status}
+                                      </button>
+                                    </td>
 
-                                {/* Extra column */}
-                                <td className="px-2 py-2.5 text-center text-neutral-600"></td>
-                              </tr>
-                            ))}
+                                    {/* Date */}
+                                    <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300">
+                                      {item.date}
+                                    </td>
 
-                            {/* Summary / Progress Bar Footer Row */}
-                            <tr className="border-b border-neutral-800/80 bg-transparent">
-                              <td className="border-r border-neutral-800/80 py-2"></td>
-                              <td className="border-r border-neutral-800/80 py-2"></td>
-                              <td className="border-r border-neutral-800/80 py-2"></td>
+                                    {/* Extra column */}
+                                    <td className="px-2 py-2.5 text-center text-neutral-600"></td>
+                                  </tr>
+                                ))}
 
-                              {/* Dual-color Progress Bar */}
-                              <td className="p-1 border-r border-neutral-800/80">
-                                <div className="h-6 w-full rounded flex overflow-hidden">
-                                  {inQueuePct > 0 && (
-                                    <div
-                                      style={{ width: `${inQueuePct}%` }}
-                                      className="bg-[#ffa114] h-full transition-all duration-300"
-                                      title={`In Queue: ${inQueueCount}`}
-                                    />
-                                  )}
-                                  {workingPct > 0 && (
-                                    <div
-                                      style={{ width: `${workingPct}%` }}
-                                      className="bg-[#ea384c] h-full transition-all duration-300"
-                                      title={`Working on it: ${workingCount}`}
-                                    />
-                                  )}
-                                  {donePct > 0 && (
-                                    <div
-                                      style={{ width: `${donePct}%` }}
-                                      className="bg-[#22c55e] h-full transition-all duration-300"
-                                      title={`Done: ${doneCount}`}
-                                    />
-                                  )}
-                                </div>
-                              </td>
+                                {/* Summary / Progress Bar Footer Row */}
+                                <tr className="border-b border-neutral-800/80 bg-transparent">
+                                  <td className="border-r border-neutral-800/80 py-2"></td>
+                                  <td className="border-r border-neutral-800/80 py-2"></td>
+                                  <td className="border-r border-neutral-800/80 py-2"></td>
 
-                              {/* Date range pill */}
-                              <td className="py-1 px-3 border-r border-neutral-800/80 text-center">
-                                <div className="inline-block px-3 py-1 bg-[#1e2025] border border-neutral-700/60 rounded text-[11px] text-neutral-300 font-normal">
-                                  {group.dateRange}
-                                </div>
-                              </td>
+                                  {/* Dual-color Progress Bar */}
+                                  <td className="p-1 border-r border-neutral-800/80">
+                                    <div className="h-6 w-full rounded flex overflow-hidden">
+                                      {inQueuePct > 0 && (
+                                        <div
+                                          style={{ width: `${inQueuePct}%` }}
+                                          className="bg-[#ffa114] h-full transition-all duration-300"
+                                          title={`In Queue: ${inQueueCount}`}
+                                        />
+                                      )}
+                                      {workingPct > 0 && (
+                                        <div
+                                          style={{ width: `${workingPct}%` }}
+                                          className="bg-[#ea384c] h-full transition-all duration-300"
+                                          title={`Working on it: ${workingCount}`}
+                                        />
+                                      )}
+                                      {donePct > 0 && (
+                                        <div
+                                          style={{ width: `${donePct}%` }}
+                                          className="bg-[#22c55e] h-full transition-all duration-300"
+                                          title={`Done: ${doneCount}`}
+                                        />
+                                      )}
+                                    </div>
+                                  </td>
 
-                              <td></td>
-                            </tr>
-                          </tbody>
-                        </table>
+                                  {/* Date range pill */}
+                                  <td className="py-1 px-3 border-r border-neutral-800/80 text-center">
+                                    <div className="inline-block px-3 py-1 bg-[#1e2025] border border-neutral-700/60 rounded text-[11px] text-neutral-300 font-normal">
+                                      {group.dateRange}
+                                    </div>
+                                  </td>
+
+                                  <td></td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* TAB 2: DOC (CLIENT BRIEF) */}
+            {activeTab === 'Doc' && (
+              <div className="flex-1 flex flex-col">
+                {/* Doc Toolbar */}
+                <div className="flex flex-wrap items-center gap-2 pb-4 mb-6 border-b border-neutral-800/80 text-neutral-300 text-xs">
+                  {/* + Add Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDocNotes(true)}
+                    className="inline-flex items-center gap-1.5 h-7 px-3 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-md transition cursor-pointer shadow-sm mr-1"
+                  >
+                    <Plus size={14} strokeWidth={2.5} />
+                    <span>Add</span>
+                  </button>
+
+                  {/* Undo / Redo */}
+                  <div className="flex items-center gap-1 px-1">
+                    <button
+                      type="button"
+                      className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                      title="Undo"
+                    >
+                      <Undo2 size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                      title="Redo"
+                    >
+                      <Redo2 size={15} />
+                    </button>
+                  </div>
+
+                  <div className="w-px h-4 bg-neutral-800 mx-1" />
+
+                  {/* Normal Text Dropdown */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 px-2 py-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer text-xs"
+                  >
+                    <span>Normal text</span>
+                    <ChevronDown size={13} className="text-neutral-500" />
+                  </button>
+
+                  {/* Alignment Dropdown */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 px-1.5 py-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer text-xs"
+                    title="Align text"
+                  >
+                    <AlignLeft size={15} />
+                    <ChevronDown size={11} className="text-neutral-500" />
+                  </button>
+
+                  {/* List Options */}
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                      title="Bullet list"
+                    >
+                      <List size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                      title="Numbered list"
+                    >
+                      <ListOrdered size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                      title="Checklist"
+                    >
+                      <ListTodo size={15} />
+                    </button>
+                  </div>
+
+                  <div className="w-px h-4 bg-neutral-800 mx-1" />
+
+                  {/* Style */}
+                  <button
+                    type="button"
+                    className="px-2 py-1 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer text-xs"
+                  >
+                    Style
+                  </button>
+
+                  {/* Mention @ */}
+                  <button
+                    type="button"
+                    className="p-1.5 hover:text-white hover:bg-neutral-800/60 rounded transition cursor-pointer"
+                    title="Mention member"
+                  >
+                    <AtSign size={15} />
+                  </button>
+                </div>
+
+                {/* Doc Content Area */}
+                <div className="max-w-4xl space-y-6">
+                  {/* Doc Title Heading */}
+                  <div>
+                    <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mb-3">
+                      Doc
+                    </h1>
+
+                    {/* Metadata Header */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
+                      {/* Creator */}
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 bg-neutral-800 shrink-0">
+                          <Image
+                            src="/images/clients/SUNDDAE.jpg"
+                            alt="George"
+                            width={20}
+                            height={20}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span>
+                          Creator <strong className="text-white font-semibold">George</strong>
+                        </span>
+                      </div>
+
+                      {/* Created Date */}
+                      <div className="flex items-center gap-1.5 text-neutral-400">
+                        <span>Created</span>
+                        <span className="text-neutral-200">Apr 13,2026, 20:56</span>
+                      </div>
+
+                      {/* Last Updated */}
+                      <div className="flex items-center gap-1.5 text-neutral-400">
+                        <Clock size={13} className="text-neutral-500" />
+                        <span>Last updated</span>
+                        <span className="text-neutral-200">Apr 13,2026, 22:43</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Client Brief Main Paragraph */}
+                  <div className="text-neutral-300 text-sm leading-relaxed font-normal">
+                    Platform ini dirancang untuk membantu mengelola pekerjaan secara lebih
+                    terstruktur dan efisien. Dengan fitur yang intuitif, pengguna dapat mengatur
+                    tugas, berkolaborasi dengan tim, serta memantau perkembangan proyek dalam satu
+                    tempat yang terintegrasi.
+                  </div>
+
+                  {/* Attached Word Document Card */}
+                  <div className="pt-2">
+                    <div className="w-56 rounded-xl overflow-hidden border border-neutral-800 bg-[#16171b] hover:border-neutral-700 hover:shadow-lg transition-all cursor-pointer group">
+                      {/* Word Icon Container */}
+                      <div className="h-28 bg-[#3b82f6] flex items-center justify-center relative group-hover:brightness-105 transition">
+                        <span className="text-4xl font-extrabold text-white font-serif tracking-tighter drop-shadow-sm select-none">
+                          W
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            alert('Downloading harga-Makanan-terbaru.docx')
+                          }}
+                          className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition"
+                          title="Download document"
+                        >
+                          <Download size={14} />
+                        </button>
+                      </div>
+
+                      {/* Document Name Footer */}
+                      <div className="px-3.5 py-2.5 bg-[#141517] border-t border-neutral-800/80">
+                        <p className="text-xs text-neutral-300 font-medium truncate group-hover:text-blue-400 transition">
+                          harga-Makanan-terbaru.docx
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Attached Image Preview */}
+                  <div className="pt-2">
+                    <div className="w-64 h-40 rounded-xl overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
+                      <Image
+                        src="https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=600&auto=format&fit=crop&q=80"
+                        alt="Brief Image Reference"
+                        width={256}
+                        height={160}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Interactive Start Writing / Note Row */}
+                  <div className="pt-4 border-t border-neutral-800/60">
+                    {isEditingDocNotes ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={docNotes}
+                          onChange={(e) => setDocNotes(e.target.value)}
+                          placeholder="Type notes or project brief details here..."
+                          autoFocus
+                          rows={4}
+                          className="w-full p-3 bg-[#191a1e] border border-neutral-700 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 transition"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingDocNotes(false)}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+                          >
+                            Save Note
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingDocNotes(false)}
+                            className="px-3 py-1.5 text-neutral-400 hover:text-white text-xs transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => setIsEditingDocNotes(true)}
+                        className="flex items-center gap-2.5 cursor-pointer text-neutral-500 hover:text-neutral-400 group py-1 select-none"
+                      >
+                        <span className="w-5 h-5 rounded bg-blue-600 text-white flex items-center justify-center group-hover:bg-blue-500 transition shadow-sm">
+                          <Plus size={14} strokeWidth={2.5} />
+                        </span>
+                        <span className="text-xs sm:text-sm text-neutral-400 group-hover:text-neutral-300 transition">
+                          {docNotes ? docNotes : 'Type something here to start writing'}
+                        </span>
                       </div>
                     )}
                   </div>
-                )
-              })}
-            </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: CALENDAR VIEW */}
+            {activeTab === 'Calendar' && (
+              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-neutral-800/80 border border-neutral-700 flex items-center justify-center text-blue-500 mb-4 shadow-inner">
+                  <CalendarIcon size={28} />
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2">Project Calendar & Timeline</h3>
+                <p className="text-sm text-neutral-400 max-w-md mb-6">
+                  Tenggat waktu pengerjaan tugas & milestone untuk Aqua dijadwalkan pada 28 - 29
+                  Maret 2025.
+                </p>
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#191a1e] border border-neutral-800 rounded-xl text-xs text-neutral-300">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  <span>Timeline: Mar 28, 2025 – Mar 29, 2025</span>
+                </div>
+              </div>
+            )}
           </div>
         </main>
       </div>
