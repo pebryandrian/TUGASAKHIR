@@ -51,61 +51,64 @@ import {
   Edit3,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  Mail,
+  Folder,
+  Tag,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
-export type TaskStatus = 'In Queue' | 'Working on it' | 'Done' | 'Stuck'
+export type TaskStatus = string
 
-export const orderedStatusList: {
-  status: TaskStatus
+export interface StatusDef {
+  id: string
   label: string
-  bg: string
-  hoverBg: string
-  textColor: string
   colorCode: string
-}[] = [
-  {
-    status: 'Working on it',
-    label: 'Working on it',
-    bg: 'bg-[#ea384c]',
-    hoverBg: 'hover:bg-[#d63044]',
-    textColor: 'text-white',
-    colorCode: '#ea384c',
-  },
-  {
-    status: 'Done',
-    label: 'Done',
-    bg: 'bg-[#22c55e]',
-    hoverBg: 'hover:bg-[#16a34a]',
-    textColor: 'text-white',
-    colorCode: '#22c55e',
-  },
-  {
-    status: 'In Queue',
-    label: 'In Queue',
-    bg: 'bg-[#ffa114]',
-    hoverBg: 'hover:bg-[#f59405]',
-    textColor: 'text-neutral-950',
-    colorCode: '#ffa114',
-  },
-  {
-    status: 'Stuck',
-    label: 'Stuck',
-    bg: 'bg-[#b91c1c]',
-    hoverBg: 'hover:bg-[#991b1b]',
-    textColor: 'text-white',
-    colorCode: '#b91c1c',
-  },
-]
-
-export const statusConfig: Record<TaskStatus, (typeof orderedStatusList)[0]> = {
-  'Working on it': orderedStatusList[0],
-  Done: orderedStatusList[1],
-  'In Queue': orderedStatusList[2],
-  Stuck: orderedStatusList[3],
 }
 
+export const initialStatusList: StatusDef[] = [
+  { id: 'working', label: 'Working on it', colorCode: '#ea384c' },
+  { id: 'done',    label: 'Done',          colorCode: '#22c55e' },
+  { id: 'queue',   label: 'In Queue',      colorCode: '#ffa114' },
+  { id: 'stuck',   label: 'Stuck',         colorCode: '#b91c1c' },
+]
+
+// Colour palette for the add-label modal
+export const COLOR_PALETTE = [
+  '#ea384c', '#f97316', '#ffa114', '#eab308', '#22c55e',
+  '#14b8a6', '#3b82f6', '#6366f1', '#a855f7', '#ec4899',
+  '#64748b', '#78716c', '#b91c1c', '#0284c7', '#16a34a',
+  '#7c3aed', '#db2777', '#0891b2', '#059669', '#d97706',
+]
+
+// 40 colors palette (5 columns x 8 rows) matching Monday.com color picker
+export const MONDAY_PALETTE = [
+  '#9333ea', '#ec4899', '#f43f5e', '#f97316', '#fb923c',
+  '#06b6d4', '#10b981', '#84cc16', '#eab308', '#f59e0b',
+  '#3b82f6', '#6366f1', '#8b5cf6', '#db2777', '#e11d48',
+  '#059669', '#0d9488', '#0284c7', '#94a3b8', '#64748b',
+  '#475569', '#52525b', '#525252', '#57534e', '#3f3f46',
+  '#581c87', '#1e3a8a', '#134e4a', '#14532d', '#7f1d1d',
+  '#c084fc', '#6ee7b7', '#fde047', '#7dd3fc', '#f1f5f9',
+  '#ffffff', '#27272a', '#0f172a', '#831843', '#064e3b',
+]
+
+export const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export const MONTH_NAMES = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+]
+
 // ======================== TASK & GROUP INTERFACES ========================
+// Helper: get a light text colour for very dark/light bg
+export function getContrastText(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return luminance > 0.55 ? '#0a0a0a' : '#ffffff'
+}
+
 export interface TaskItem {
   id: string
   title: string
@@ -290,11 +293,356 @@ const initialDocBlocks: DocBlock[] = [
 ]
 
 const teamMembers = [
+  { id: 'm-0', name: 'Balok Farmer', role: 'Product Manager', avatar: '/images/clients/SUNDDAE.jpg' },
+  { id: 'm-01', name: 'Afira cendera', role: 'Design Lead', avatar: '/images/clients/ASIAN-MOOD.webp' },
   { id: 'm-1', name: 'George', role: 'Product Lead', avatar: '/images/clients/SUNDDAE.jpg' },
   { id: 'm-2', name: 'Jordan Fufu', role: 'Senior Designer', avatar: '/images/clients/CONTROVERSIAL.webp' },
   { id: 'm-3', name: 'Puput Atira', role: 'UI/UX Designer', avatar: '/images/clients/ASIAN-MOOD.webp' },
   { id: 'm-4', name: 'Rahmat Sudianto', role: 'Illustrator', avatar: '/images/clients/SOAR.webp' },
 ]
+
+// ======================== CALENDAR VIEW COMPONENT ========================
+interface CalendarViewProps {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+  getContrastTextFn: (hex: string) => string
+  onAddTask: (date: string) => void
+}
+
+function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: CalendarViewProps) {
+  const today = new Date()
+  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1)) // March 2026
+  const [hoveredEvent, setHoveredEvent] = useState<{ task: TaskItem; groupTitle: string; rect?: DOMRect } | null>(null)
+  const [clickedDay, setClickedDay] = useState<number | null>(null)
+
+  const year = currentMonth.getFullYear()
+  const month = currentMonth.getMonth()
+
+  const rawMonthName = currentMonth.toLocaleString('id-ID', { month: 'long', year: 'numeric' })
+  const monthName = rawMonthName.charAt(0).toUpperCase() + rawMonthName.slice(1)
+
+  // Monday-first calculation (0 = Mon, ..., 6 = Sun)
+  const firstDay = new Date(year, month, 1).getDay() // 0=Sun, 1=Mon, ..., 6=Sat
+  const firstDayOffset = (firstDay + 6) % 7
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const daysInPrevMonth = new Date(year, month, 0).getDate()
+
+  // All tasks flattened with group info
+  const allTasks = groups.flatMap((g) =>
+    g.items.map((item) => ({ task: item, groupTitle: g.title, groupColor: g.color }))
+  )
+
+  // Parse task date → match to calendar cell
+  const getTasksForDay = (day: number): typeof allTasks => {
+    return allTasks.filter((t) => {
+      try {
+        const d = new Date(t.task.date)
+        return d.getMonth() === month && d.getDate() === day
+      } catch {
+        return false
+      }
+    })
+  }
+
+  const formatDateForModal = (day: number) => {
+    const d = new Date(year, month, day)
+    return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+  }
+
+  const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1))
+  const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1))
+  const goToday = () => setCurrentMonth(new Date(2026, 2, 1))
+
+  const isToday = (day: number) =>
+    (day === today.getDate() && month === today.getMonth() && year === today.getFullYear()) ||
+    (year === 2026 && month === 2 && day === 17)
+
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+  // Build calendar grid cells
+  const cells: { day: number; current: boolean }[] = []
+  for (let i = firstDayOffset - 1; i >= 0; i--) {
+    cells.push({ day: daysInPrevMonth - i, current: false })
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ day: d, current: true })
+  }
+  const remainder = cells.length % 7
+  if (remainder !== 0) {
+    for (let d = 1; d <= 7 - remainder; d++) {
+      cells.push({ day: d, current: false })
+    }
+  }
+
+  const statusDef = (label: string) =>
+    statusList.find((s) => s.label === label) || { colorCode: '#64748b', label }
+
+  return (
+    <div className="flex-1 flex flex-col select-none">
+      {/* Top Toolbar matching screenshot */}
+      <div className="flex items-center justify-between mb-4">
+        {/* Left Toolbar */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onAddTask(formatDateForModal(today.getDate()))}
+            className="h-8 px-3 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 rounded-md transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+          >
+            <span>New item</span>
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Search size={14} />
+            <span>Search</span>
+          </button>
+          <button
+            type="button"
+            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <UserIcon size={14} />
+            <span>Person</span>
+          </button>
+          <button
+            type="button"
+            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Filter size={14} />
+            <span>Filter</span>
+            <ChevronDown size={12} />
+          </button>
+          <button
+            type="button"
+            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <ArrowUpDown size={14} />
+            <span>Sort</span>
+          </button>
+        </div>
+
+        {/* Right Navigation */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={goToday}
+            className="h-8 px-3 text-xs font-medium text-neutral-300 border border-neutral-700/80 bg-neutral-800/20 hover:bg-neutral-800 rounded-md transition cursor-pointer"
+          >
+            Today
+          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={prevMonth}
+              className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition cursor-pointer"
+              aria-label="Previous month"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={nextMonth}
+              className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition cursor-pointer"
+              aria-label="Next month"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <span className="text-xs font-semibold text-neutral-200 min-w-[70px] text-center">
+            {monthName}
+          </span>
+          <button
+            type="button"
+            className="h-8 px-2.5 text-xs font-medium text-neutral-300 border border-neutral-700/80 bg-neutral-800/20 hover:bg-neutral-800 rounded-md transition flex items-center gap-1 cursor-pointer"
+          >
+            <span>Month</span>
+            <ChevronDown size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Day Headers (Mon - Sun) */}
+      <div className="grid grid-cols-7 border-t border-l border-r border-neutral-800/80">
+        {DAYS.map((d) => (
+          <div
+            key={d}
+            className="py-2 text-center text-xs font-normal text-neutral-400 bg-[#16171a] border-r border-neutral-800/80 last:border-r-0"
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7 border-l border-t border-neutral-800/80 flex-1">
+        {cells.map((cell, idx) => {
+          const tasks = cell.current ? getTasksForDay(cell.day) : []
+          const isTodayCell = isToday(cell.day) && cell.current
+
+          return (
+            <div
+              key={idx}
+              className={`min-h-[110px] p-2 border-r border-b border-neutral-800/80 flex flex-col justify-between transition-colors duration-150 cursor-pointer group relative ${
+                !cell.current
+                  ? 'bg-[#141518]/70 text-neutral-600'
+                  : 'bg-[#1a1b1f] hover:bg-[#383a42]'
+              }`}
+              onClick={() => {
+                if (!cell.current) return
+                onAddTask(formatDateForModal(cell.day))
+              }}
+            >
+              {/* Day Number (Top Right) */}
+              <div className="flex justify-end relative z-20 pointer-events-none">
+                {isTodayCell ? (
+                  <span className="bg-blue-600 text-white font-semibold text-xs px-1.5 py-0.5 rounded-sm flex items-center justify-center min-w-[20px] text-center">
+                    {String(cell.day).padStart(2, '0')}
+                  </span>
+                ) : (
+                  <span
+                    className={`text-xs font-normal ${
+                      cell.current ? 'text-neutral-400 group-hover:text-neutral-300' : 'text-neutral-600'
+                    }`}
+                  >
+                    {String(cell.day).padStart(2, '0')}
+                  </span>
+                )}
+              </div>
+
+              {/* Centered + Add text on Hover */}
+              {cell.current && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">
+                  <span className="text-xs text-neutral-300 font-normal select-none">
+                    + Add
+                  </span>
+                </div>
+              )}
+
+              {/* Task Pills */}
+              <div className="space-y-1 relative z-20 mt-auto">
+                {tasks.slice(0, 2).map(({ task, groupTitle }) => {
+                  const sd = statusDef(task.status)
+                  const displayTitle = task.title ? task.title.charAt(0).toUpperCase() + task.title.slice(1) : ''
+                  return (
+                    <div
+                      key={task.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setClickedDay(cell.day)
+                      }}
+                      onMouseEnter={(e) => {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setHoveredEvent({ task, groupTitle, rect })
+                      }}
+                      onMouseLeave={() => setHoveredEvent(null)}
+                      className="w-full py-1 px-3 rounded-full text-xs font-medium text-white text-center truncate cursor-pointer shadow-sm hover:brightness-110 transition"
+                      style={{
+                        backgroundColor: sd.colorCode || '#ea384c',
+                      }}
+                      title={task.title}
+                    >
+                      {displayTitle}
+                    </div>
+                  )
+                })}
+                {tasks.length > 2 && (
+                  <div className="text-[10px] text-neutral-400 pl-1 font-medium">+{tasks.length - 2} more</div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Day Detail Panel (shown when day task pill is clicked) */}
+      {clickedDay !== null && (() => {
+        const dayTasks = getTasksForDay(clickedDay)
+        return (
+          <div className="mt-4 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl p-4 animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={15} className="text-blue-400" />
+                <span className="text-sm font-bold text-white">
+                  {new Date(year, month, clickedDay).toLocaleDateString('en-US', {
+                    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+                  })}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onAddTask(formatDateForModal(clickedDay))}
+                  className="h-7 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus size={12} strokeWidth={2.5} />
+                  Add Event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClickedDay(null)}
+                  className="p-1 text-neutral-400 hover:text-white rounded transition cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {dayTasks.length === 0 ? (
+              <p className="text-xs text-neutral-500 italic">No tasks scheduled for this day. Click "Add Event" to create one.</p>
+            ) : (
+              <div className="space-y-2">
+                {dayTasks.map(({ task, groupTitle }) => {
+                  const sd = statusDef(task.status)
+                  return (
+                    <div
+                      key={task.id}
+                      className="flex items-center gap-3 p-2.5 rounded-xl bg-[#111214] border border-neutral-800 hover:border-neutral-700 transition"
+                    >
+                      <div
+                        className="w-1 h-8 rounded-full shrink-0"
+                        style={{ backgroundColor: sd.colorCode }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-white truncate">{task.title}</p>
+                        <p className="text-[10px] text-neutral-500">{groupTitle}</p>
+                      </div>
+                      <span
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold shrink-0"
+                        style={{
+                          backgroundColor: sd.colorCode,
+                          color: getContrastTextFn(sd.colorCode),
+                        }}
+                      >
+                        {task.status}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* Status Legend matching screenshot */}
+      <div className="mt-8 flex items-center justify-center gap-6 py-2">
+        <div className="flex items-center gap-2">
+          <span className="w-3.5 h-3.5 rounded-full bg-[#f59e0b]" />
+          <span className="text-xs text-neutral-300">In progress</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-3.5 h-3.5 rounded-full bg-[#22c55e]" />
+          <span className="text-xs text-neutral-300">Done</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-3.5 h-3.5 rounded-full bg-[#ea384c]" />
+          <span className="text-xs text-neutral-300">Working on it</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function ProjectDetailPage() {
   const router = useRouter()
@@ -311,12 +659,21 @@ export default function ProjectDetailPage() {
   const [activeNav, setActiveNav] = useState('Home')
   const [selectedWorkspace] = useState('2026 INVISUAL')
 
+  // ======================== DYNAMIC STATUS LIST ========================
+  const [statusList, setStatusList] = useState<StatusDef[]>(initialStatusList)
+
+  // Manage Labels Modal
+  const [showManageLabels, setShowManageLabels] = useState(false)
+  const [newLabelName, setNewLabelName] = useState('')
+  const [newLabelColor, setNewLabelColor] = useState(COLOR_PALETTE[0])
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null)
+
   // ======================== MAIN TABLE FILTER & SORT STATES ========================
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearchInput, setShowSearchInput] = useState(false)
   const [personFilter, setPersonFilter] = useState<string>('all')
   const [showPersonFilterMenu, setShowPersonFilterMenu] = useState(false)
-  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [showStatusFilterMenu, setShowStatusFilterMenu] = useState(false)
   const [sortOption, setSortOption] = useState<'none' | 'name-asc' | 'name-desc' | 'date-asc' | 'date-desc'>('none')
   const [showSortMenu, setShowSortMenu] = useState(false)
@@ -345,11 +702,26 @@ export default function ProjectDetailPage() {
 
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
-  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskTitle, setNewTaskTitle] = useState('New Item')
   const [newTaskGroup, setNewTaskGroup] = useState<string>('group-1')
-  const [newTaskAssignee, setNewTaskAssignee] = useState<string>(teamMembers[0].name)
-  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('In Queue')
-  const [newTaskDate, setNewTaskDate] = useState<string>('Mar 28, 2025')
+  const [newTaskAssignee, setNewTaskAssignee] = useState<string>('')
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('')
+  const [newTaskDate, setNewTaskDate] = useState<string>('Feb 4, 12:00 AM')
+
+  // Modal Popover dropdown states (matching slides)
+  const [showGroupDropdown, setShowGroupDropdown] = useState(false)
+  const [showPersonDropdown, setShowPersonDropdown] = useState(false)
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false)
+  const [showDateDropdown, setShowDateDropdown] = useState(false)
+  const [datePickerMonth, setDatePickerMonth] = useState(2) // March
+  const [datePickerYear, setDatePickerYear] = useState(2026)
+  const [datePickerDay, setDatePickerDay] = useState(17)
+  const [datePickerTime, setDatePickerTime] = useState('12:00 AM')
+  const [searchGroupQuery, setSearchGroupQuery] = useState('')
+  const [searchPersonQuery, setSearchPersonQuery] = useState('')
+  const [showInlineAddLabel, setShowInlineAddLabel] = useState(false)
+  const [inlineLabelName, setInlineLabelName] = useState('')
+  const [inlineLabelColor, setInlineLabelColor] = useState('#f59e0b')
 
   // Add column modal
   const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
@@ -368,6 +740,24 @@ export default function ProjectDetailPage() {
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showMentionMenu, setShowMentionMenu] = useState(false)
+
+  // ======================== STATUS LABEL MANAGEMENT ========================
+
+  const handleAddLabel = () => {
+    if (!newLabelName.trim()) return
+    const id = `custom-${Date.now()}`
+    setStatusList((prev) => [...prev, { id, label: newLabelName.trim(), colorCode: newLabelColor }])
+    setNewLabelName('')
+    setNewLabelColor(COLOR_PALETTE[0])
+  }
+
+  const handleDeleteLabel = (id: string) => {
+    setStatusList((prev) => prev.filter((s) => s.id !== id))
+  }
+
+  const handleUpdateLabelColor = (id: string, colorCode: string) => {
+    setStatusList((prev) => prev.map((s) => (s.id === id ? { ...s, colorCode } : s)))
+  }
 
   // ======================== MAIN TABLE FUNCTIONS ========================
 
@@ -485,16 +875,16 @@ export default function ProjectDetailPage() {
     e.preventDefault()
     if (!newTaskTitle.trim()) return
 
-    const selectedMember = teamMembers.find((m) => m.name === newTaskAssignee) || teamMembers[0]
+    const selectedMember = teamMembers.find((m) => m.name === newTaskAssignee)
 
     const newItem: TaskItem = {
       id: `task-${Date.now()}`,
       title: newTaskTitle.trim(),
       hasChevron: true,
       description: 'Tugas baru dibuat via toolbar New Item.',
-      personAvatars: [selectedMember.avatar],
-      personNames: [selectedMember.name],
-      status: newTaskStatus,
+      personAvatars: selectedMember ? [selectedMember.avatar] : [],
+      personNames: selectedMember ? [selectedMember.name] : [],
+      status: newTaskStatus || 'In progress',
       date: newTaskDate,
       checked: false,
       expanded: false,
@@ -507,8 +897,12 @@ export default function ProjectDetailPage() {
       })
     )
 
-    setNewTaskTitle('')
+    setNewTaskTitle('New Item')
     setShowNewItemModal(false)
+    setShowGroupDropdown(false)
+    setShowPersonDropdown(false)
+    setShowStatusDropdown(false)
+    setShowDateDropdown(false)
   }
 
   // Inline rename task
@@ -540,7 +934,7 @@ export default function ProjectDetailPage() {
   }
 
   // Bulk set status
-  const handleBulkSetStatus = (status: TaskStatus) => {
+  const handleBulkSetStatus = (status: string) => {
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
@@ -734,11 +1128,11 @@ export default function ProjectDetailPage() {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
       const curStyles = b.styles || {}
-      let nextStyles = { ...curStyles }
+      const nextStyles = { ...curStyles }
       if (typeof value !== 'undefined') {
-        nextStyles[styleKey] = curStyles[styleKey] === value ? undefined : value
+        ;(nextStyles as any)[styleKey] = curStyles[styleKey] === value ? undefined : value
       } else {
-        nextStyles[styleKey] = !curStyles[styleKey]
+        ;(nextStyles as any)[styleKey] = !curStyles[styleKey]
       }
       return { ...b, styles: nextStyles }
     })
@@ -746,9 +1140,9 @@ export default function ProjectDetailPage() {
   }
 
   const applyListType = (type: 'bullet-list' | 'numbered-list' | 'checklist') => {
-    const updated = docBlocks.map((b) => {
+    const updated = docBlocks.map((b): DocBlock => {
       if (b.id !== activeBlock.id) return b
-      if (b.type === type) return { ...b, type: 'paragraph', items: undefined }
+      if (b.type === type) return { ...b, type: 'paragraph' as BlockType, items: undefined }
       const existingItems =
         b.items ||
         (b.content
@@ -1361,16 +1755,16 @@ export default function ProjectDetailPage() {
                               <span>All Statuses</span>
                               {statusFilter === 'all' && <Check size={14} />}
                             </button>
-                            {orderedStatusList.map((s) => (
+                            {statusList.map((s) => (
                               <button
-                                key={s.status}
+                                key={s.id}
                                 type="button"
                                 onClick={() => {
-                                  setStatusFilter(s.status)
+                                  setStatusFilter(s.label)
                                   setShowStatusFilterMenu(false)
                                 }}
                                 className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
-                                  statusFilter === s.status
+                                  statusFilter === s.label
                                     ? 'bg-blue-600/15 text-blue-400 font-semibold'
                                     : 'text-neutral-300 hover:bg-neutral-800'
                                 }`}
@@ -1382,7 +1776,7 @@ export default function ProjectDetailPage() {
                                   />
                                   <span>{s.label}</span>
                                 </div>
-                                {statusFilter === s.status && <Check size={14} />}
+                                {statusFilter === s.label && <Check size={14} />}
                               </button>
                             ))}
                           </div>
@@ -1531,29 +1925,19 @@ export default function ProjectDetailPage() {
                       <span>Tasks selected</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-neutral-400 mr-1">Set Status:</span>
-                      <button
-                        type="button"
-                        onClick={() => handleBulkSetStatus('Working on it')}
-                        className="px-2 py-1 bg-[#ea384c] text-white text-[11px] font-semibold rounded hover:brightness-105 transition"
-                      >
-                        Working on it
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleBulkSetStatus('Done')}
-                        className="px-2 py-1 bg-[#22c55e] text-white text-[11px] font-semibold rounded hover:brightness-105 transition"
-                      >
-                        Done
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleBulkSetStatus('In Queue')}
-                        className="px-2 py-1 bg-[#ffa114] text-neutral-950 text-[11px] font-semibold rounded hover:brightness-105 transition"
-                      >
-                        In Queue
-                      </button>
+                      {statusList.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => handleBulkSetStatus(s.label)}
+                          style={{ backgroundColor: s.colorCode, color: getContrastText(s.colorCode) }}
+                          className="px-2 py-1 text-[11px] font-semibold rounded hover:brightness-105 transition"
+                        >
+                          {s.label}
+                        </button>
+                      ))}
 
                       <div className="w-px h-4 bg-neutral-700 mx-2" />
 
@@ -1573,10 +1957,15 @@ export default function ProjectDetailPage() {
                 <div className="space-y-8 flex-1">
                   {processedGroups.map((group) => {
                     const totalItems = group.items.length || 1
+                    // Dynamic progress bar: compute per-status counts
+                    const statusCounts = statusList.map((s) => ({
+                      ...s,
+                      count: group.items.filter((i) => i.status === s.label).length,
+                    }))
+
+                    // Keep legacy variables for tooltip
                     const inQueueCount = group.items.filter((i) => i.status === 'In Queue').length
-                    const workingCount = group.items.filter(
-                      (i) => i.status === 'Working on it'
-                    ).length
+                    const workingCount = group.items.filter((i) => i.status === 'Working on it').length
                     const doneCount = group.items.filter((i) => i.status === 'Done').length
                     const stuckCount = group.items.filter((i) => i.status === 'Stuck').length
 
@@ -1697,8 +2086,8 @@ export default function ProjectDetailPage() {
                               {/* Table Body */}
                               <tbody>
                                 {group.items.map((item) => {
-                                  const currentStatusConf =
-                                    statusConfig[item.status] || statusConfig['In Queue']
+                                  const currentStatusDef =
+                                    statusList.find((s) => s.label === item.status) || statusList[statusList.length - 1] || { colorCode: '#64748b', label: item.status }
                                   const isStatusPickerOpen =
                                     activeStatusPicker?.groupId === group.id &&
                                     activeStatusPicker?.taskId === item.id
@@ -1882,43 +2271,67 @@ export default function ProjectDetailPage() {
                                             )
                                           }
                                           title="Click to select status"
-                                          className={`w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 ${currentStatusConf.bg} ${currentStatusConf.textColor} ${currentStatusConf.hoverBg}`}
+                                          style={{
+                                            backgroundColor: currentStatusDef.colorCode,
+                                            color: getContrastText(currentStatusDef.colorCode),
+                                          }}
+                                          className="w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 hover:brightness-90"
                                         >
                                           <span>{item.status}</span>
                                           <ChevronDown size={12} className="opacity-70" />
                                         </button>
 
-                                        {/* Status Picker Popover (Displaying statuses in clean order) */}
+                                        {/* Status Picker Popover */}
                                         {isStatusPickerOpen && (
                                           <>
                                             <div
                                               className="fixed inset-0 z-20"
                                               onClick={() => setActiveStatusPicker(null)}
                                             />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 space-y-1">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
                                                 Select Status
                                               </div>
 
-                                              {/* Ordered List of Statuses */}
-                                              {orderedStatusList.map((st) => {
-                                                const isSelected = item.status === st.status
-                                                return (
-                                                  <button
-                                                    key={st.status}
-                                                    type="button"
-                                                    onClick={() =>
-                                                      setTaskStatus(group.id, item.id, st.status)
-                                                    }
-                                                    className={`w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm ${st.bg} ${st.textColor} ${st.hoverBg}`}
-                                                  >
-                                                    <span>{st.label}</span>
-                                                    {isSelected && (
-                                                      <Check size={14} strokeWidth={2.5} />
-                                                    )}
-                                                  </button>
-                                                )
-                                              })}
+                                              <div className="space-y-1">
+                                                {statusList.map((st) => {
+                                                  const isSelected = item.status === st.label
+                                                  return (
+                                                    <button
+                                                      key={st.id}
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setTaskStatus(group.id, item.id, st.label)
+                                                      }
+                                                      style={{
+                                                        backgroundColor: st.colorCode,
+                                                        color: getContrastText(st.colorCode),
+                                                      }}
+                                                      className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm hover:brightness-90"
+                                                    >
+                                                      <span>{st.label}</span>
+                                                      {isSelected && (
+                                                        <Check size={14} strokeWidth={2.5} />
+                                                      )}
+                                                    </button>
+                                                  )
+                                                })}
+                                              </div>
+
+                                              {/* Add New Label */}
+                                              <div className="mt-2 pt-2 border-t border-neutral-800/80">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setActiveStatusPicker(null)
+                                                    setShowManageLabels(true)
+                                                  }}
+                                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 transition cursor-pointer"
+                                                >
+                                                  <Plus size={13} strokeWidth={2.5} />
+                                                  <span>Add New Label</span>
+                                                </button>
+                                              </div>
                                             </div>
                                           </>
                                         )}
@@ -2003,36 +2416,23 @@ export default function ProjectDetailPage() {
                                   <td className="border-r border-neutral-800/80 py-2"></td>
                                   <td className="border-r border-neutral-800/80 py-2"></td>
 
-                                  {/* Dynamic Multi-color Progress Bar */}
+                                  {/* Dynamic Multi-color Progress Bar (uses dynamic statusList) */}
                                   <td className="p-1 border-r border-neutral-800/80">
                                     <div
                                       className="h-6 w-full rounded flex overflow-hidden cursor-help shadow-sm"
-                                      title={`In Queue: ${inQueueCount}, Working on it: ${workingCount}, Done: ${doneCount}, Stuck: ${stuckCount}`}
+                                      title={statusCounts.map((s) => `${s.label}: ${s.count}`).join(', ')}
                                     >
-                                      {inQueuePct > 0 && (
-                                        <div
-                                          style={{ width: `${inQueuePct}%` }}
-                                          className="bg-[#ffa114] h-full transition-all duration-300"
-                                        />
-                                      )}
-                                      {workingPct > 0 && (
-                                        <div
-                                          style={{ width: `${workingPct}%` }}
-                                          className="bg-[#ea384c] h-full transition-all duration-300"
-                                        />
-                                      )}
-                                      {donePct > 0 && (
-                                        <div
-                                          style={{ width: `${donePct}%` }}
-                                          className="bg-[#22c55e] h-full transition-all duration-300"
-                                        />
-                                      )}
-                                      {stuckPct > 0 && (
-                                        <div
-                                          style={{ width: `${stuckPct}%` }}
-                                          className="bg-[#b91c1c] h-full transition-all duration-300"
-                                        />
-                                      )}
+                                      {statusCounts.map((s) => {
+                                        const pct = (s.count / totalItems) * 100
+                                        if (pct <= 0) return null
+                                        return (
+                                          <div
+                                            key={s.id}
+                                            style={{ width: `${pct}%`, backgroundColor: s.colorCode }}
+                                            className="h-full transition-all duration-300"
+                                          />
+                                        )
+                                      })}
                                     </div>
                                   </td>
 
@@ -2866,146 +3266,828 @@ export default function ProjectDetailPage() {
 
             {/* TAB 3: CALENDAR VIEW */}
             {activeTab === 'Calendar' && (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-neutral-800/80 border border-neutral-700 flex items-center justify-center text-blue-500 mb-4 shadow-inner">
-                  <CalendarIcon size={28} />
-                </div>
-                <h3 className="text-lg font-bold text-white mb-2">Project Calendar & Timeline</h3>
-                <p className="text-sm text-neutral-400 max-w-md mb-6">
-                  Tenggat waktu pengerjaan tugas & milestone untuk Aqua dijadwalkan pada 28 - 29
-                  Maret 2025.
-                </p>
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#191a1e] border border-neutral-800 rounded-xl text-xs text-neutral-300">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                  <span>Timeline: Mar 28, 2025 – Mar 29, 2025</span>
-                </div>
-              </div>
+              <CalendarView
+                groups={groups}
+                statusList={statusList}
+                getContrastTextFn={getContrastText}
+                onAddTask={(date) => {
+                  try {
+                    const parsed = new Date(date)
+                    if (!isNaN(parsed.getTime())) {
+                      setDatePickerDay(parsed.getDate())
+                      setDatePickerMonth(parsed.getMonth())
+                      setDatePickerYear(parsed.getFullYear())
+                    }
+                  } catch {}
+                  setNewTaskDate(date ? `${date}, 12:00 AM` : 'Feb 4, 2026, 12:00 AM')
+                  setShowNewItemModal(true)
+                  setShowGroupDropdown(false)
+                  setShowPersonDropdown(false)
+                  setShowStatusDropdown(false)
+                  setShowDateDropdown(false)
+                }}
+              />
             )}
           </div>
         </main>
       </div>
 
-      {/* ======================== NEW ITEM MODAL DIALOG ======================== */}
-      {showNewItemModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* ======================== NEW ITEM MODAL DIALOG (MATCHING 4 SLIDES) ======================== */}
+      {showNewItemModal && (() => {
+        const currentSelectedGroup = groups.find((g) => g.id === newTaskGroup) || groups[0]
+        const getGroupColorHex = (g?: TaskGroup) => {
+          if (!g) return '#3b82f6'
+          if (g.id === 'group-1') return '#3b82f6'
+          if (g.id === 'group-2') return '#ef4444'
+          if (g.id === 'group-3') return '#22c55e'
+          const m = g.color?.match(/#[0-9a-fA-F]+/)
+          return m ? m[0] : '#3b82f6'
+        }
+        const filteredGroups = groups.filter((g) =>
+          g.title.toLowerCase().includes(searchGroupQuery.toLowerCase())
+        )
+        const selectedAssigneeMember = teamMembers.find((m) => m.name === newTaskAssignee)
+        const filteredMembers = teamMembers.filter((m) =>
+          m.name.toLowerCase().includes(searchPersonQuery.toLowerCase())
+        )
+
+        const statusOptionsList: StatusDef[] = [
+          { id: 'in_progress', label: 'In progress', colorCode: '#f59e0b' },
+          { id: 'working', label: 'Working on it', colorCode: '#ea384c' },
+          { id: 'default', label: 'Default label', colorCode: '#4b5563' },
+          ...statusList.filter(
+            (s) =>
+              !['In progress', 'Working on it', 'Default label', 'In Queue', 'working', 'done'].includes(s.label)
+          ),
+        ]
+        const selectedStatusDef =
+          statusOptionsList.find((s) => s.label === newTaskStatus) ||
+          statusList.find((s) => s.label === newTaskStatus) || {
+            id: 'none',
+            label: newTaskStatus,
+            colorCode: '#4b5563',
+          }
+
+        // Date picker calendar calculation (Tanggal, Bulan, Tahun)
+        const pickerFirstDay = new Date(datePickerYear, datePickerMonth, 1).getDay()
+        const pickerFirstDayOffset = (pickerFirstDay + 6) % 7 // Monday-first
+        const pickerDaysInMonth = new Date(datePickerYear, datePickerMonth + 1, 0).getDate()
+        const pickerDaysInPrevMonth = new Date(datePickerYear, datePickerMonth, 0).getDate()
+
+        const pickerCells: { day: number; current: boolean }[] = []
+        for (let i = pickerFirstDayOffset - 1; i >= 0; i--) {
+          pickerCells.push({ day: pickerDaysInPrevMonth - i, current: false })
+        }
+        for (let d = 1; d <= pickerDaysInMonth; d++) {
+          pickerCells.push({ day: d, current: true })
+        }
+        const pickerRemainder = pickerCells.length % 7
+        if (pickerRemainder !== 0) {
+          for (let d = 1; d <= 7 - pickerRemainder; d++) {
+            pickerCells.push({ day: d, current: false })
+          }
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/75 backdrop-blur-[2px]"
+              onClick={() => {
+                setShowNewItemModal(false)
+                setShowGroupDropdown(false)
+                setShowPersonDropdown(false)
+                setShowStatusDropdown(false)
+                setShowDateDropdown(false)
+              }}
+            />
+            <div className="relative w-full max-w-[460px] bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <input
+                    type="text"
+                    required
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    placeholder="New Item"
+                    className="text-base font-semibold text-white bg-transparent border border-white/60 focus:border-blue-500 rounded px-2.5 py-1 outline-none transition"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewItemModal(false)
+                    setShowGroupDropdown(false)
+                    setShowPersonDropdown(false)
+                    setShowStatusDropdown(false)
+                    setShowDateDropdown(false)
+                  }}
+                  className="text-neutral-400 hover:text-white transition p-1 rounded-md hover:bg-neutral-800 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateNewTask} className="space-y-3.5">
+                {/* Row 1: Group (Slide 16:9 - 80 & 82) */}
+                <div className="flex items-center gap-3 relative">
+                  <div className="flex items-center gap-2 w-20 shrink-0">
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-[#ea580c]/20 text-[#fb923c]">
+                      <Folder size={12} />
+                    </span>
+                    <span className="text-xs text-neutral-300 font-medium">Group</span>
+                  </div>
+                  <div className="relative flex-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowGroupDropdown(!showGroupDropdown)
+                        setShowPersonDropdown(false)
+                        setShowStatusDropdown(false)
+                      }}
+                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center gap-2 cursor-pointer transition text-left"
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: getGroupColorHex(currentSelectedGroup) }}
+                      />
+                      <span className="text-xs text-neutral-200 truncate">
+                        {currentSelectedGroup?.title || 'Tugas Pertama'}
+                      </span>
+                    </button>
+
+                    {/* Group Dropdown Popover (Slide 82) */}
+                    {showGroupDropdown && (
+                      <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
+                          <Search size={13} className="text-neutral-400 shrink-0" />
+                          <input
+                            type="text"
+                            placeholder="Search group"
+                            value={searchGroupQuery}
+                            onChange={(e) => setSearchGroupQuery(e.target.value)}
+                            autoFocus
+                            className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
+                          />
+                        </div>
+                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                          {filteredGroups.map((g) => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => {
+                                setNewTaskGroup(g.id)
+                                setShowGroupDropdown(false)
+                              }}
+                              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left text-xs transition cursor-pointer ${
+                                newTaskGroup === g.id
+                                  ? 'bg-blue-600/20 text-white'
+                                  : 'text-neutral-200 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: getGroupColorHex(g) }}
+                              />
+                              <span className="truncate">{g.title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 2: Person (Bottom-Left Slide) */}
+                <div className="flex items-center gap-3 relative">
+                  <div className="flex items-center gap-2 w-20 shrink-0">
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-[#ca8a04]/20 text-[#facc15]">
+                      <UserIcon size={12} />
+                    </span>
+                    <span className="text-xs text-neutral-300 font-medium">Person</span>
+                  </div>
+                  <div className="relative flex-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowPersonDropdown(!showPersonDropdown)
+                        setShowGroupDropdown(false)
+                        setShowStatusDropdown(false)
+                      }}
+                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
+                    >
+                      {selectedAssigneeMember ? (
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={selectedAssigneeMember.avatar}
+                            alt={selectedAssigneeMember.name}
+                            className="w-5 h-5 rounded-full object-cover shrink-0"
+                          />
+                          <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
+                        </div>
+                      ) : (
+                        <div className="w-full flex items-center justify-center text-neutral-500">
+                          <div className="w-5 h-5 rounded-full border border-neutral-600 flex items-center justify-center">
+                            <UserIcon size={11} className="text-neutral-400" />
+                          </div>
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Person Dropdown Popover (Slide 3) */}
+                    {showPersonDropdown && (
+                      <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
+                          <Search size={13} className="text-neutral-400 shrink-0" />
+                          <input
+                            type="text"
+                            placeholder="Search group"
+                            value={searchPersonQuery}
+                            onChange={(e) => setSearchPersonQuery(e.target.value)}
+                            autoFocus
+                            className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
+                          />
+                        </div>
+                        <p className="text-[11px] font-semibold text-neutral-400 px-2 py-1">Suggested Users</p>
+                        <div className="space-y-0.5 max-h-44 overflow-y-auto">
+                          {filteredMembers.map((m) => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                setNewTaskAssignee(m.name)
+                                setShowPersonDropdown(false)
+                              }}
+                              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-left transition cursor-pointer ${
+                                newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
+                              }`}
+                            >
+                              <img src={m.avatar} alt={m.name} className="w-5 h-5 rounded-full object-cover shrink-0" />
+                              <span className="text-xs text-neutral-200">{m.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const email = prompt('Enter email address to invite:')
+                            if (email) {
+                              alert(`Invitation sent to ${email}!`)
+                              setShowPersonDropdown(false)
+                            }
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                        >
+                          <Mail size={13} />
+                          <span>Email an invite to a new member</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 3: Status (Bottom-Right Slide) */}
+                <div className="flex items-center gap-3 relative">
+                  <div className="flex items-center gap-2 w-20 shrink-0">
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-[#db2777]/20 text-[#f472b6]">
+                      <Tag size={12} />
+                    </span>
+                    <span className="text-xs text-neutral-300 font-medium">Status</span>
+                  </div>
+                  <div className="relative flex-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowStatusDropdown(!showStatusDropdown)
+                        setShowGroupDropdown(false)
+                        setShowPersonDropdown(false)
+                      }}
+                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center gap-2 cursor-pointer transition text-left"
+                    >
+                      {newTaskStatus ? (
+                        <span
+                          className="px-2.5 py-0.5 rounded text-xs font-semibold text-white"
+                          style={{ backgroundColor: selectedStatusDef.colorCode }}
+                        >
+                          {newTaskStatus}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-neutral-500"></span>
+                      )}
+                    </button>
+
+                    {/* Status Dropdown Popover (Slide 4) */}
+                    {showStatusDropdown && (
+                      <div className="absolute left-0 top-full mt-1.5 w-48 bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
+                        <div className="space-y-1.5">
+                          {statusOptionsList.map((s) => (
+                            <button
+                              key={s.label}
+                              type="button"
+                              onClick={() => setNewTaskStatus(s.label)}
+                              className="w-full py-1.5 px-3 rounded text-xs font-semibold text-white text-center shadow-sm hover:brightness-110 transition cursor-pointer"
+                              style={{ backgroundColor: s.colorCode }}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* New Label button */}
+                        {showInlineAddLabel ? (
+                          <div className="mt-2 pt-2 border-t border-neutral-800 space-y-2">
+                            <input
+                              type="text"
+                              placeholder="New label name"
+                              value={inlineLabelName}
+                              onChange={(e) => setInlineLabelName(e.target.value)}
+                              className="w-full h-7 px-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-white outline-none focus:border-blue-500"
+                            />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {COLOR_PALETTE.slice(0, 6).map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setInlineLabelColor(c)}
+                                  className={`w-4 h-4 rounded-full transition ${
+                                    inlineLabelColor === c ? 'ring-2 ring-white scale-110' : ''
+                                  }`}
+                                  style={{ backgroundColor: c }}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!inlineLabelName.trim()) return
+                                const newLabel = {
+                                  id: `custom-${Date.now()}`,
+                                  label: inlineLabelName.trim(),
+                                  colorCode: inlineLabelColor,
+                                }
+                                setStatusList((prev) => [...prev, newLabel])
+                                setNewTaskStatus(newLabel.label)
+                                setInlineLabelName('')
+                                setShowInlineAddLabel(false)
+                              }}
+                              className="w-full h-6 text-[11px] font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded cursor-pointer"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowInlineAddLabel(true)}
+                            className="w-full flex items-center justify-center gap-1.5 mt-2 py-1 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                          >
+                            <Plus size={12} strokeWidth={2.5} />
+                            <span>New Label</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setShowStatusDropdown(false)}
+                          className="w-full mt-2 py-1.5 bg-[#282a32] hover:bg-neutral-700 text-xs font-semibold text-neutral-200 rounded border border-neutral-700 transition cursor-pointer text-center"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 4: Date (Pilihan Tanggal, Bulan, Tahun) */}
+                <div className="flex items-center gap-3 relative">
+                  <div className="flex items-center gap-2 w-20 shrink-0">
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-[#7c3aed]/20 text-[#c084fc]">
+                      <CalendarIcon size={12} />
+                    </span>
+                    <span className="text-xs text-neutral-300 font-medium">Date</span>
+                  </div>
+                  <div className="relative flex-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDateDropdown(!showDateDropdown)
+                        setShowGroupDropdown(false)
+                        setShowPersonDropdown(false)
+                        setShowStatusDropdown(false)
+                      }}
+                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
+                    >
+                      <span className="text-xs text-neutral-200 truncate">
+                        {newTaskDate || 'Pilih tanggal, bulan & tahun'}
+                      </span>
+                      <CalendarIcon size={13} className="text-neutral-400 shrink-0 ml-2" />
+                    </button>
+
+                    {/* Date Picker Popover */}
+                    {showDateDropdown && (
+                      <div className="absolute left-0 bottom-full mb-2 w-72 bg-[#1e2025] border border-neutral-700 rounded-xl shadow-2xl p-3.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                        {/* Header: Bulan & Tahun Selectors + Navigation */}
+                        <div className="flex items-center justify-between mb-3 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (datePickerMonth === 0) {
+                                setDatePickerMonth(11)
+                                setDatePickerYear((y) => y - 1)
+                              } else {
+                                setDatePickerMonth((m) => m - 1)
+                              }
+                            }}
+                            className="p-1 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                            aria-label="Previous month"
+                          >
+                            <ChevronLeft size={15} />
+                          </button>
+
+                          <div className="flex items-center gap-1.5">
+                            {/* Pilihan Bulan (Month) */}
+                            <select
+                              value={datePickerMonth}
+                              onChange={(e) => setDatePickerMonth(Number(e.target.value))}
+                              className="bg-[#282a32] text-xs font-semibold text-neutral-200 border border-neutral-700 rounded px-2 py-1 outline-none cursor-pointer hover:border-neutral-500 transition"
+                            >
+                              {SHORT_MONTHS.map((m, idx) => (
+                                <option key={m} value={idx}>
+                                  {MONTH_NAMES[idx]}
+                                </option>
+                              ))}
+                            </select>
+
+                            {/* Pilihan Tahun (Year) */}
+                            <select
+                              value={datePickerYear}
+                              onChange={(e) => setDatePickerYear(Number(e.target.value))}
+                              className="bg-[#282a32] text-xs font-semibold text-neutral-200 border border-neutral-700 rounded px-2 py-1 outline-none cursor-pointer hover:border-neutral-500 transition"
+                            >
+                              {[2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
+                                <option key={y} value={y}>
+                                  {y}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (datePickerMonth === 11) {
+                                setDatePickerMonth(0)
+                                setDatePickerYear((y) => y + 1)
+                              } else {
+                                setDatePickerMonth((m) => m + 1)
+                              }
+                            }}
+                            className="p-1 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                            aria-label="Next month"
+                          >
+                            <ChevronRight size={15} />
+                          </button>
+                        </div>
+
+                        {/* Weekday headers */}
+                        <div className="grid grid-cols-7 text-center text-[10px] font-bold text-neutral-500 mb-1.5">
+                          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => (
+                            <div key={d}>{d}</div>
+                          ))}
+                        </div>
+
+                        {/* Calendar days grid (Tanggal) */}
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                          {pickerCells.map((cell, cIdx) => {
+                            const isSelected = cell.current && cell.day === datePickerDay
+                            return (
+                              <button
+                                key={cIdx}
+                                type="button"
+                                disabled={!cell.current}
+                                onClick={() => {
+                                  if (!cell.current) return
+                                  setDatePickerDay(cell.day)
+                                }}
+                                className={`h-7 rounded-md text-xs font-medium transition flex items-center justify-center ${
+                                  !cell.current
+                                    ? 'text-neutral-600 cursor-not-allowed'
+                                    : isSelected
+                                    ? 'bg-blue-600 text-white font-bold shadow'
+                                    : 'text-neutral-300 hover:bg-[#282a32] hover:text-white cursor-pointer'
+                                }`}
+                              >
+                                {cell.day}
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {/* Bottom Bar: Jam, Hari Ini & Tombol Simpan */}
+                        <div className="mt-3 pt-2.5 border-t border-neutral-800 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1 bg-[#282a32] border border-neutral-700/80 rounded px-1.5 py-0.5">
+                            <Clock size={11} className="text-neutral-400" />
+                            <input
+                              type="text"
+                              value={datePickerTime}
+                              onChange={(e) => setDatePickerTime(e.target.value)}
+                              placeholder="12:00 AM"
+                              className="w-16 bg-transparent text-[11px] text-white outline-none text-center font-medium"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date()
+                                setDatePickerDay(now.getDate())
+                                setDatePickerMonth(now.getMonth())
+                                setDatePickerYear(now.getFullYear())
+                              }}
+                              className="text-[11px] text-neutral-400 hover:text-white px-2 py-1 rounded hover:bg-neutral-800 transition cursor-pointer"
+                            >
+                              Hari ini
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const formatted = `${SHORT_MONTHS[datePickerMonth]} ${String(datePickerDay).padStart(2, '0')}, ${datePickerYear}${datePickerTime ? `, ${datePickerTime}` : ''}`
+                                setNewTaskDate(formatted)
+                                setShowDateDropdown(false)
+                              }}
+                              className="h-6 px-3 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold rounded shadow transition cursor-pointer"
+                            >
+                              Pilih
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewItemModal(false)
+                      setShowGroupDropdown(false)
+                      setShowPersonDropdown(false)
+                      setShowStatusDropdown(false)
+                      setShowDateDropdown(false)
+                    }}
+                    className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 rounded-md shadow-sm transition cursor-pointer active:scale-95"
+                  >
+                    Create Item
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ======================== MANAGE LABELS MODAL ======================== */}
+      {showManageLabels && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
-            className="absolute inset-0 bg-black/75 backdrop-blur-xs"
-            onClick={() => setShowNewItemModal(false)}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowManageLabels(false)}
           />
-          <div className="relative w-full max-w-md bg-[#16171a] border border-neutral-700/80 rounded-2xl shadow-2xl p-6 z-10 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-800 mb-5">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus size={16} className="text-blue-500" />
-                <span>Create New Task</span>
-              </h3>
+          <div className="relative w-full max-w-md bg-[#16171b] border border-neutral-700/80 rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-base font-bold text-white">Manage Status Labels</h2>
+                <p className="text-[11px] text-neutral-400 mt-0.5">Create and customize your status labels</p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowNewItemModal(false)}
-                className="text-neutral-400 hover:text-white transition p-1"
+                onClick={() => setShowManageLabels(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateNewTask} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                  Task Title *
-                </label>
+            {/* Existing Labels */}
+            <div className="space-y-2 mb-5 max-h-60 overflow-y-auto pr-1">
+              {statusList.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-3 p-2.5 rounded-xl bg-[#1e2025] border border-neutral-800 group"
+                >
+                  {/* Color Swatch (click to expand palette) */}
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingLabelId(editingLabelId === s.id ? null : s.id)
+                      }
+                      className="w-7 h-7 rounded-lg border-2 border-neutral-700 hover:border-white transition cursor-pointer shadow-sm"
+                      style={{ backgroundColor: s.colorCode }}
+                      title="Change color"
+                    />
+                    {editingLabelId === s.id && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setEditingLabelId(null)}
+                        />
+                        <div className="absolute top-full left-0 mt-1.5 z-20 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100">
+                          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-2">Pick a Color</p>
+                          <div className="grid grid-cols-5 gap-1.5">
+                            {COLOR_PALETTE.map((c) => (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => {
+                                  handleUpdateLabelColor(s.id, c)
+                                  setEditingLabelId(null)
+                                }}
+                                className="w-8 h-8 rounded-lg border-2 transition cursor-pointer hover:scale-110 hover:border-white"
+                                style={{
+                                  backgroundColor: c,
+                                  borderColor: s.colorCode === c ? 'white' : 'transparent',
+                                }}
+                                title={c}
+                              />
+                            ))}
+                          </div>
+                          {/* Custom hex input */}
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <div
+                              className="w-6 h-6 rounded shrink-0 border border-neutral-600"
+                              style={{ backgroundColor: s.colorCode }}
+                            />
+                            <input
+                              type="text"
+                              defaultValue={s.colorCode}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value.trim()
+                                  if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+                                    handleUpdateLabelColor(s.id, val)
+                                    setEditingLabelId(null)
+                                  }
+                                }
+                              }}
+                              placeholder="#hex"
+                              className="flex-1 h-7 px-2 bg-[#111214] border border-neutral-700 rounded text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Label name */}
+                  <span className="flex-1 text-xs font-medium text-neutral-200 truncate">{s.label}</span>
+
+                  {/* Badge preview */}
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold shrink-0"
+                    style={{
+                      backgroundColor: s.colorCode,
+                      color: getContrastText(s.colorCode),
+                    }}
+                  >
+                    {s.label}
+                  </span>
+
+                  {/* Delete button (only for custom labels) */}
+                  {!['working', 'done', 'queue', 'stuck'].includes(s.id) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLabel(s.id)}
+                      className="p-1 rounded text-neutral-600 hover:text-rose-400 hover:bg-rose-900/20 transition cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+                      title="Delete label"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add New Label Form */}
+            <div className="border-t border-neutral-800 pt-4">
+              <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-3">Add New Label</p>
+              <div className="flex items-center gap-2">
+                {/* Color picker trigger */}
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setEditingLabelId(editingLabelId === 'new' ? null : 'new')}
+                    className="w-9 h-9 rounded-xl border-2 border-neutral-600 hover:border-white transition cursor-pointer shadow-sm flex items-center justify-center"
+                    style={{ backgroundColor: newLabelColor }}
+                    title="Pick color"
+                  />
+                  {editingLabelId === 'new' && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setEditingLabelId(null)}
+                      />
+                      <div className="absolute bottom-full left-0 mb-1.5 z-20 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100">
+                        <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-2">Pick a Color</p>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {COLOR_PALETTE.map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => {
+                                setNewLabelColor(c)
+                                setEditingLabelId(null)
+                              }}
+                              className="w-8 h-8 rounded-lg border-2 transition cursor-pointer hover:scale-110 hover:border-white"
+                              style={{
+                                backgroundColor: c,
+                                borderColor: newLabelColor === c ? 'white' : 'transparent',
+                              }}
+                              title={c}
+                            />
+                          ))}
+                        </div>
+                        {/* Custom hex input */}
+                        <div className="mt-2 flex items-center gap-1.5">
+                          <div
+                            className="w-6 h-6 rounded shrink-0 border border-neutral-600"
+                            style={{ backgroundColor: newLabelColor }}
+                          />
+                          <input
+                            type="text"
+                            defaultValue={newLabelColor}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const val = (e.target as HTMLInputElement).value.trim()
+                                if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+                                  setNewLabelColor(val)
+                                  setEditingLabelId(null)
+                                }
+                              }
+                            }}
+                            placeholder="#hex"
+                            className="flex-1 h-7 px-2 bg-[#111214] border border-neutral-700 rounded text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <input
                   type="text"
-                  required
-                  placeholder="e.g. Buat wireframe landing page"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  autoFocus
-                  className="w-full h-9 px-3 bg-[#1e2025] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
+                  value={newLabelName}
+                  onChange={(e) => setNewLabelName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddLabel() }}
+                  placeholder="Label name..."
+                  className="flex-1 h-9 px-3 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Target Group
-                  </label>
-                  <select
-                    value={newTaskGroup}
-                    onChange={(e) => setNewTaskGroup(e.target.value)}
-                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
-                  >
-                    {groups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Assignee
-                  </label>
-                  <select
-                    value={newTaskAssignee}
-                    onChange={(e) => setNewTaskAssignee(e.target.value)}
-                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
-                  >
-                    {teamMembers.map((m) => (
-                      <option key={m.id} value={m.name}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Status
-                  </label>
-                  <select
-                    value={newTaskStatus}
-                    onChange={(e) => setNewTaskStatus(e.target.value as TaskStatus)}
-                    className="w-full h-9 px-2.5 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
-                  >
-                    {orderedStatusList.map((s) => (
-                      <option key={s.status} value={s.status}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Date
-                  </label>
-                  <input
-                    type="text"
-                    value={newTaskDate}
-                    onChange={(e) => setNewTaskDate(e.target.value)}
-                    className="w-full h-9 px-3 bg-[#1e2025] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-800">
                 <button
                   type="button"
-                  onClick={() => setShowNewItemModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition"
+                  onClick={handleAddLabel}
+                  disabled={!newLabelName.trim()}
+                  className="h-9 px-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition cursor-pointer shrink-0"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-                >
-                  Create Task
+                  Add
                 </button>
               </div>
-            </form>
+
+              {/* Live preview */}
+              {newLabelName.trim() && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <span className="text-[10px] text-neutral-400">Preview:</span>
+                  <span
+                    className="px-2.5 py-1 rounded text-[11px] font-semibold"
+                    style={{
+                      backgroundColor: newLabelColor,
+                      color: getContrastText(newLabelColor),
+                    }}
+                  >
+                    {newLabelName}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end mt-5 pt-4 border-t border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setShowManageLabels(false)}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
