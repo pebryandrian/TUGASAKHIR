@@ -15,6 +15,7 @@ import {
   Plus,
   X,
   Star,
+  LogOut,
 } from 'lucide-react'
 
 interface ScopeItem {
@@ -75,6 +76,7 @@ export default function DashboardPage() {
   const [searchMember, setSearchMember] = useState('')
   const [activeNav, setActiveNav] = useState('Home')
   const [selectedWorkspace] = useState('2026 INVISUAL')
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
 
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
@@ -143,8 +145,57 @@ export default function DashboardPage() {
           <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Search">
             <Search size={18} strokeWidth={1.8} />
           </button>
-          <div className="w-8 h-8 rounded-full border border-neutral-600 bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-300 ml-1 cursor-pointer hover:border-neutral-400 transition">
-            G
+          {/* User Profile Avatar & Dropdown Menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="w-8 h-8 rounded-full border border-neutral-600 hover:border-blue-400 overflow-hidden bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-200 transition cursor-pointer ml-1"
+              aria-label="User menu"
+            >
+              G
+            </button>
+
+            {isUserMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsUserMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-11 w-52 bg-[#1b1c20] border border-neutral-800/90 rounded-2xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex flex-col items-center text-center p-2 pb-3 border-b border-neutral-800/80">
+                    <div className="w-12 h-12 rounded-full border border-neutral-600 overflow-hidden bg-neutral-800 flex items-center justify-center mb-2">
+                      <span className="text-base font-bold text-neutral-300">G</span>
+                    </div>
+                    <p className="text-sm font-semibold text-white tracking-tight">
+                      George Frederic
+                    </p>
+                  </div>
+
+                  <div className="pt-2 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false)
+                        router.push('/profile')
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-neutral-300 hover:text-white hover:bg-neutral-800/60 transition cursor-pointer text-left"
+                    >
+                      <Settings size={15} />
+                      <span>Profile Settings</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/signin')}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
+                    >
+                      <LogOut size={15} />
+                      <span>Log out</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
