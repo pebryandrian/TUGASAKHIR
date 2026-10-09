@@ -38,3 +38,11 @@
   --color-background: #ffffff;
   --color-foreground: #1f2421;
 }
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -17,6 +17,9 @@ import {
   Star,
   LogOut,
 } from 'lucide-react'
+import { WorkspaceSelector } from '@/components/workspace-selector'
+import { signOut } from '@/lib/auth'
+import { createProject, listProjects, type Project } from '@/lib/db'
 
 interface ScopeItem {
   id: string
@@ -41,7 +44,7 @@ interface ProjectCard {
   starred: boolean
 }
 
-const scopeItems: ScopeItem[] = [
+const initialScopes: ScopeItem[] = [
   { id: '1', title: 'Client', image: '/images/scope/scope-client.jpg' },
   { id: '2', title: 'Marketplace', image: '/images/scope/scope-marketplace.jpg' },
   { id: '3', title: 'Mockup', image: '/images/scope/scope-mockup.jpg' },
@@ -75,19 +78,76 @@ export default function DashboardPage() {
   const router = useRouter()
   const [searchMember, setSearchMember] = useState('')
   const [activeNav, setActiveNav] = useState('Home')
-  const [selectedWorkspace] = useState('2026 INVISUAL')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
 
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
   const [modalCards, setModalCards] = useState<ProjectCard[]>([])
   const [modalSearch, setModalSearch] = useState('')
-  const [starredCards, setStarredCards] = useState<Set<string>>(new Set())
+  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string }[]>([])
+  const [showFavorites, setShowFavorites] = useState(true)
+
+  // Scope Of Work — daftar scope diturunkan dari projects di Supabase.
+  const [projects, setProjects] = useState<Project[]>([])
+  const [showNewScopeModal, setShowNewScopeModal] = useState(false)
+  const [newScopeName, setNewScopeName] = useState('')
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      setProjects(await listProjects())
+    } catch {
+      setProjects([])
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshProjects()
+  }, [refreshProjects])
+
+  const scopeImages = initialScopes.map((s) => s.image)
+  const scopes: ScopeItem[] =
+    projects.length > 0
+      ? Array.from(new Set(projects.map((p) => p.scope).filter(Boolean) as string[])).map(
+          (title, i) => ({ id: `scope-${title}`, title, image: scopeImages[i % scopeImages.length] }),
+        )
+      : initialScopes
+
+  const cardsForScope = (title: string): ProjectCard[] => {
+    const rows = projects.filter((p) => p.scope === title)
+    if (rows.length === 0) return generateCards(title)
+    return rows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description ?? '',
+      progress: p.progress,
+      total: 100,
+      starred: false,
+    }))
+  }
 
   const openScopeModal = (item: ScopeItem) => {
     setSelectedScope(item)
-    setModalCards(generateCards(item.title))
+    setModalCards(cardsForScope(item.title))
     setModalSearch('')
+  }
+
+  const handleCreateScope = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const title = newScopeName.trim()
+    if (!title) return
+    await createProject({ name: title, scope: title })
+    await refreshProjects()
+    setNewScopeName('')
+    setShowNewScopeModal(false)
+  }
+
+  const handleNewCard = async () => {
+    if (!selectedScope) return
+    const name = prompt('Card name:', 'New Project')
+    if (!name?.trim()) return
+    await createProject({ name: name.trim(), scope: selectedScope.title })
+    await refreshProjects()
+    setModalCards(cardsForScope(selectedScope.title))
   }
 
   const closeScopeModal = () => {
@@ -95,13 +155,12 @@ export default function DashboardPage() {
     setModalCards([])
   }
 
-  const toggleStar = (cardId: string) => {
-    setStarredCards(prev => {
-      const next = new Set(prev)
-      if (next.has(cardId)) next.delete(cardId)
-      else next.add(cardId)
-      return next
-    })
+  const toggleStar = (card: ProjectCard, scopeTitle: string) => {
+    setFavorites((prev) =>
+      prev.some((f) => f.id === card.id)
+        ? prev.filter((f) => f.id !== card.id)
+        : [...prev, { id: card.id, name: card.name, scope: scopeTitle }]
+    )
   }
 
   const filteredModalCards = modalCards.filter(c =>
@@ -186,7 +245,11 @@ export default function DashboardPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => router.push('/signin')}
+                      onClick={async () => {
+                        await signOut()
+                        router.push('/signin')
+                        router.refresh()
+                      }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
                     >
                       <LogOut size={15} />
@@ -219,25 +282,42 @@ export default function DashboardPage() {
 
               <button
                 type="button"
-                onClick={() => setActiveNav('Favorites')}
-                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
-                  activeNav === 'Favorites' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
-                }`}
+                onClick={() => setShowFavorites((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer text-neutral-400 hover:text-white hover:bg-neutral-800/40"
               >
                 <span>Favorites</span>
-                <ChevronDown size={15} strokeWidth={1.8} />
+                <ChevronDown
+                  size={15}
+                  strokeWidth={1.8}
+                  className={`transition-transform ${showFavorites ? '' : '-rotate-90'}`}
+                />
               </button>
 
-              <button
-                type="button"
-                onClick={() => setActiveNav('Settings')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
-                  activeNav === 'Settings' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
-                }`}
-              >
-                <Settings size={18} strokeWidth={1.8} />
-                <span>Settings</span>
-              </button>
+              {showFavorites && (
+                <div className="pl-3 space-y-0.5">
+                  {favorites.length === 0 ? (
+                    <p className="px-4 py-1.5 text-xs text-neutral-600">
+                      Belum ada favorit. Klik bintang pada proyek.
+                    </p>
+                  ) : (
+                    favorites.map((f) => (
+                      <Link
+                        key={f.id}
+                        href={`/project/${f.scope.toLowerCase().replace(/\s+/g, '-')}/${f.name
+                          .toLowerCase()
+                          .replace(/\s+/g, '-')}`}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
+                      >
+                        <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
+                          {f.scope}
+                        </span>
+                      </Link>
+                    ))
+                  )}
+                </div>
+              )}
             </nav>
 
             <div className="pt-2">
@@ -253,23 +333,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition">
-                  <div className="flex items-center gap-2.5 overflow-hidden">
-                    <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">I</span>
-                    <span className="text-xs font-semibold text-white truncate">{selectedWorkspace}</span>
-                  </div>
-                  <ChevronDown size={15} className="text-neutral-400 shrink-0" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => alert('Add workspace')}
-                  className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
-                  aria-label="Add workspace"
-                >
-                  <Plus size={18} strokeWidth={2.5} />
-                </button>
-              </div>
+              <WorkspaceSelector />
             </div>
           </div>
         </aside>
@@ -287,7 +351,10 @@ export default function DashboardPage() {
               <h2 className="text-xl font-bold text-white tracking-tight">Scope Of Work</h2>
               <button
                 type="button"
-                onClick={() => alert('New Scope action')}
+                onClick={() => {
+                  setNewScopeName('')
+                  setShowNewScopeModal(true)
+                }}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
               >
                 <Plus size={16} strokeWidth={2.5} />
@@ -297,7 +364,7 @@ export default function DashboardPage() {
 
             {/* Grid of Scope Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {scopeItems.map((item) => (
+              {scopes.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => openScopeModal(item)}
@@ -381,6 +448,51 @@ export default function DashboardPage() {
         </main>
       </div>
 
+      {/* =================== CREATE NEW SCOPE MODAL =================== */}
+      {showNewScopeModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowNewScopeModal(false)}
+          />
+          <form
+            onSubmit={handleCreateScope}
+            className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-start justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white tracking-tight">Create New Scope</h2>
+              <button
+                type="button"
+                onClick={() => setShowNewScopeModal(false)}
+                className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer -mt-1"
+                aria-label="Close"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              autoFocus
+              value={newScopeName}
+              onChange={(e) => setNewScopeName(e.target.value)}
+              placeholder="scope name"
+              className="w-full h-14 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+            />
+
+            <div className="flex items-center justify-end pt-6">
+              <button
+                type="submit"
+                disabled={!newScopeName.trim()}
+                className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* =================== SCOPE DETAIL MODAL =================== */}
       {selectedScope && (
         <div
@@ -429,7 +541,7 @@ export default function DashboardPage() {
               </div>
               <button
                 type="button"
-                onClick={() => alert('New Card')}
+                onClick={handleNewCard}
                 className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
               >
                 <Plus size={15} strokeWidth={2.5} />
@@ -447,7 +559,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
                   {filteredModalCards.map((card) => {
                     const pct = Math.round((card.progress / card.total) * 100)
-                    const isStarred = starredCards.has(card.id)
+                    const isStarred = favorites.some((f) => f.id === card.id)
                     return (
                       <div
                         key={card.id}
@@ -463,7 +575,7 @@ export default function DashboardPage() {
                           <span className="text-sm font-semibold text-white leading-snug">{card.name}</span>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleStar(card.id) }}
+                            onClick={(e) => { e.stopPropagation(); toggleStar(card, selectedScope?.title || '') }}
                             className={`p-0.5 rounded transition cursor-pointer shrink-0 ${
                               isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
                             }`}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -12,7 +12,6 @@ import {
   ChevronDown,
   Settings,
   MoreHorizontal,
-  Plus,
   ArrowLeft,
   ChevronLeft,
   Camera,
@@ -25,6 +24,9 @@ import {
   Shield,
   LogOut,
 } from 'lucide-react'
+import { WorkspaceSelector } from '@/components/workspace-selector'
+import { getSessionProfile, updateProfile, changePassword } from '@/lib/db'
+import { signOut } from '@/lib/auth'
 
 type Role = 'Team Member' | 'Project Manager' | 'Admin' | 'Owner' | 'None Member'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -58,7 +60,6 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [activeNav, setActiveNav] = useState('Home')
-  const [selectedWorkspace] = useState('2026 INVISUAL')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
 
   const [profile, setProfile] = useState<ProfileData>(initialProfile)
@@ -80,6 +81,28 @@ export default function ProfilePage() {
   const isDirty =
     JSON.stringify(form) !== JSON.stringify(profile) ||
     avatarPreview !== savedAvatar
+
+  // Load the signed-in user's profile from Supabase.
+  useEffect(() => {
+    getSessionProfile().then((p) => {
+      if (!p) return
+      const [firstName, ...rest] = p.name.split(' ')
+      const loaded: ProfileData = {
+        firstName,
+        lastName: rest.join(' '),
+        jobTitle: '',
+        email: p.email,
+        password: '',
+        role: p.role === 'project_manager' ? 'Project Manager' : 'Team Member',
+        bio: '',
+        avatarUrl: p.avatar_url,
+      }
+      setProfile(loaded)
+      setForm(loaded)
+      setSavedAvatar(p.avatar_url)
+      setAvatarPreview(p.avatar_url)
+    })
+  }, [])
 
   const handleFieldChange = (field: keyof ProfileData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -118,7 +141,7 @@ export default function ProfilePage() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const handlePasswordChange = () => {
+  const handlePasswordChange = async () => {
     setPasswordError('')
     if (newPassword.length < 8) {
       setPasswordError('Password must be at least 8 characters.')
@@ -126,6 +149,12 @@ export default function ProfilePage() {
     }
     if (newPassword !== confirmPassword) {
       setPasswordError('Passwords do not match.')
+      return
+    }
+    try {
+      await changePassword(newPassword)
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : 'Failed to update password.')
       return
     }
     setForm(prev => ({ ...prev, password: newPassword }))
@@ -137,11 +166,18 @@ export default function ProfilePage() {
   const handleSave = async () => {
     if (!isDirty) return
     setSaveStatus('saving')
-    await new Promise(r => setTimeout(r, 1200))
-    setProfile({ ...form })
-    setSavedAvatar(avatarPreview)
-    setSaveStatus('saved')
-    setTimeout(() => setSaveStatus('idle'), 3000)
+    try {
+      await updateProfile({
+        name: `${form.firstName} ${form.lastName}`.trim(),
+        avatar_url: avatarPreview,
+      })
+      setProfile({ ...form })
+      setSavedAvatar(avatarPreview)
+      setSaveStatus('saved')
+      setTimeout(() => setSaveStatus('idle'), 3000)
+    } catch {
+      setSaveStatus('error')
+    }
   }
 
   const handleCancel = () => {
@@ -153,9 +189,11 @@ export default function ProfilePage() {
     setPasswordError('')
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setShowLogoutConfirm(false)
+    await signOut()
     router.push('/signin')
+    router.refresh()
   }
 
   const displayInitials = `${profile.firstName?.[0] ?? ''}${profile.lastName?.[0] ?? ''}`.toUpperCase()
@@ -245,7 +283,7 @@ export default function ProfilePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => router.push('/signin')}
+                      onClick={handleLogout}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
                     >
                       <LogOut size={15} />
@@ -287,17 +325,6 @@ export default function ProfilePage() {
                 <span>Favorites</span>
                 <ChevronDown size={15} strokeWidth={1.8} />
               </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveNav('Settings')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
-                  activeNav === 'Settings' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
-                }`}
-              >
-                <Settings size={18} strokeWidth={1.8} />
-                <span>Settings</span>
-              </button>
             </nav>
 
             <div className="pt-2">
@@ -312,23 +339,7 @@ export default function ProfilePage() {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition">
-                  <div className="flex items-center gap-2.5 overflow-hidden">
-                    <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">I</span>
-                    <span className="text-xs font-semibold text-white truncate">{selectedWorkspace}</span>
-                  </div>
-                  <ChevronDown size={15} className="text-neutral-400 shrink-0" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => alert('Add workspace')}
-                  className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
-                  aria-label="Add workspace"
-                >
-                  <Plus size={18} strokeWidth={2.5} />
-                </button>
-              </div>
+              <WorkspaceSelector />
             </div>
           </div>
 

@@ -1,11 +1,34 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
+  findProject,
+  loadBoard,
+  listWorkspaces,
+  createWorkspace,
+  createTask,
+  updateTask as updateTaskRow,
+  deleteTasks,
+  createGroup,
+  createStatus,
+  deleteStatus,
+  updateStatusColor,
+  addSubtask as addSubtaskRow,
+  setSubtaskDone,
+  deleteSubtask as deleteSubtaskRow,
+  addComment as addCommentRow,
+  likeComment,
+  saveDoc,
+  addMemberByEmail,
+  getSessionProfile,
+  type Workspace,
+} from '@/lib/db'
+import {
   Bell,
+  ThumbsUp,
   Users,
   Search,
   Home,
@@ -55,6 +78,12 @@ import {
   Mail,
   Folder,
   Tag,
+  Circle,
+  Paperclip,
+  Smile,
+  Send,
+  ChevronsRight,
+  LayoutGrid,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -66,11 +95,13 @@ export interface StatusDef {
   colorCode: string
 }
 
+// Kolom Kanban baku sesuai skripsi: To Do -> In Progress -> Review -> Done.
+// Daftar ini dipakai bersama oleh Main Table, dropdown status, dan papan Kanban.
 export const initialStatusList: StatusDef[] = [
-  { id: 'working', label: 'Working on it', colorCode: '#ea384c' },
-  { id: 'done',    label: 'Done',          colorCode: '#22c55e' },
-  { id: 'queue',   label: 'In Queue',      colorCode: '#ffa114' },
-  { id: 'stuck',   label: 'Stuck',         colorCode: '#b91c1c' },
+  { id: 'todo',        label: 'To Do',       colorCode: '#64748b' },
+  { id: 'in-progress', label: 'In Progress', colorCode: '#3b82f6' },
+  { id: 'review',      label: 'Review',      colorCode: '#ffa114' },
+  { id: 'done',        label: 'Done',        colorCode: '#22c55e' },
 ]
 
 // Colour palette for the add-label modal
@@ -99,6 +130,13 @@ export const MONTH_NAMES = [
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ]
 
+// Pengguna yang sedang login — dipakai untuk komentar & uploader lampiran.
+export const CURRENT_USER = {
+  name: 'George Frederik',
+  avatar:
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+}
+
 // ======================== TASK & GROUP INTERFACES ========================
 // Helper: get a light text colour for very dark/light bg
 export function getContrastText(hex: string): string {
@@ -107,6 +145,18 @@ export function getContrastText(hex: string): string {
   const b = parseInt(hex.slice(5, 7), 16)
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   return luminance > 0.55 ? '#0a0a0a' : '#ffffff'
+}
+
+// Konversi tanggal UI ("Mar 28, 2025") <-> ISO (kolom `date` di Postgres).
+function toISODate(value: string): string | null {
+  const d = new Date(value)
+  return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10)
+}
+
+function fromISODate(value: string | null): string {
+  if (!value) return ''
+  const d = new Date(value)
+  return Number.isNaN(+d) ? value : `${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 }
 
 export interface TaskItem {
@@ -120,6 +170,18 @@ export interface TaskItem {
   date: string
   checked: boolean
   expanded?: boolean
+  subtasks?: { id: string; text: string; done: boolean }[]
+  attachments?: { id: string; name: string; owner?: string; avatar?: string }[]
+  comments?: {
+    id: string
+    author: string
+    text: string
+    time: string
+    avatar?: string
+    likes?: number
+    reactions?: number
+    replies?: { id: string; author: string; text: string; time: string; avatar?: string }[]
+  }[]
 }
 
 export interface TaskGroup {
@@ -146,10 +208,28 @@ const initialGroups: TaskGroup[] = [
         description: 'Desain ulang logo Aqua dalam resolusi tinggi dengan variasi warna.',
         personAvatars: ['/images/clients/SUNDDAE.jpg'],
         personNames: ['George'],
-        status: 'In Queue',
+        status: 'To Do',
         date: 'Mar 28, 2025',
         checked: false,
         expanded: false,
+        subtasks: [
+          { id: 'sub-1', text: 'Kumpulkan referensi logo', done: true },
+          { id: 'sub-2', text: 'Sketsa 3 alternatif', done: false },
+        ],
+        attachments: [
+          { id: 'att-1', name: 'Revisi dari client.pdf', owner: 'George', avatar: '/images/clients/SUNDDAE.jpg' },
+          { id: 'att-2', name: 'Revisi dari client.pdf', owner: 'Puput', avatar: '/images/clients/ASIAN-MOOD.webp' },
+        ],
+        comments: [
+          {
+            id: 'cm-1',
+            author: 'George Frederik',
+            text: 'Perbaiki ini',
+            time: 'Yesterday at 4:10 AM',
+            avatar: CURRENT_USER.avatar,
+            likes: 0,
+          },
+        ],
       },
       {
         id: 't-1-2',
@@ -158,7 +238,7 @@ const initialGroups: TaskGroup[] = [
         description: 'Eksplorasi konsep dan moodboard visual untuk media sosial.',
         personAvatars: ['/images/clients/CONTROVERSIAL.webp', '/images/clients/KONA.webp'],
         personNames: ['Jordan Fufu', 'Puput Atira'],
-        status: 'Working on it',
+        status: 'In Progress',
         date: 'Mar 28, 2025',
         checked: false,
         expanded: false,
@@ -179,7 +259,7 @@ const initialGroups: TaskGroup[] = [
         description: 'Persiapan materi publikasi dan aset packaging.',
         personAvatars: ['/images/clients/ASIAN-MOOD.webp'],
         personNames: ['Puput Atira'],
-        status: 'In Queue',
+        status: 'To Do',
         date: 'Mar 28, 2025',
         checked: false,
         expanded: false,
@@ -191,7 +271,7 @@ const initialGroups: TaskGroup[] = [
         description: 'Finishing logo vector SVG dan guideline brand.',
         personAvatars: ['/images/clients/SOAR.webp'],
         personNames: ['Rahmat Sudianto'],
-        status: 'Working on it',
+        status: 'In Progress',
         date: 'Mar 28, 2025',
         checked: false,
         expanded: false,
@@ -212,7 +292,7 @@ const initialGroups: TaskGroup[] = [
         description: 'Meeting review akhir bersama tim lead.',
         personAvatars: ['/images/clients/GRIZZLE.webp'],
         personNames: ['George'],
-        status: 'In Queue',
+        status: 'Review',
         date: 'Mar 29, 2025',
         checked: false,
         expanded: false,
@@ -292,7 +372,14 @@ const initialDocBlocks: DocBlock[] = [
   },
 ]
 
-const teamMembers = [
+export interface Member {
+  id: string
+  name: string
+  role: string
+  avatar: string
+}
+
+const initialMembers: Member[] = [
   { id: 'm-0', name: 'Balok Farmer', role: 'Product Manager', avatar: '/images/clients/SUNDDAE.jpg' },
   { id: 'm-01', name: 'Afira cendera', role: 'Design Lead', avatar: '/images/clients/ASIAN-MOOD.webp' },
   { id: 'm-1', name: 'George', role: 'Product Lead', avatar: '/images/clients/SUNDDAE.jpg' },
@@ -301,19 +388,108 @@ const teamMembers = [
   { id: 'm-4', name: 'Rahmat Sudianto', role: 'Illustrator', avatar: '/images/clients/SOAR.webp' },
 ]
 
+// ======================== CUSTOM VIEWS (Gantt / Chart) ========================
+interface CustomView {
+  id: string
+  name: string
+  type: 'gantt' | 'chart'
+}
+
+function GanttView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
+  const tasks = groups.flatMap((g) => g.items.map((t) => ({ task: t, group: g })))
+  const dates = tasks
+    .map((t) => new Date(t.task.date).getTime())
+    .filter((n) => !Number.isNaN(n))
+  if (tasks.length === 0) {
+    return <p className="text-sm text-neutral-500 py-10 text-center">Belum ada tugas untuk ditampilkan.</p>
+  }
+  const min = Math.min(...dates)
+  const max = Math.max(...dates)
+  const span = Math.max(max - min, 86400000) // minimal 1 hari
+  return (
+    <div className="space-y-2">
+      {tasks.map(({ task, group }) => {
+        const d = new Date(task.date).getTime()
+        const left = Number.isNaN(d) ? 0 : ((d - min) / span) * 100
+        const sd = statusList.find((s) => s.label === task.status)
+        return (
+          <div key={task.id} className="flex items-center gap-3">
+            <div className="w-52 shrink-0 min-w-0">
+              <p className="text-xs font-medium text-white truncate">{task.title}</p>
+              <p className="text-[10px] text-neutral-500 truncate">{group.title}</p>
+            </div>
+            <div className="relative flex-1 h-7 bg-[#191a1e] rounded-md border border-neutral-800/70">
+              <div
+                className="absolute top-1/2 -translate-y-1/2 h-4 rounded-full min-w-[42px] flex items-center px-2 text-[10px] font-semibold text-white truncate"
+                style={{ left: `calc(${left}% - 0px)`, backgroundColor: sd?.colorCode || '#3b82f6' }}
+                title={task.date}
+              >
+                {task.date}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChartView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
+  const allTasks = groups.flatMap((g) => g.items)
+  const total = allTasks.length || 1
+  return (
+    <div className="space-y-4 max-w-xl">
+      <p className="text-xs text-neutral-400">Distribusi status ({allTasks.length} tugas)</p>
+      {statusList.map((s) => {
+        const count = allTasks.filter((t) => t.status === s.label).length
+        const pct = (count / total) * 100
+        return (
+          <div key={s.id} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-neutral-300">{s.label}</span>
+              <span className="text-neutral-500">
+                {count} ({Math.round(pct)}%)
+              </span>
+            </div>
+            <div className="h-6 bg-[#191a1e] rounded-md overflow-hidden border border-neutral-800/70">
+              <div
+                className="h-full transition-all duration-300"
+                style={{ width: `${pct}%`, backgroundColor: s.colorCode }}
+              />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ======================== CALENDAR VIEW COMPONENT ========================
 interface CalendarViewProps {
   groups: TaskGroup[]
   statusList: StatusDef[]
+  members: Member[]
   getContrastTextFn: (hex: string) => string
   onAddTask: (date: string) => void
 }
 
-function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: CalendarViewProps) {
+function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTask }: CalendarViewProps) {
   const today = new Date()
   const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1)) // March 2026
   const [hoveredEvent, setHoveredEvent] = useState<{ task: TaskItem; groupTitle: string; rect?: DOMRect } | null>(null)
   const [clickedDay, setClickedDay] = useState<number | null>(null)
+
+  // Toolbar filter/sort state
+  const [query, setQuery] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+  const [personFilter, setPersonFilter] = useState('all')
+  const [showPersonMenu, setShowPersonMenu] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [sortOption, setSortOption] = useState<'none' | 'name-asc' | 'date-asc'>('none')
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const [mode, setMode] = useState<'month' | 'agenda'>('month')
+  const [showModeMenu, setShowModeMenu] = useState(false)
 
   const year = currentMonth.getFullYear()
   const month = currentMonth.getMonth()
@@ -327,10 +503,21 @@ function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: Cale
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const daysInPrevMonth = new Date(year, month, 0).getDate()
 
-  // All tasks flattened with group info
-  const allTasks = groups.flatMap((g) =>
-    g.items.map((item) => ({ task: item, groupTitle: g.title, groupColor: g.color }))
-  )
+  // All tasks flattened with group info, then filtered + sorted per toolbar
+  const allTasks = groups
+    .flatMap((g) => g.items.map((item) => ({ task: item, groupTitle: g.title, groupColor: g.color })))
+    .filter(({ task }) => {
+      if (query && !task.title.toLowerCase().includes(query.toLowerCase())) return false
+      if (personFilter !== 'all' && !(task.personNames || []).includes(personFilter)) return false
+      if (statusFilter !== 'all' && task.status !== statusFilter) return false
+      return true
+    })
+    .sort((a, b) => {
+      if (sortOption === 'name-asc') return a.task.title.localeCompare(b.task.title)
+      if (sortOption === 'date-asc')
+        return new Date(a.task.date).getTime() - new Date(b.task.date).getTime()
+      return 0
+    })
 
   // Parse task date → match to calendar cell
   const getTasksForDay = (day: number): typeof allTasks => {
@@ -393,33 +580,165 @@ function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: Cale
           </button>
           <button
             type="button"
-            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+            onClick={() => setShowSearch((v) => !v)}
+            className={`h-8 px-2.5 text-xs rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+              showSearch || query
+                ? 'text-white bg-neutral-800'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60'
+            }`}
           >
             <Search size={14} />
             <span>Search</span>
           </button>
-          <button
-            type="button"
-            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <UserIcon size={14} />
-            <span>Person</span>
-          </button>
-          <button
-            type="button"
-            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Filter size={14} />
-            <span>Filter</span>
-            <ChevronDown size={12} />
-          </button>
-          <button
-            type="button"
-            className="h-8 px-2.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60 rounded-md transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <ArrowUpDown size={14} />
-            <span>Sort</span>
-          </button>
+          {showSearch && (
+            <input
+              type="text"
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Cari tugas..."
+              className="h-8 px-2.5 w-40 bg-[#191a1e] border border-neutral-700 rounded-md text-xs text-white placeholder:text-neutral-500 outline-none focus:border-blue-500"
+            />
+          )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowPersonMenu((v) => !v)
+                setShowStatusMenu(false)
+                setShowSortMenu(false)
+                setShowModeMenu(false)
+              }}
+              className={`h-8 px-2.5 text-xs rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+                personFilter !== 'all'
+                  ? 'text-white bg-neutral-800'
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60'
+              }`}
+            >
+              <UserIcon size={14} />
+              <span>{personFilter === 'all' ? 'Person' : personFilter}</span>
+            </button>
+            {showPersonMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowPersonMenu(false)} />
+                <div className="absolute left-0 top-full mt-1 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30 max-h-60 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => { setPersonFilter('all'); setShowPersonMenu(false) }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                  >
+                    Semua orang
+                  </button>
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => { setPersonFilter(m.name); setShowPersonMenu(false) }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                        personFilter === m.name
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-200 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowStatusMenu((v) => !v)
+                setShowPersonMenu(false)
+                setShowSortMenu(false)
+                setShowModeMenu(false)
+              }}
+              className={`h-8 px-2.5 text-xs rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+                statusFilter !== 'all'
+                  ? 'text-white bg-neutral-800'
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60'
+              }`}
+            >
+              <Filter size={14} />
+              <span>{statusFilter === 'all' ? 'Filter' : statusFilter}</span>
+              <ChevronDown size={12} />
+            </button>
+            {showStatusMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowStatusMenu(false)} />
+                <div className="absolute left-0 top-full mt-1 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                  <button
+                    type="button"
+                    onClick={() => { setStatusFilter('all'); setShowStatusMenu(false) }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                  >
+                    Semua status
+                  </button>
+                  {statusList.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => { setStatusFilter(s.label); setShowStatusMenu(false) }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                        statusFilter === s.label
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-200 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowSortMenu((v) => !v)
+                setShowPersonMenu(false)
+                setShowStatusMenu(false)
+                setShowModeMenu(false)
+              }}
+              className={`h-8 px-2.5 text-xs rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+                sortOption !== 'none'
+                  ? 'text-white bg-neutral-800'
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60'
+              }`}
+            >
+              <ArrowUpDown size={14} />
+              <span>Sort</span>
+            </button>
+            {showSortMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowSortMenu(false)} />
+                <div className="absolute left-0 top-full mt-1 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                  {([
+                    { v: 'none', label: 'Default' },
+                    { v: 'name-asc', label: 'Nama (A-Z)' },
+                    { v: 'date-asc', label: 'Tanggal (terdekat)' },
+                  ] as const).map((o) => (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => { setSortOption(o.v); setShowSortMenu(false) }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                        sortOption === o.v
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-200 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Right Navigation */}
@@ -452,17 +771,48 @@ function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: Cale
           <span className="text-xs font-semibold text-neutral-200 min-w-[70px] text-center">
             {monthName}
           </span>
-          <button
-            type="button"
-            className="h-8 px-2.5 text-xs font-medium text-neutral-300 border border-neutral-700/80 bg-neutral-800/20 hover:bg-neutral-800 rounded-md transition flex items-center gap-1 cursor-pointer"
-          >
-            <span>Month</span>
-            <ChevronDown size={12} />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowModeMenu((v) => !v)
+                setShowPersonMenu(false)
+                setShowStatusMenu(false)
+                setShowSortMenu(false)
+              }}
+              className="h-8 px-2.5 text-xs font-medium text-neutral-300 border border-neutral-700/80 bg-neutral-800/20 hover:bg-neutral-800 rounded-md transition flex items-center gap-1 cursor-pointer"
+            >
+              <span>{mode === 'month' ? 'Month' : 'Agenda'}</span>
+              <ChevronDown size={12} />
+            </button>
+            {showModeMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowModeMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 w-32 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                  {(['month', 'agenda'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => { setMode(m); setShowModeMenu(false) }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs capitalize transition cursor-pointer ${
+                        mode === m
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-200 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Day Headers (Mon - Sun) */}
+      {mode === 'month' && (
+      <>
       <div className="grid grid-cols-7 border-t border-l border-r border-neutral-800/80">
         {DAYS.map((d) => (
           <div
@@ -554,8 +904,40 @@ function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: Cale
           )
         })}
       </div>
+      </>
+      )}
 
-      {/* Day Detail Panel (shown when day task pill is clicked) */}
+      {/* Agenda mode */}
+      {mode === 'agenda' && (
+        <div className="border border-neutral-800/80 rounded-lg overflow-hidden">
+          {allTasks.length === 0 ? (
+            <p className="text-sm text-neutral-500 py-10 text-center">Tidak ada tugas.</p>
+          ) : (
+            allTasks.map(({ task, groupTitle }) => {
+              const sd = statusDef(task.status)
+              return (
+                <div
+                  key={task.id}
+                  className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800/60 hover:bg-white/[0.02] transition"
+                >
+                  <span className="w-1 h-8 rounded-full shrink-0" style={{ backgroundColor: sd.colorCode }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{task.title}</p>
+                    <p className="text-[11px] text-neutral-500">{groupTitle}</p>
+                  </div>
+                  <span className="text-xs text-neutral-400 whitespace-nowrap">{task.date}</span>
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold shrink-0"
+                    style={{ backgroundColor: sd.colorCode, color: getContrastTextFn(sd.colorCode) }}
+                  >
+                    {task.status}
+                  </span>
+                </div>
+              )
+            })
+          )}
+        </div>
+      )}
       {clickedDay !== null && (() => {
         const dayTasks = getTasksForDay(clickedDay)
         return (
@@ -625,21 +1007,125 @@ function CalendarView({ groups, statusList, getContrastTextFn, onAddTask }: Cale
         )
       })()}
 
-      {/* Status Legend matching screenshot */}
-      <div className="mt-8 flex items-center justify-center gap-6 py-2">
-        <div className="flex items-center gap-2">
-          <span className="w-3.5 h-3.5 rounded-full bg-[#f59e0b]" />
-          <span className="text-xs text-neutral-300">In progress</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3.5 h-3.5 rounded-full bg-[#22c55e]" />
-          <span className="text-xs text-neutral-300">Done</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3.5 h-3.5 rounded-full bg-[#ea384c]" />
-          <span className="text-xs text-neutral-300">Working on it</span>
-        </div>
+      {/* Status Legend matching the Kanban columns */}
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-6 py-2">
+        {statusList.map((s) => (
+          <div key={s.id} className="flex items-center gap-2">
+            <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: s.colorCode }} />
+            <span className="text-xs text-neutral-300">{s.label}</span>
+          </div>
+        ))}
       </div>
+    </div>
+  )
+}
+
+// ======================== KANBAN BOARD VIEW COMPONENT ========================
+interface KanbanViewProps {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+  onMoveTask: (taskId: string, groupId: string, newStatus: string) => void
+  onAddTask: (statusLabel: string) => void
+  onOpenTask: (groupId: string, taskId: string) => void
+}
+
+function KanbanView({ groups, statusList, onMoveTask, onAddTask, onOpenTask }: KanbanViewProps) {
+  const [dragged, setDragged] = useState<{ taskId: string; groupId: string } | null>(null)
+  const [overStatus, setOverStatus] = useState<string | null>(null)
+
+  const flat = groups.flatMap((g) => g.items.map((t) => ({ task: t, group: g })))
+
+  return (
+    <div className="flex gap-4 overflow-x-auto pb-6 -mx-1 px-1">
+      {statusList.map((status) => {
+        const column = flat.filter((x) => x.task.status === status.label)
+        const isOver = overStatus === status.id
+        return (
+          <div
+            key={status.id}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setOverStatus(status.id)
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget === e.target) setOverStatus((s) => (s === status.id ? null : s))
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (dragged) onMoveTask(dragged.taskId, dragged.groupId, status.label)
+              setDragged(null)
+              setOverStatus(null)
+            }}
+            className={`w-72 shrink-0 rounded-xl border bg-[#191a1e] flex flex-col transition-colors ${
+              isOver ? 'border-blue-500/80' : 'border-neutral-800/80'
+            }`}
+          >
+            {/* Column header */}
+            <div className="flex items-center justify-between px-3.5 py-3 border-b border-neutral-800/70">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: status.colorCode }} />
+                <span className="text-sm font-semibold text-white truncate">{status.label}</span>
+                <span className="text-xs text-neutral-500">{column.length}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAddTask(status.label)}
+                className="text-neutral-400 hover:text-white hover:bg-neutral-800/60 p-1 rounded-md transition cursor-pointer"
+                aria-label={`Tambah tugas ke ${status.label}`}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+
+            {/* Cards */}
+            <div className="flex-1 space-y-2.5 p-3 min-h-[120px]">
+              {column.length === 0 && (
+                <p className="text-xs text-neutral-600 text-center py-6 select-none">Tidak ada tugas</p>
+              )}
+              {column.map(({ task, group }) => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={() => setDragged({ taskId: task.id, groupId: group.id })}
+                  onDragEnd={() => {
+                    setDragged(null)
+                    setOverStatus(null)
+                  }}
+                  onClick={() => onOpenTask(group.id, task.id)}
+                  className="bg-[#1b1c20] border border-neutral-800/70 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-blue-500/40 transition-colors"
+                >
+                  <p className="text-sm font-medium text-white leading-snug line-clamp-2">{task.title}</p>
+                  {task.description && (
+                    <p className="mt-1 text-xs text-neutral-500 leading-relaxed line-clamp-2">{task.description}</p>
+                  )}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1 text-[10px] text-neutral-400 min-w-0">
+                      <Folder size={11} className="shrink-0" />
+                      <span className="truncate max-w-[110px]">{group.title}</span>
+                    </span>
+                    <span className="text-[10px] text-neutral-400 whitespace-nowrap">{task.date}</span>
+                  </div>
+                  {task.personNames && task.personNames.length > 0 && (
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <div className="flex items-center -space-x-2">
+                        {task.personAvatars.slice(0, 4).map((src, i) => (
+                          <span
+                            key={i}
+                            className="relative w-5 h-5 rounded-full border border-[#1b1c20] overflow-hidden bg-neutral-700"
+                          >
+                            <Image src={src} alt={task.personNames?.[i] || 'Member'} fill sizes="20px" className="object-cover" />
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-neutral-400 truncate">{task.personNames.join(', ')}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -654,13 +1140,146 @@ export default function ProjectDetailPage() {
   const scopeTitle = rawScope.charAt(0).toUpperCase() + rawScope.slice(1).replace(/-/g, ' ')
   const cardTitle = rawCard.charAt(0).toUpperCase() + rawCard.slice(1).replace(/-/g, ' ')
 
-  const [activeTab, setActiveTab] = useState<'Main Table' | 'Calendar' | 'Doc'>('Main Table')
+  const [activeTab, setActiveTab] = useState<string>('Main Table')
   const [groups, setGroups] = useState<TaskGroup[]>(initialGroups)
   const [activeNav, setActiveNav] = useState('Home')
-  const [selectedWorkspace] = useState('2026 INVISUAL')
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([
+    { id: 'seed-1', name: '2026 INVISUAL', owner_id: null },
+    { id: 'seed-2', name: '2025 INVISUAL', owner_id: null },
+    { id: 'seed-3', name: '2024 INVISUAL', owner_id: null },
+  ])
+  const [selectedWorkspace, setSelectedWorkspace] = useState('2026 INVISUAL')
+  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false)
+  const [workspaceSearch, setWorkspaceSearch] = useState('')
+  const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [members, setMembers] = useState<Member[]>(initialMembers)
+  const [customViews, setCustomViews] = useState<CustomView[]>([])
+  const [showAddViewMenu, setShowAddViewMenu] = useState(false)
 
   // ======================== DYNAMIC STATUS LIST ========================
   const [statusList, setStatusList] = useState<StatusDef[]>(initialStatusList)
+
+  // ======================== SUPABASE LOAD ========================
+  const [projectId, setProjectId] = useState<string | null>(null)
+  // Pengguna yang sedang login, dipakai untuk komentar & lampiran.
+  const [me, setMe] = useState(CURRENT_USER)
+
+  // Muat board dari Supabase. Kalau project belum ada di DB, data contoh tetap tampil.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const project = await findProject(rawScope, rawCard)
+      if (!project) return
+      const board = await loadBoard(project.id)
+      if (!alive) return
+
+      listWorkspaces()
+        .then((rows) => {
+          if (alive && rows.length) setWorkspaces(rows)
+        })
+        .catch(() => {})
+
+      getSessionProfile()
+        .then((p) => {
+          if (alive && p) setMe({ name: p.name, avatar: p.avatar_url || CURRENT_USER.avatar })
+        })
+        .catch(() => {})
+
+      setProjectId(project.id)
+      if (board.statuses.length) {
+        setStatusList(
+          board.statuses.map((s) => ({ id: s.id, label: s.label, colorCode: s.color_code })),
+        )
+      }
+      if (board.members.length) {
+        setMembers(
+          board.members.map((m) => ({
+            id: m.id,
+            name: m.name,
+            role: m.role,
+            avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+          })),
+        )
+      }
+      if (board.groups.length) {
+        setGroups(
+          board.groups.map((g) => ({
+            id: g.id,
+            title: g.title,
+            color: g.color || 'text-[#6c7ff5]',
+            collapsed: false,
+            dateRange: '',
+            items: board.tasks
+              .filter((t) => t.group_id === g.id)
+              .map((t) => {
+                const assignee = board.members.find((m) => m.id === t.assignee_id)
+                return {
+                  id: t.id,
+                  title: t.title,
+                  hasChevron: true,
+                  description: t.description ?? undefined,
+                  personAvatars: assignee?.avatar_url ? [assignee.avatar_url] : [],
+                  personNames: assignee ? [assignee.name] : [],
+                  status: board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do',
+                  date: fromISODate(t.due_date),
+                  checked: t.checked,
+                  expanded: false,
+                  subtasks: board.subtasks
+                    .filter((s) => s.task_id === t.id)
+                    .map((s) => ({ id: s.id, text: s.text, done: s.done })),
+                  attachments: board.attachments
+                    .filter((a) => a.task_id === t.id)
+                    .map((a) => ({ id: a.id, name: a.name })),
+                  comments: board.comments
+                    .filter((c) => c.task_id === t.id && !c.parent_id)
+                    .map((c) => ({
+                      id: c.id,
+                      author: c.author_name,
+                      text: c.body,
+                      time: new Date(c.created_at).toLocaleString('en-US'),
+                      avatar: c.author_avatar ?? undefined,
+                      likes: c.likes,
+                      replies: board.comments
+                        .filter((r) => r.parent_id === c.id)
+                        .map((r) => ({
+                          id: r.id,
+                          author: r.author_name,
+                          text: r.body,
+                          time: new Date(r.created_at).toLocaleString('en-US'),
+                          avatar: r.author_avatar ?? undefined,
+                        })),
+                    })),
+                }
+              }),
+          })),
+        )
+      }
+      if (board.docBlocks.length) {
+        setDocBlocks(board.docBlocks as DocBlock[])
+        setHistory([board.docBlocks as DocBlock[]])
+        setHistoryIndex(0)
+      }
+    })().catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [rawScope, rawCard])
+
+  // Terjemahkan label status UI -> id kolom `statuses` di DB.
+  const statusIdByLabel = (label: string) => statusList.find((s) => s.label === label)?.id ?? null
+  const refreshMembers = async () => {
+    if (!projectId) return
+    const board = await loadBoard(projectId)
+    setMembers(
+      board.members.map((m) => ({
+        id: m.id,
+        name: m.name,
+        role: m.role,
+        avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+      })),
+    )
+  }
 
   // Manage Labels Modal
   const [showManageLabels, setShowManageLabels] = useState(false)
@@ -697,9 +1316,6 @@ export default function ProjectDetailPage() {
     taskId: string
   } | null>(null)
 
-  // Inline editing task title
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
-
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
   const [newTaskTitle, setNewTaskTitle] = useState('New Item')
@@ -727,12 +1343,53 @@ export default function ProjectDetailPage() {
   const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
   const [extraColumns, setExtraColumns] = useState<string[]>([])
 
+  // ======================== TASK DETAIL MODAL (klik task) ========================
+  const [detailTask, setDetailTask] = useState<{ groupId: string; taskId: string } | null>(null)
+  const [detailStatusOpen, setDetailStatusOpen] = useState(false)
+  const [detailPersonOpen, setDetailPersonOpen] = useState(false)
+  const [detailDateOpen, setDetailDateOpen] = useState(false)
+  const [detailMaximized, setDetailMaximized] = useState(false)
+  const [detailSubtaskInput, setDetailSubtaskInput] = useState('')
+  const [detailComment, setDetailComment] = useState('')
+  const [detailShowSubtasks, setDetailShowSubtasks] = useState(true)
+  const [detailShowAttach, setDetailShowAttach] = useState(true)
+  const [detailReplyTo, setDetailReplyTo] = useState<string | null>(null)
+  const [detailReplyText, setDetailReplyText] = useState('')
+  const [commentSearch, setCommentSearch] = useState('')
+  const [showCommentSearch, setShowCommentSearch] = useState(false)
+
+  const openTaskDetail = (groupId: string, taskId: string) => {
+    setDetailTask({ groupId, taskId })
+    setDetailStatusOpen(false)
+    setDetailPersonOpen(false)
+    setDetailDateOpen(false)
+    setDetailMaximized(false)
+    setDetailSubtaskInput('')
+    setDetailComment('')
+  }
+
+  const closeTaskDetail = () => {
+    setDetailTask(null)
+    setDetailStatusOpen(false)
+    setDetailPersonOpen(false)
+    setDetailDateOpen(false)
+  }
+
   // ======================== DOC TAB STATE & HISTORY ========================
   const [docBlocks, setDocBlocks] = useState<DocBlock[]>(initialDocBlocks)
   const [history, setHistory] = useState<DocBlock[][]>([initialDocBlocks])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [activeBlockId, setActiveBlockId] = useState<string>('block-1')
   const [lastUpdated, setLastUpdated] = useState('Apr 13, 2026, 22:43')
+
+  // Simpan isi tab Doc ke Supabase (debounce 800ms).
+  useEffect(() => {
+    if (!projectId) return
+    const t = setTimeout(() => {
+      saveDoc(projectId, docBlocks).catch(() => {})
+    }, 800)
+    return () => clearTimeout(t)
+  }, [projectId, docBlocks])
 
   // Doc toolbars dropdown states
   const [showAddMenu, setShowAddMenu] = useState(false)
@@ -743,19 +1400,28 @@ export default function ProjectDetailPage() {
 
   // ======================== STATUS LABEL MANAGEMENT ========================
 
-  const handleAddLabel = () => {
+  const handleAddLabel = async () => {
     if (!newLabelName.trim()) return
-    const id = `custom-${Date.now()}`
-    setStatusList((prev) => [...prev, { id, label: newLabelName.trim(), colorCode: newLabelColor }])
+    const label = newLabelName.trim()
+    let id = `custom-${Date.now()}`
+    if (projectId) {
+      const row = await createStatus(projectId, label, newLabelColor, statusList.length).catch(
+        () => null,
+      )
+      if (row) id = row.id
+    }
+    setStatusList((prev) => [...prev, { id, label, colorCode: newLabelColor }])
     setNewLabelName('')
     setNewLabelColor(COLOR_PALETTE[0])
   }
 
   const handleDeleteLabel = (id: string) => {
+    if (projectId) deleteStatus(id).catch(() => {})
     setStatusList((prev) => prev.filter((s) => s.id !== id))
   }
 
   const handleUpdateLabelColor = (id: string, colorCode: string) => {
+    if (projectId) updateStatusColor(id, colorCode).catch(() => {})
     setStatusList((prev) => prev.map((s) => (s.id === id ? { ...s, colorCode } : s)))
   }
 
@@ -763,6 +1429,9 @@ export default function ProjectDetailPage() {
 
   // Select a status from the ordered dropdown list
   const setTaskStatus = (groupId: string, taskId: string, newStatus: TaskStatus) => {
+    if (projectId) {
+      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(() => {})
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -775,8 +1444,34 @@ export default function ProjectDetailPage() {
     setActiveStatusPicker(null)
   }
 
+  // ======================== KANBAN DRAG & DROP ========================
+  // Pindahkan tugas antar kolom Kanban (native HTML5 drag & drop).
+  const handleMoveTask = (taskId: string, groupId: string, newStatus: string) => {
+    if (projectId) {
+      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(() => {})
+    }
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, items: g.items.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)) }
+          : g
+      )
+    )
+  }
+
+  // Buka modal New Item dengan status kolom yang ditekan.
+  const handleAddTaskInStatus = (statusLabel: string) => {
+    setNewTaskStatus(statusLabel)
+    setShowNewItemModal(true)
+  }
+
   // Toggle assignee membership on a task
-  const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof teamMembers)[0]) => {
+  const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof members)[0]) => {
+    if (projectId) {
+      const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+      const exists = (current?.personNames || []).includes(member.name)
+      updateTaskRow(taskId, { assignee_id: exists ? null : member.id }).catch(() => {})
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -809,6 +1504,9 @@ export default function ProjectDetailPage() {
 
   // Set task date
   const setTaskDate = (groupId: string, taskId: string, newDate: string) => {
+    if (projectId) {
+      updateTaskRow(taskId, { due_date: toISODate(newDate) }).catch(() => {})
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -823,6 +1521,10 @@ export default function ProjectDetailPage() {
 
   // Toggle task checkbox
   const toggleTaskCheck = (groupId: string, taskId: string) => {
+    if (projectId) {
+      const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+      if (current) updateTaskRow(taskId, { checked: !current.checked }).catch(() => {})
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -871,20 +1573,36 @@ export default function ProjectDetailPage() {
   }
 
   // Submit new task from modal
-  const handleCreateNewTask = (e: React.FormEvent) => {
+  const handleCreateNewTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTaskTitle.trim()) return
 
-    const selectedMember = teamMembers.find((m) => m.name === newTaskAssignee)
+    const selectedMember = members.find((m) => m.name === newTaskAssignee)
+    const statusLabel = newTaskStatus || 'To Do'
+    const groupId = groups.some((g) => g.id === newTaskGroup) ? newTaskGroup : groups[0]?.id ?? null
+    let id = `task-${Date.now()}`
+
+    if (projectId) {
+      const row = await createTask({
+        project_id: projectId,
+        group_id: groupId,
+        status_id: statusIdByLabel(statusLabel),
+        title: newTaskTitle.trim(),
+        description: 'Tugas baru dibuat via toolbar New Item.',
+        due_date: toISODate(newTaskDate),
+        assignee_id: selectedMember?.id ?? null,
+      }).catch(() => null)
+      if (row) id = row.id
+    }
 
     const newItem: TaskItem = {
-      id: `task-${Date.now()}`,
+      id,
       title: newTaskTitle.trim(),
       hasChevron: true,
       description: 'Tugas baru dibuat via toolbar New Item.',
       personAvatars: selectedMember ? [selectedMember.avatar] : [],
       personNames: selectedMember ? [selectedMember.name] : [],
-      status: newTaskStatus || 'In progress',
+      status: statusLabel,
       date: newTaskDate,
       checked: false,
       expanded: false,
@@ -892,7 +1610,7 @@ export default function ProjectDetailPage() {
 
     setGroups((prev) =>
       prev.map((g) => {
-        if (g.id !== newTaskGroup) return g
+        if (g.id !== groupId) return g
         return { ...g, items: [...g.items, newItem] }
       })
     )
@@ -907,6 +1625,7 @@ export default function ProjectDetailPage() {
 
   // Inline rename task
   const updateTaskTitle = (groupId: string, taskId: string, newTitle: string) => {
+    if (projectId) updateTaskRow(taskId, { title: newTitle }).catch(() => {})
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -918,6 +1637,31 @@ export default function ProjectDetailPage() {
     )
   }
 
+  // Update task description from the detail modal
+  const updateTaskDescription = (groupId: string, taskId: string, description: string) => {
+    if (projectId) updateTaskRow(taskId, { description }).catch(() => {})
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) => (t.id === taskId ? { ...t, description } : t)),
+        }
+      })
+    )
+  }
+
+  // Generic partial update for a task (subtasks, attachments, comments)
+  const updateTask = (groupId: string, taskId: string, patch: Partial<TaskItem>) => {
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, items: g.items.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) }
+          : g
+      )
+    )
+  }
+
   // Bulk actions count
   const allTasks = groups.flatMap((g) => g.items)
   const selectedTasks = allTasks.filter((t) => t.checked)
@@ -925,6 +1669,7 @@ export default function ProjectDetailPage() {
   // Bulk delete
   const handleBulkDelete = () => {
     if (!confirm(`Delete ${selectedTasks.length} selected tasks?`)) return
+    if (projectId) deleteTasks(selectedTasks.map((t) => t.id)).catch(() => {})
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
@@ -955,16 +1700,22 @@ export default function ProjectDetailPage() {
   }
 
   // Add new group
-  const handleAddNewGroup = () => {
+  const handleAddNewGroup = async () => {
     const groupName = prompt('Enter new group name:', 'Tugas Baru')
     if (!groupName) return
     const colors = ['text-[#6c7ff5]', 'text-[#ea384c]', 'text-[#22c55e]', 'text-[#f59e0b]', 'text-[#ec4899]']
+    const color = colors[groups.length % colors.length]
+    let id = `group-${Date.now()}`
+    if (projectId) {
+      const row = await createGroup(projectId, groupName, color, groups.length).catch(() => null)
+      if (row) id = row.id
+    }
     const newGroup: TaskGroup = {
-      id: `group-${Date.now()}`,
+      id,
       title: groupName,
-      color: colors[groups.length % colors.length],
+      color,
       collapsed: false,
-      dateRange: 'Mar 28 - 29',
+      dateRange: '',
       items: [],
     }
     setGroups([...groups, newGroup])
@@ -1159,7 +1910,7 @@ export default function ProjectDetailPage() {
     commitBlocksChange(updated)
   }
 
-  const insertMention = (member: (typeof teamMembers)[0]) => {
+  const insertMention = (member: (typeof members)[0]) => {
     const updated = docBlocks.map((b) => {
       if (b.id !== activeBlock.id) return b
       return { ...b, content: (b.content || '') + ` @${member.name} ` }
@@ -1461,20 +2212,109 @@ export default function ProjectDetailPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition">
-                  <div className="flex items-center gap-2.5 overflow-hidden">
-                    <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                      I
-                    </span>
-                    <span className="text-xs font-semibold text-white truncate">
-                      {selectedWorkspace}
-                    </span>
-                  </div>
-                  <ChevronDown size={15} className="text-neutral-400 shrink-0" />
+                <div className="relative flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowWorkspaceMenu((v) => !v)}
+                    className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
+                  >
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                      <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        I
+                      </span>
+                      <span className="text-xs font-semibold text-white truncate">
+                        {selectedWorkspace}
+                      </span>
+                    </div>
+                    <ChevronDown size={15} className="text-neutral-400 shrink-0" />
+                  </button>
+
+                  {showWorkspaceMenu && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setShowWorkspaceMenu(false)} />
+                      <div className="absolute left-0 top-full mt-1.5 z-30 w-[286px] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100">
+                        {/* Search */}
+                        <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
+                          <Search size={15} className="text-neutral-400 shrink-0" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={workspaceSearch}
+                            onChange={(e) => setWorkspaceSearch(e.target.value)}
+                            placeholder="Search for a workspace"
+                            className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
+                          />
+                        </div>
+
+                        {/* Recent workspace */}
+                        <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
+                          Recent workspace
+                        </p>
+                        <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                          {workspaces
+                            .filter((ws) =>
+                              ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
+                            )
+                            .map((ws) => (
+                              <button
+                                key={ws.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedWorkspace(ws.name)
+                                  setShowWorkspaceMenu(false)
+                                  setWorkspaceSearch('')
+                                }}
+                                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
+                                  ws.name === selectedWorkspace
+                                    ? 'bg-blue-600 text-white font-semibold'
+                                    : 'text-neutral-200 hover:bg-neutral-800'
+                                }`}
+                              >
+                                {ws.name}
+                              </button>
+                            ))}
+                          {workspaces.filter((ws) =>
+                            ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
+                          ).length === 0 && (
+                            <p className="px-3 py-2 text-xs text-neutral-500">
+                              Workspace tidak ditemukan.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowWorkspaceMenu(false)
+                              setNewWorkspaceName('')
+                              setShowAddWorkspaceModal(true)
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <Plus size={14} />
+                            <span>Add Workspace</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowWorkspaceMenu(false)}
+                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                          >
+                            <LayoutGrid size={13} />
+                            <span>Browse All</span>
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => alert('Add workspace')}
+                  onClick={() => {
+                    setNewWorkspaceName('')
+                    setShowAddWorkspaceModal(true)
+                  }}
                   className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
                   aria-label="Add workspace"
                 >
@@ -1557,17 +2397,99 @@ export default function ProjectDetailPage() {
                   )}
                 </button>
 
-                {/* Add Tab */}
+                {/* Kanban Tab */}
                 <button
                   type="button"
-                  onClick={() => alert('Add custom view (Kanban, Gantt, Chart)')}
-                  className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
-                  aria-label="Add tab"
+                  onClick={() => setActiveTab('Kanban')}
+                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                    activeTab === 'Kanban'
+                      ? 'border-white text-white font-semibold'
+                      : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                  }`}
                 >
-                  <Plus size={16} />
+                  <span>Kanban</span>
+                  {activeTab === 'Kanban' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
                 </button>
+
+                {/* Custom view tabs */}
+                {customViews.map((cv) => (
+                  <button
+                    key={cv.id}
+                    type="button"
+                    onClick={() => setActiveTab(cv.name)}
+                    className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                      activeTab === cv.name
+                        ? 'border-white text-white font-semibold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    <span>{cv.name}</span>
+                    {activeTab === cv.name && (
+                      <MoreHorizontal size={14} className="text-neutral-500" />
+                    )}
+                  </button>
+                ))}
+
+                {/* Add Tab */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddViewMenu((v) => !v)}
+                    className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
+                    aria-label="Add tab"
+                  >
+                    <Plus size={16} />
+                  </button>
+                  {showAddViewMenu && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setShowAddViewMenu(false)} />
+                      <div className="absolute left-0 top-full mt-1 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1 z-30 animate-in fade-in zoom-in-95 duration-100">
+                        <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                          Add View
+                        </div>
+                        {([
+                          { name: 'Gantt', type: 'gantt' as const },
+                          { name: 'Chart', type: 'chart' as const },
+                        ] as const).map((opt) => (
+                          <button
+                            key={opt.name}
+                            type="button"
+                            onClick={() => {
+                              if (customViews.some((v) => v.name === opt.name)) {
+                                setActiveTab(opt.name)
+                              } else {
+                                setCustomViews((prev) => [
+                                  ...prev,
+                                  { id: `view-${Date.now()}`, name: opt.name, type: opt.type },
+                                ])
+                                setActiveTab(opt.name)
+                              }
+                              setShowAddViewMenu(false)
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 rounded transition cursor-pointer text-left"
+                          >
+                            + {opt.name} view
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* TAB: KANBAN BOARD */}
+            {activeTab === 'Kanban' && (
+              <KanbanView
+                groups={processedGroups}
+                statusList={statusList}
+                onMoveTask={handleMoveTask}
+                onAddTask={handleAddTaskInStatus}
+                onOpenTask={openTaskDetail}
+              />
+            )}
 
             {/* TAB 1: MAIN TABLE */}
             {activeTab === 'Main Table' && (
@@ -1678,7 +2600,7 @@ export default function ProjectDetailPage() {
                               <span>All Members</span>
                               {personFilter === 'all' && <Check size={14} />}
                             </button>
-                            {teamMembers.map((m) => (
+                            {members.map((m) => (
                               <button
                                 key={m.id}
                                 type="button"
@@ -2118,12 +3040,18 @@ export default function ProjectDetailPage() {
                                         </button>
                                       </td>
 
-                                      {/* Item Name (Editable + Expandable) */}
+                                      {/* Item Name (klik = detail) */}
                                       <td className="px-4 py-2.5 border-r border-neutral-800/80">
-                                        <div className="flex items-center gap-2">
+                                        <div
+                                          className="flex items-center gap-2 cursor-pointer"
+                                          onClick={() => openTaskDetail(group.id, item.id)}
+                                        >
                                           <button
                                             type="button"
-                                            onClick={() => toggleTaskExpand(group.id, item.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              toggleTaskExpand(group.id, item.id)
+                                            }}
                                             className="text-neutral-500 hover:text-neutral-300 transition cursor-pointer p-0.5"
                                             title="Expand task details"
                                           >
@@ -2135,29 +3063,12 @@ export default function ProjectDetailPage() {
                                             />
                                           </button>
 
-                                          {editingTaskId === item.id ? (
-                                            <input
-                                              type="text"
-                                              value={item.title}
-                                              onChange={(e) =>
-                                                updateTaskTitle(group.id, item.id, e.target.value)
-                                              }
-                                              onBlur={() => setEditingTaskId(null)}
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter') setEditingTaskId(null)
-                                              }}
-                                              autoFocus
-                                              className="bg-[#191a1e] border border-blue-500/70 rounded px-1.5 py-0.5 text-xs text-white outline-none w-full"
-                                            />
-                                          ) : (
-                                            <span
-                                              onClick={() => setEditingTaskId(item.id)}
-                                              className="text-xs text-neutral-200 font-medium cursor-pointer hover:text-white hover:underline transition"
-                                              title="Click to rename"
-                                            >
-                                              {item.title}
-                                            </span>
-                                          )}
+                                          <span
+                                            className="text-xs text-neutral-200 font-medium hover:text-white hover:underline transition"
+                                            title="Klik untuk buka detail"
+                                          >
+                                            {item.title}
+                                          </span>
                                         </div>
 
                                         {/* Expanded sub-details */}
@@ -2212,7 +3123,7 @@ export default function ProjectDetailPage() {
                                                 Assign Members
                                               </div>
                                               <div className="space-y-1">
-                                                {teamMembers.map((m) => {
+                                                {members.map((m) => {
                                                   const isAssigned = (item.personNames || []).includes(
                                                     m.name
                                                   )
@@ -2968,7 +3879,7 @@ export default function ProjectDetailPage() {
                             Mention Member
                           </div>
                           <div className="p-1 space-y-0.5">
-                            {teamMembers.map((member) => (
+                            {members.map((member) => (
                               <button
                                 key={member.id}
                                 type="button"
@@ -3196,7 +4107,19 @@ export default function ProjectDetailPage() {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    alert(`Downloading ${block.fileData?.name} (${block.fileData?.size})`)
+                                    const name = block.fileData?.name || 'dokumen.txt'
+                                    const blob = new Blob(
+                                      [`${name}\nUkuran: ${block.fileData?.size || '-'}\n\n(Contoh berkas dari tab Doc.)`],
+                                      { type: 'text/plain' }
+                                    )
+                                    const url = URL.createObjectURL(blob)
+                                    const a = document.createElement('a')
+                                    a.href = url
+                                    a.download = name
+                                    document.body.appendChild(a)
+                                    a.click()
+                                    document.body.removeChild(a)
+                                    URL.revokeObjectURL(url)
                                   }}
                                   className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
                                   title="Download document"
@@ -3269,6 +4192,7 @@ export default function ProjectDetailPage() {
               <CalendarView
                 groups={groups}
                 statusList={statusList}
+                members={members}
                 getContrastTextFn={getContrastText}
                 onAddTask={(date) => {
                   try {
@@ -3288,6 +4212,21 @@ export default function ProjectDetailPage() {
                 }}
               />
             )}
+
+            {/* CUSTOM VIEWS (Gantt / Chart) */}
+            {(() => {
+              const cv = customViews.find((v) => v.name === activeTab)
+              if (!cv) return null
+              return (
+                <div className="flex-1">
+                  {cv.type === 'gantt' ? (
+                    <GanttView groups={groups} statusList={statusList} />
+                  ) : (
+                    <ChartView groups={groups} statusList={statusList} />
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </main>
       </div>
@@ -3306,8 +4245,8 @@ export default function ProjectDetailPage() {
         const filteredGroups = groups.filter((g) =>
           g.title.toLowerCase().includes(searchGroupQuery.toLowerCase())
         )
-        const selectedAssigneeMember = teamMembers.find((m) => m.name === newTaskAssignee)
-        const filteredMembers = teamMembers.filter((m) =>
+        const selectedAssigneeMember = members.find((m) => m.name === newTaskAssignee)
+        const filteredMembers = members.filter((m) =>
           m.name.toLowerCase().includes(searchPersonQuery.toLowerCase())
         )
 
@@ -3529,12 +4468,16 @@ export default function ProjectDetailPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={async () => {
                             const email = prompt('Enter email address to invite:')
-                            if (email) {
-                              alert(`Invitation sent to ${email}!`)
-                              setShowPersonDropdown(false)
+                            if (!email || !projectId) return
+                            try {
+                              await addMemberByEmail(projectId, email.trim())
+                              await refreshMembers()
+                            } catch (err) {
+                              alert(err instanceof Error ? err.message : 'Failed to invite member')
                             }
+                            setShowPersonDropdown(false)
                           }}
                           className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
                         >
@@ -3618,13 +4561,20 @@ export default function ProjectDetailPage() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
                                 if (!inlineLabelName.trim()) return
-                                const newLabel = {
-                                  id: `custom-${Date.now()}`,
-                                  label: inlineLabelName.trim(),
-                                  colorCode: inlineLabelColor,
+                                const label = inlineLabelName.trim()
+                                let id = `custom-${Date.now()}`
+                                if (projectId) {
+                                  const row = await createStatus(
+                                    projectId,
+                                    label,
+                                    inlineLabelColor,
+                                    statusList.length,
+                                  ).catch(() => null)
+                                  if (row) id = row.id
                                 }
+                                const newLabel = { id, label, colorCode: inlineLabelColor }
                                 setStatusList((prev) => [...prev, newLabel])
                                 setNewTaskStatus(newLabel.label)
                                 setInlineLabelName('')
@@ -4091,6 +5041,849 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ======================== ADD WORKSPACE MODAL ======================== */}
+      {showAddWorkspaceModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowAddWorkspaceModal(false)}
+          />
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const name = newWorkspaceName.trim()
+              if (!name) return
+              const created = await createWorkspace(name).catch(() => null)
+              if (created) setWorkspaces((prev) => [...prev, created])
+              setSelectedWorkspace(name)
+              setNewWorkspaceName('')
+              setShowAddWorkspaceModal(false)
+            }}
+            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white">Buat Workspace Baru</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddWorkspaceModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Nama Workspace
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={newWorkspaceName}
+              onChange={(e) => setNewWorkspaceName(e.target.value)}
+              placeholder="mis. 2027 INVISUAL"
+              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+            />
+
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowAddWorkspaceModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!newWorkspaceName.trim()}
+                className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ======================== TASK DETAIL MODAL (klik task) ======================== */}
+      {detailTask && (() => {
+        const group = groups.find((g) => g.id === detailTask.groupId)
+        const task = group?.items.find((t) => t.id === detailTask.taskId)
+        if (!group || !task) return null
+        const statusDef = statusList.find((s) => s.label === task.status) || {
+          id: 'none',
+          label: task.status,
+          colorCode: '#4b5563',
+        }
+        const close = closeTaskDetail
+        const timeNow = () =>
+          new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+
+        const addSubtask = async () => {
+          const text = detailSubtaskInput.trim()
+          if (!text) return
+          const subs = task.subtasks || []
+          let id = `sub-${Date.now()}`
+          if (projectId) {
+            const row = await addSubtaskRow(task.id, text, subs.length).catch(() => null)
+            if (row) id = row.id
+          }
+          updateTask(group.id, task.id, {
+            subtasks: [...subs, { id, text, done: false }],
+          })
+          setDetailSubtaskInput('')
+        }
+
+        const toggleSubtask = (subId: string) => {
+          const sub = (task.subtasks || []).find((s) => s.id === subId)
+          if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+          updateTask(group.id, task.id, {
+            subtasks: (task.subtasks || []).map((s) =>
+              s.id === subId ? { ...s, done: !s.done } : s
+            ),
+          })
+        }
+
+        const deleteSubtask = (subId: string) => {
+          if (projectId) deleteSubtaskRow(subId).catch(() => {})
+          updateTask(group.id, task.id, {
+            subtasks: (task.subtasks || []).filter((s) => s.id !== subId),
+          })
+        }
+
+        const addAttachment = (name: string) =>
+          updateTask(group.id, task.id, {
+            attachments: [
+              ...(task.attachments || []),
+              { id: `att-${Date.now()}`, name, owner: me.name, avatar: me.avatar },
+            ],
+          })
+
+        const deleteAttachment = (attId: string) =>
+          updateTask(group.id, task.id, {
+            attachments: (task.attachments || []).filter((a) => a.id !== attId),
+          })
+
+        const postComment = async () => {
+          const text = detailComment.trim()
+          if (!text) return
+          let id = `cm-${Date.now()}`
+          if (projectId) {
+            const row = await addCommentRow(task.id, text).catch(() => null)
+            if (row) id = row.id
+          }
+          updateTask(group.id, task.id, {
+            comments: [
+              ...(task.comments || []),
+              {
+                id,
+                author: me.name,
+                text,
+                time: `Today at ${timeNow()}`,
+                avatar: me.avatar,
+                likes: 0,
+                replies: [],
+              },
+            ],
+          })
+          setDetailComment('')
+        }
+
+        const toggleCommentLike = (commentId: string) => {
+          const current = (task.comments || []).find((c) => c.id === commentId)
+          if (projectId && current) likeComment(commentId, (current.likes || 0) + 1).catch(() => {})
+          updateTask(group.id, task.id, {
+            comments: (task.comments || []).map((c) =>
+              c.id === commentId ? { ...c, likes: (c.likes || 0) + 1 } : c
+            ),
+          })
+        }
+
+        const toggleCommentReaction = (commentId: string) =>
+          updateTask(group.id, task.id, {
+            comments: (task.comments || []).map((c) =>
+              c.id === commentId ? { ...c, reactions: (c.reactions || 0) + 1 } : c
+            ),
+          })
+
+        const addReply = async (commentId: string, text: string) => {
+          const trimmed = text.trim()
+          if (!trimmed) return
+          let id = `rep-${Date.now()}`
+          if (projectId) {
+            const row = await addCommentRow(task.id, trimmed, commentId).catch(() => null)
+            if (row) id = row.id
+          }
+          updateTask(group.id, task.id, {
+            comments: (task.comments || []).map((c) =>
+              c.id === commentId
+                ? {
+                    ...c,
+                    replies: [
+                      ...(c.replies || []),
+                      {
+                        id,
+                        author: me.name,
+                        text: trimmed,
+                        time: `Today at ${timeNow()}`,
+                        avatar: me.avatar,
+                      },
+                    ],
+                  }
+                : c
+            ),
+          })
+        }
+
+        const visibleComments = (task.comments || []).filter((c) =>
+          `${c.author} ${c.text}`.toLowerCase().includes(commentSearch.toLowerCase())
+        )
+
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 md:p-5">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={close} />
+            <div
+              className={`relative w-full bg-[#0d0e10] border border-[#202227] rounded-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150 ${
+                detailMaximized ? 'max-w-none h-full max-h-none' : 'max-w-[1400px] h-full max-h-[94vh]'
+              }`}
+            >
+              {/* Top bar */}
+              <div className="flex items-center justify-between h-11 px-4 border-b border-[#1e2025] shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-1 text-neutral-400">
+                    <button
+                      type="button"
+                      onClick={() => setDetailMaximized(false)}
+                      className="p-1 rounded hover:bg-neutral-800 hover:text-white transition cursor-pointer"
+                      title="Perkecil"
+                    >
+                      <ChevronUp size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailMaximized(true)}
+                      className="p-1 rounded hover:bg-neutral-800 hover:text-white transition cursor-pointer"
+                      title="Perbesar"
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                  </div>
+                  <span className="text-sm text-neutral-400 truncate">{scopeTitle}</span>
+                  <span className="text-neutral-600">/</span>
+                  <span className="text-sm font-medium text-white truncate">{cardTitle}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDetailMaximized((v) => !v)}
+                    className="p-1.5 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                    title={detailMaximized ? 'Perkecil' : 'Perbesar'}
+                  >
+                    <ChevronsRight size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={close}
+                    className="p-1.5 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                    title="Tutup"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 flex min-h-0">
+                {/* Left: task content */}
+                <div className="flex-1 overflow-y-auto no-scrollbar px-6 md:px-10 py-8">
+                  <input
+                    type="text"
+                    value={task.title}
+                    onChange={(e) => updateTaskTitle(group.id, task.id, e.target.value)}
+                    className="w-full bg-transparent text-2xl md:text-3xl font-bold text-white outline-none border-b border-transparent focus:border-neutral-700 pb-0.5"
+                  />
+
+                  <div className="mt-7 space-y-5">
+                    {/* Status */}
+                    <div className="flex items-center gap-4 relative">
+                      <Circle size={17} className="text-neutral-400 shrink-0" />
+                      <span className="w-24 shrink-0 text-sm text-neutral-400">Status</span>
+                      <button
+                        type="button"
+                        onClick={() => setDetailStatusOpen((v) => !v)}
+                        style={{
+                          backgroundColor: statusDef.colorCode,
+                          color: getContrastText(statusDef.colorCode),
+                        }}
+                        className="px-4 py-1 rounded-full text-xs font-semibold transition cursor-pointer hover:brightness-90"
+                      >
+                        {task.status}
+                      </button>
+
+                      {detailStatusOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setDetailStatusOpen(false)} />
+                          <div className="absolute left-32 top-9 z-20 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100">
+                            <div className="space-y-1">
+                              {statusList.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setTaskStatus(group.id, task.id, s.label)
+                                    setDetailStatusOpen(false)
+                                  }}
+                                  style={{
+                                    backgroundColor: s.colorCode,
+                                    color: getContrastText(s.colorCode),
+                                  }}
+                                  className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer hover:brightness-90"
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Dates */}
+                    <div className="flex items-center gap-4 relative">
+                      <CalendarDays size={17} className="text-neutral-400 shrink-0" />
+                      <span className="w-24 shrink-0 text-sm text-neutral-400">Dates</span>
+                      <button
+                        type="button"
+                        onClick={() => setDetailDateOpen((v) => !v)}
+                        className="text-sm text-neutral-200 hover:text-white hover:underline transition cursor-pointer"
+                      >
+                        {task.date}
+                      </button>
+
+                      {detailDateOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setDetailDateOpen(false)} />
+                          <div className="absolute left-32 top-9 z-20 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100">
+                            {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map((d) => (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => {
+                                  setTaskDate(group.id, task.id, d)
+                                  setDetailDateOpen(false)
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                  task.date === d
+                                    ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                    : 'text-neutral-200 hover:bg-neutral-800'
+                                }`}
+                              >
+                                {d}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Person */}
+                    <div className="flex items-center gap-4 relative">
+                      <UserIcon size={17} className="text-neutral-400 shrink-0" />
+                      <span className="w-24 shrink-0 text-sm text-neutral-400">Person</span>
+                      <div className="flex items-center gap-2">
+                        {task.personAvatars.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setDetailPersonOpen((v) => !v)}
+                            className="flex items-center -space-x-2 cursor-pointer hover:opacity-80 transition"
+                            title="Ubah penanggung jawab"
+                          >
+                            {task.personAvatars.map((av, i) => (
+                              <span
+                                key={i}
+                                className="relative w-7 h-7 rounded-full border-2 border-[#0d0e10] overflow-hidden bg-neutral-700"
+                              >
+                                <Image src={av} alt="Assignee" fill sizes="28px" className="object-cover" />
+                              </span>
+                            ))}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setDetailPersonOpen((v) => !v)}
+                            className="text-xs text-neutral-500 hover:text-white transition cursor-pointer"
+                          >
+                            + Add person
+                          </button>
+                        )}
+                        <span className="text-sm text-neutral-300">
+                          {(task.personNames || []).join(', ')}
+                        </span>
+                      </div>
+
+                      {detailPersonOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setDetailPersonOpen(false)} />
+                          <div className="absolute left-32 top-10 z-20 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100">
+                            {members.map((m) => {
+                              const isAssigned = (task.personNames || []).includes(m.name)
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => toggleTaskAssignee(group.id, task.id, m)}
+                                  className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="relative w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                                      <Image src={m.avatar} alt={m.name} fill sizes="20px" className="object-cover" />
+                                    </span>
+                                    <span className="text-neutral-200 text-xs">{m.name}</span>
+                                  </div>
+                                  <span
+                                    className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                      isAssigned ? 'bg-blue-600 border-blue-500 text-white' : 'border-neutral-600'
+                                    }`}
+                                  >
+                                    {isAssigned && <Check size={11} strokeWidth={3} />}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="my-7 border-t border-[#1e2025]" />
+
+                  {/* Description */}
+                  <textarea
+                    value={task.description || ''}
+                    onChange={(e) => updateTaskDescription(group.id, task.id, e.target.value)}
+                    placeholder="Add description"
+                    rows={3}
+                    className="w-full bg-transparent text-sm text-neutral-300 placeholder:text-neutral-500 resize-none outline-none leading-relaxed"
+                  />
+
+                  <div className="my-7 border-t border-[#1e2025]" />
+
+                  {/* Subtasks */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailShowSubtasks((v) => !v)}
+                      className="flex items-center gap-2.5 text-sm text-neutral-200 hover:text-white transition cursor-pointer"
+                    >
+                      <ChevronRight
+                        size={16}
+                        className={`text-neutral-400 transition-transform ${
+                          detailShowSubtasks ? 'rotate-90' : ''
+                        }`}
+                      />
+                      <span className="font-medium">Subtasks</span>
+                      <span className="text-xs text-neutral-500">
+                        {(task.subtasks || []).length} subtasks
+                      </span>
+                    </button>
+
+                    {detailShowSubtasks && (
+                      <div className="mt-3 space-y-1.5">
+                        {(task.subtasks || []).map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 group/sub pl-6">
+                            <button
+                              type="button"
+                              onClick={() => toggleSubtask(s.id)}
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer shrink-0 ${
+                                s.done ? 'bg-blue-600 border-blue-500 text-white' : 'border-neutral-600'
+                              }`}
+                            >
+                              {s.done && <Check size={11} strokeWidth={3} />}
+                            </button>
+                            <span
+                              className={`flex-1 text-sm ${
+                                s.done ? 'text-neutral-500 line-through' : 'text-neutral-200'
+                              }`}
+                            >
+                              {s.text}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => deleteSubtask(s.id)}
+                              className="p-1 rounded text-neutral-600 hover:text-rose-400 opacity-0 group-hover/sub:opacity-100 transition cursor-pointer"
+                              title="Hapus subtask"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+
+                        <div className="pl-6 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={detailSubtaskInput}
+                            onChange={(e) => setDetailSubtaskInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                addSubtask()
+                              }
+                            }}
+                            placeholder="Add subtask..."
+                            className="flex-1 bg-transparent text-sm text-neutral-200 placeholder:text-neutral-500 outline-none py-1"
+                          />
+                          {detailSubtaskInput.trim() && (
+                            <button
+                              type="button"
+                              onClick={addSubtask}
+                              className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                            >
+                              Add
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="my-7 border-t border-[#1e2025]" />
+
+                  {/* Attach file */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailShowAttach((v) => !v)}
+                      className="flex items-center gap-2.5 text-sm text-neutral-200 hover:text-white transition cursor-pointer"
+                    >
+                      <ChevronDown
+                        size={16}
+                        className={`text-neutral-400 transition-transform ${
+                          detailShowAttach ? '' : '-rotate-90'
+                        }`}
+                      />
+                      <span className="font-medium">Attach file</span>
+                      <span className="text-xs text-neutral-500">
+                        {(task.attachments || []).length} file
+                      </span>
+                    </button>
+
+                    {detailShowAttach && (
+                      <div className="mt-4 space-y-4">
+                        {/* Dropzone */}
+                        <label
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            Array.from(e.dataTransfer.files).forEach((f) => addAttachment(f.name))
+                          }}
+                          className="flex items-center justify-center h-14 rounded-lg border border-dashed border-neutral-700 bg-[#141518]/60 hover:border-neutral-500 hover:bg-[#16171b] transition cursor-pointer"
+                        >
+                          <span className="text-sm text-neutral-400">Drop or browse file here</span>
+                          <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              Array.from(e.target.files || []).forEach((f) => addAttachment(f.name))
+                              e.target.value = ''
+                            }}
+                          />
+                        </label>
+
+                        {/* File cards */}
+                        {(task.attachments || []).length > 0 && (
+                          <div className="flex flex-wrap gap-4">
+                            {(task.attachments || []).map((a) => (
+                              <div
+                                key={a.id}
+                                className="relative w-[210px] rounded-xl border border-[#24262c] bg-[#181a1d] group/att hover:border-neutral-600 transition"
+                              >
+                                <div className="h-[118px] flex items-center justify-center">
+                                  <FileText size={40} strokeWidth={1.4} className="text-[#3b82f6]" />
+                                </div>
+                                <div className="flex items-center justify-between px-3 pb-3">
+                                  <span className="text-[11px] text-neutral-300 truncate max-w-[110px]">
+                                    {a.name}
+                                  </span>
+                                  {a.avatar ? (
+                                    <span className="relative w-6 h-6 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                                      <Image src={a.avatar} alt={a.owner || 'Uploader'} fill sizes="24px" className="object-cover" />
+                                    </span>
+                                  ) : (
+                                    <span className="w-6 h-6 rounded-full bg-neutral-700 text-[10px] font-semibold text-white flex items-center justify-center shrink-0">
+                                      {(a.owner || 'U').charAt(0).toUpperCase()}
+                                    </span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteAttachment(a.id)}
+                                  className="absolute top-2 right-2 p-1 rounded-md bg-black/40 text-neutral-300 hover:text-rose-400 hover:bg-black/60 opacity-0 group-hover/att:opacity-100 transition cursor-pointer"
+                                  title="Hapus lampiran"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: comments */}
+                <div className="hidden md:flex w-[360px] lg:w-[420px] shrink-0 border-l border-[#1e2025] flex-col">
+                  <div className="h-12 px-4 flex items-center justify-between border-b border-[#1e2025] shrink-0 gap-2">
+                    {showCommentSearch ? (
+                      <div className="flex-1 flex items-center gap-2 h-8 px-2.5 rounded-lg bg-[#141518] border border-[#2a2c32]">
+                        <Search size={14} className="text-neutral-500 shrink-0" />
+                        <input
+                          type="text"
+                          autoFocus
+                          value={commentSearch}
+                          onChange={(e) => setCommentSearch(e.target.value)}
+                          placeholder="Cari komentar..."
+                          className="flex-1 bg-transparent text-xs text-neutral-200 placeholder:text-neutral-500 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCommentSearch(false)
+                            setCommentSearch('')
+                          }}
+                          className="text-neutral-500 hover:text-white transition cursor-pointer"
+                          title="Tutup pencarian"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-sm font-semibold text-neutral-200">
+                          Comments
+                          {(task.comments || []).length > 0 && (
+                            <span className="ml-2 text-xs text-neutral-500">
+                              {(task.comments || []).length}
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowCommentSearch(true)}
+                          className="p-1 rounded text-neutral-400 hover:text-white transition cursor-pointer"
+                          title="Cari komentar"
+                        >
+                          <Search size={16} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto no-scrollbar p-4 space-y-3">
+                    {visibleComments.length === 0 ? (
+                      <p className="text-xs text-neutral-600 text-center mt-8">
+                        {commentSearch ? 'Komentar tidak ditemukan.' : 'Belum ada komentar.'}
+                      </p>
+                    ) : (
+                      visibleComments.map((c) => (
+                        <div
+                          key={c.id}
+                          className="rounded-xl border border-[#24262c] bg-[#181a1d] p-3"
+                        >
+                          <div className="flex gap-2.5">
+                            {c.avatar ? (
+                              <span className="relative w-7 h-7 rounded-full overflow-hidden shrink-0">
+                                <Image
+                                  src={c.avatar}
+                                  alt={c.author}
+                                  fill
+                                  sizes="28px"
+                                  className="object-cover"
+                                />
+                              </span>
+                            ) : (
+                              <span className="w-7 h-7 rounded-full bg-blue-600 text-white text-[11px] font-semibold flex items-center justify-center shrink-0">
+                                {c.author.charAt(0).toUpperCase()}
+                              </span>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-neutral-200">
+                                  {c.author}
+                                </span>
+                                <span className="text-[10px] text-neutral-500">{c.time}</span>
+                              </div>
+                              <p className="text-sm text-neutral-300 break-words mt-1">
+                                {c.text}
+                              </p>
+
+                              {(c.replies || []).length > 0 && (
+                                <div className="mt-2 space-y-2 border-l border-[#2a2c32] pl-3">
+                                  {(c.replies || []).map((r) => (
+                                    <div key={r.id} className="flex gap-2">
+                                      {r.avatar ? (
+                                        <span className="relative w-6 h-6 rounded-full overflow-hidden shrink-0">
+                                          <Image
+                                            src={r.avatar}
+                                            alt={r.author}
+                                            fill
+                                            sizes="24px"
+                                            className="object-cover"
+                                          />
+                                        </span>
+                                      ) : (
+                                        <span className="w-6 h-6 rounded-full bg-neutral-700 text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
+                                          {r.author.charAt(0).toUpperCase()}
+                                        </span>
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[11px] font-semibold text-neutral-200">
+                                            {r.author}
+                                          </span>
+                                          <span className="text-[10px] text-neutral-500">
+                                            {r.time}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-neutral-300 break-words">
+                                          {r.text}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-4 mt-2 text-neutral-400">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCommentLike(c.id)}
+                                  className="flex items-center gap-1 text-[11px] hover:text-white transition cursor-pointer"
+                                  title="Suka"
+                                >
+                                  <ThumbsUp size={13} />
+                                  {(c.likes || 0) > 0 && <span>{c.likes}</span>}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCommentReaction(c.id)}
+                                  className="flex items-center gap-1 text-[11px] hover:text-white transition cursor-pointer"
+                                  title="Emoji"
+                                >
+                                  <Smile size={13} />
+                                  {(c.reactions || 0) > 0 && <span>{c.reactions}</span>}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDetailReplyTo((v) => (v === c.id ? null : c.id))
+                                    setDetailReplyText('')
+                                  }}
+                                  className="text-[11px] hover:text-white transition cursor-pointer"
+                                >
+                                  Reply
+                                </button>
+                              </div>
+
+                              {detailReplyTo === c.id && (
+                                <div className="flex items-center gap-2 mt-2">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    value={detailReplyText}
+                                    onChange={(e) => setDetailReplyText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        addReply(c.id, detailReplyText)
+                                        setDetailReplyTo(null)
+                                        setDetailReplyText('')
+                                      }
+                                      if (e.key === 'Escape') setDetailReplyTo(null)
+                                    }}
+                                    placeholder="Tulis balasan..."
+                                    className="flex-1 bg-transparent text-xs text-neutral-200 placeholder:text-neutral-500 outline-none border-b border-[#2a2c32] pb-1"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      addReply(c.id, detailReplyText)
+                                      setDetailReplyTo(null)
+                                      setDetailReplyText('')
+                                    }}
+                                    className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                                  >
+                                    Kirim
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="p-4 shrink-0">
+                    <div className="rounded-xl border border-[#2a2c32] bg-[#141518] p-3">
+                      <textarea
+                        value={detailComment}
+                        onChange={(e) => setDetailComment(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            postComment()
+                          }
+                        }}
+                        placeholder="Write a comment.."
+                        rows={2}
+                        className="w-full bg-transparent text-sm text-neutral-200 placeholder:text-neutral-500 resize-none outline-none"
+                      />
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-3 text-neutral-400">
+                          <label className="cursor-pointer" title="Attach file">
+                            <Paperclip size={16} className="hover:text-white transition" />
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) addAttachment(f.name)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDetailComment((v) => (v ? v : ':smile: '))
+                            }
+                            className="cursor-pointer"
+                            title="Emoji"
+                          >
+                            <Smile size={16} className="hover:text-white transition" />
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={postComment}
+                          disabled={!detailComment.trim()}
+                          className="w-9 h-9 rounded-lg bg-[#2563eb] hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center text-white transition cursor-pointer"
+                          title="Kirim komentar"
+                        >
+                          <Send size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
