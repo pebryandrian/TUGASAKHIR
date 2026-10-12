@@ -67,6 +67,11 @@ export interface SubTask {
   text: string
   done: boolean
   position: number
+  parent_id: string | null
+  assignee_id: string | null
+  status_id: string | null
+  due_date: string | null
+  priority: string | null
 }
 
 export interface Comment {
@@ -219,7 +224,8 @@ export async function loadBoard(projectId: string): Promise<BoardData> {
   const taskIds = ((tasks.data as Task[]) ?? []).map((t) => t.id)
   const [subtasks, attachments, comments] = taskIds.length
     ? await Promise.all([
-        db.from('subtasks').select('id, task_id, text, done, position').in('task_id', taskIds).order('position'),
+        // `*` agar tetap jalan walau kolom meta subtask (assignee/status/due/priority) belum dimigrasi.
+        db.from('subtasks').select('*').in('task_id', taskIds).order('position'),
         db.from('attachments').select('id, task_id, name, owner_id').in('task_id', taskIds),
         db
           .from('comments')
@@ -323,10 +329,15 @@ export async function updateStatusColor(id: string, colorCode: string): Promise<
 
 // ======================== SUBTASKS & COMMENTS ========================
 
-export async function addSubtask(taskId: string, text: string, position: number): Promise<SubTask> {
+export async function addSubtask(
+  taskId: string,
+  text: string,
+  position: number,
+  parentId: string | null = null,
+): Promise<SubTask> {
   const { data, error } = await supabase()
     .from('subtasks')
-    .insert({ task_id: taskId, text, position })
+    .insert({ task_id: taskId, text, position, parent_id: parentId })
     .select()
     .single()
   if (error) throw error
@@ -335,6 +346,15 @@ export async function addSubtask(taskId: string, text: string, position: number)
 
 export async function setSubtaskDone(id: string, done: boolean): Promise<void> {
   const { error } = await supabase().from('subtasks').update({ done }).eq('id', id)
+  if (error) throw error
+}
+
+// Update meta subtask (assignee/status/due date/priority) dari baris Main Table.
+export async function updateSubtask(
+  id: string,
+  patch: Partial<Pick<SubTask, 'assignee_id' | 'status_id' | 'due_date' | 'priority'>>,
+): Promise<void> {
+  const { error } = await supabase().from('subtasks').update(patch).eq('id', id)
   if (error) throw error
 }
 

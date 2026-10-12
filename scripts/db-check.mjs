@@ -102,6 +102,15 @@ try {
   const sub = await supabase.from('subtasks').insert({ task_id: task.data.id, text: 'sub', position: 0 }).select().single()
   assert.ok(!sub.error, `subtask insert failed: ${sub.error?.message}`)
 
+  // Nested subtask (sub-subtask) via parent_id.
+  const subChild = await supabase
+    .from('subtasks')
+    .insert({ task_id: task.data.id, text: 'child', position: 1, parent_id: sub.data.id })
+    .select()
+    .single()
+  assert.ok(!subChild.error, `nested subtask insert failed: ${subChild.error?.message}`)
+  assert.equal(subChild.data.parent_id, sub.data.id)
+
   const comment = await supabase.from('comments').insert({ task_id: task.data.id, body: 'hi', author_id: user.user.id }).select().single()
   assert.ok(!comment.error, `comment insert failed: ${comment.error?.message}`)
 
