@@ -86,6 +86,7 @@ import {
   Send,
   ChevronsRight,
   LayoutGrid,
+  Flag,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -161,6 +162,76 @@ function fromISODate(value: string | null): string {
   return Number.isNaN(+d) ? value : `${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 }
 
+// Warna ikon flag prioritas (dipakai baris task/subtask di Main Table).
+const PRIORITY_FLAG: Record<string, string> = {
+  high: 'text-rose-500',
+  medium: 'text-amber-400',
+  low: 'text-blue-400',
+}
+
+// Opsi prioritas yang sama untuk task & subtask (`tasks.priority` NOT NULL default 'medium').
+const PRIORITY_OPTIONS: [string, string][] = [
+  ['high', 'High'],
+  ['medium', 'Medium'],
+  ['low', 'Low'],
+]
+
+// Dropdown prioritas bersama: dipakai baris task, baris subtask, dan panel detail.
+function PriorityMenu({
+  value,
+  onSelect,
+  showLabel = false,
+  align = 'center',
+}: {
+  value: string | null
+  onSelect: (priority: string) => void
+  showLabel?: boolean
+  align?: 'center' | 'left'
+}) {
+  const [open, setOpen] = useState(false)
+  const label = PRIORITY_OPTIONS.find(([v]) => v === value)?.[1]
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer"
+        title="Ubah prioritas"
+        aria-label="Ubah prioritas"
+      >
+        <Flag size={13} fill="currentColor" className={value ? PRIORITY_FLAG[value] : 'text-neutral-600'} />
+        {showLabel && <span className="text-xs text-neutral-200">{label || '—'}</span>}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div
+            className={`absolute top-full mt-1.5 w-40 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left ${
+              align === 'left' ? 'left-0' : 'left-1/2 -translate-x-1/2'
+            }`}
+          >
+            {PRIORITY_OPTIONS.map(([val, text]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => {
+                  onSelect(val)
+                  setOpen(false)
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+              >
+                <Flag size={12} fill="currentColor" className={PRIORITY_FLAG[val]} />
+                <span className="text-neutral-200">{text}</span>
+                {value === val && <Check size={12} className="ml-auto text-blue-400" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export interface TaskItem {
   id: string
   title: string
@@ -171,8 +242,18 @@ export interface TaskItem {
   status: TaskStatus
   date: string
   checked: boolean
+  priority?: string | null
   expanded?: boolean
-  subtasks?: { id: string; text: string; done: boolean }[]
+  subtasks?: {
+    id: string
+    text: string
+    done: boolean
+    parentId?: string | null
+    assigneeId?: string | null
+    statusId?: string | null
+    date?: string | null
+    priority?: string | null
+  }[]
   attachments?: { id: string; name: string; owner?: string; avatar?: string }[]
   comments?: {
     id: string
@@ -1309,7 +1390,8 @@ export default function ProjectDetailPage() {
 
   // Add column modal
   const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
-  const [extraColumns, setExtraColumns] = useState<string[]>([])
+  // Kolom tambahan. "Priority" tampil default (sesuai desain) dan bisa diubah per baris.
+  const [extraColumns, setExtraColumns] = useState<string[]>(['Priority'])
 
   // ======================== TASK DETAIL MODAL (klik task) ========================
   const [detailTask, setDetailTask] = useState<{ groupId: string; taskId: string } | null>(null)
@@ -1456,6 +1538,18 @@ export default function ProjectDetailPage() {
           }),
         }
       })
+    )
+  }
+
+  // Set prioritas task (dipakai kolom Priority di Main Table & panel detail)
+  const setTaskPriority = (groupId: string, taskId: string, priority: string) => {
+    if (projectId) updateTaskRow(taskId, { priority: priority as Priority }).catch(() => {})
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id !== groupId
+          ? g
+          : { ...g, items: g.items.map((t) => (t.id === taskId ? { ...t, priority } : t)) },
+      ),
     )
   }
 
@@ -3790,19 +3884,95 @@ export default function ProjectDetailPage() {
                                           key={col}
                                           className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
                                         >
-                                          {col === 'Priority'
-                                            ? 'Medium'
-                                            : col === 'Timeline'
-                                            ? '2 Days'
-                                            : '-'}
+                                          {col === 'Priority' ? (
+                                            <PriorityMenu
+                                              value={item.priority ?? 'medium'}
+                                              onSelect={(p) => setTaskPriority(group.id, item.id, p)}
+                                            />
+                                          ) : (
+                                            '-'
+                                          )}
                                         </td>
                                       ))}
 
                                       {/* Extra Column cell */}
                                       <td className="px-2 py-2.5 text-center text-neutral-600"></td>
                                     </tr>
+
+                                    {item.expanded && (
+                                      <>
+                                        {renderSubtaskRows(group.id, item, null, 0)}
+                                        {subtaskOpen && (
+                                          <tr className="border-b border-neutral-800/60">
+                                            <td className="border-r border-neutral-800/80" />
+                                            <td className="px-4 py-1.5 border-r border-neutral-800/80">
+                                              <div className="flex items-center gap-2 pl-[24px]">
+                                                <input
+                                                  type="text"
+                                                  autoFocus
+                                                  value={subtaskDrafts[subKey] || ''}
+                                                  onChange={(e) =>
+                                                    setSubtaskDrafts((d) => ({ ...d, [subKey]: e.target.value }))
+                                                  }
+                                                  onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                      e.preventDefault()
+                                                      addTaskSubtask(group.id, item.id, subtaskDrafts[subKey] || '')
+                                                      setSubtaskDrafts((d) => ({ ...d, [subKey]: '' }))
+                                                    }
+                                                    if (e.key === 'Escape') setOpenSubtaskFor(null)
+                                                  }}
+                                                  placeholder="Add subtask..."
+                                                  className="flex-1 bg-transparent text-xs text-neutral-200 placeholder:text-neutral-500 outline-none border-b border-neutral-700/60 pb-0.5"
+                                                />
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    addTaskSubtask(group.id, item.id, subtaskDrafts[subKey] || '')
+                                                    setSubtaskDrafts((d) => ({ ...d, [subKey]: '' }))
+                                                  }}
+                                                  className="text-[10px] font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                                                >
+                                                  Add
+                                                </button>
+                                              </div>
+                                            </td>
+                                            <td className="border-r border-neutral-800/80" />
+                                            <td className="border-r border-neutral-800/80" />
+                                            <td className="border-r border-neutral-800/80" />
+                                            {extraColumns.map((c) => (
+                                              <td key={c} className="border-r border-neutral-800/80" />
+                                            ))}
+                                            <td />
+                                          </tr>
+                                        )}
+                                      </>
+                                    )}
+                                    </Fragment>
                                   )
                                 })}
+
+                                {/* Add Task Row */}
+                                <tr className="border-b border-neutral-800/80">
+                                  <td className="border-r border-neutral-800/80" />
+                                  <td className="px-4 py-2 border-r border-neutral-800/80">
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowNewItemModal(true)}
+                                      className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-blue-400 transition cursor-pointer"
+                                    >
+                                      <Plus size={13} strokeWidth={2.5} />
+                                      <span>Add Task</span>
+                                    </button>
+                                  </td>
+                                  <td className="border-r border-neutral-800/80" />
+                                  <td className="border-r border-neutral-800/80" />
+                                  <td className="border-r border-neutral-800/80" />
+                                  {extraColumns.map((c) => (
+                                    <td key={c} className="border-r border-neutral-800/80" />
+                                  ))}
+                                  <td />
+                                </tr>
 
                                 {/* Summary / Progress Bar Footer Row */}
                                 <tr className="border-b border-neutral-800/80 bg-transparent">
