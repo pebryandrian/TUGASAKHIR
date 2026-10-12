@@ -1325,7 +1325,9 @@ export default function ProjectDetailPage() {
   const [docBlocks, setDocBlocks] = useState<DocBlock[]>(initialDocBlocks)
   const [history, setHistory] = useState<DocBlock[][]>([initialDocBlocks])
   const [historyIndex, setHistoryIndex] = useState(0)
-  const [activeBlockId, setActiveBlockId] = useState<string>('block-1')
+  const [activeBlockIndex, setActiveBlockIndex] = useState(0)
+  // Seleksi teks di dalam blok (untuk mengubah HANYA teks yang di-blok).
+  const selectionRef = useRef<{ index: number; start: number; end: number } | null>(null)
   const [lastUpdated, setLastUpdated] = useState('Apr 13, 2026, 22:43')
 
   // Simpan isi tab Doc ke Supabase (debounce 800ms).
@@ -1779,23 +1781,107 @@ export default function ProjectDetailPage() {
       ? 'quote'
       : 'normal'
 
+  // Ambil seleksi teks yang sedang aktif (dipanggil saat mouse ditekan pada tombol
+  // toolbar, sebelum fokus pindah dari textarea) supaya ukuran font hanya mengubah
+  // teks yang di-blok.
+  const captureSelectionFromFocus = () => {
+    const el = document.activeElement
+    if (!(el instanceof HTMLTextAreaElement) || el.dataset.blockIndex === undefined) {
+      selectionRef.current = null
+      return
+    }
+    const idx = Number(el.dataset.blockIndex)
+    if (Number.isNaN(idx)) return
+    setActiveBlockIndex(idx)
+    selectionRef.current = {
+      index: idx,
+      start: el.selectionStart ?? 0,
+      end: el.selectionEnd ?? 0,
+    }
+  }
+
   const applyTextStyle = (style: TextStyleType) => {
-    const updated = docBlocks.map((b) => {
-      if (b.id !== activeBlock.id) return b
-      let newType: BlockType = 'paragraph'
-      if (style === 'h1') newType = 'h1'
-      else if (style === 'h2') newType = 'h2'
-      else if (style === 'h3') newType = 'h3'
-      else if (style === 'quote') newType = 'quote'
-      return { ...b, type: newType }
-    })
+    const newType: BlockType =
+      style === 'h1'
+        ? 'h1'
+        : style === 'h2'
+        ? 'h2'
+        : style === 'h3'
+        ? 'h3'
+        : style === 'quote'
+        ? 'quote'
+        : 'paragraph'
+
+    // Kalau ada teks yang di-blok (diseleksi), ubah HANYA bagian itu:
+    // blok dipecah jadi [sebelum] + [bagian terpilih] + [sesudah].
+    const sel = selectionRef.current
+    const target = sel ? docBlocks[sel.index] : undefined
+    const canSplit =
+      !!sel && !!target && sel.start < sel.end && sel.end <= (target.content?.length ?? 0)
+
+    let updated: DocBlock[]
+    if (canSplit && sel && target) {
+      const before = target.content.slice(0, sel.start)
+      const mid = target.content.slice(sel.start, sel.end)
+      const after = target.content.slice(sel.end)
+      // Tiap pecahan dapat id baru supaya tidak ada id kembar.
+      const part = (content: string, type: BlockType): DocBlock => ({
+        ...target,
+        id: newBlockId(),
+        content,
+        type,
+      })
+      const parts: DocBlock[] = []
+      if (before) parts.push(part(before, target.type))
+      parts.push(part(mid, newType))
+      if (after) parts.push(part(after, target.type))
+      updated = docBlocks.flatMap((b, i) => (i === sel.index ? parts : [b]))
+    } else {
+      const idx = sel?.index ?? activeIndex
+      updated = docBlocks.map((b, i) => (i === idx ? { ...b, type: newType } : b))
+    }
+
     commitBlocksChange(updated)
+    selectionRef.current = null
     setShowTextStyleDropdown(false)
   }
 
+  // Terapkan pilihan dari slash menu ke blok tertentu (menghapus "/query" yang diketik).
+  const applySlashStyle = (blockId: string, style: TextStyleType) => {
+    const newType: BlockType =
+      style === 'h1'
+        ? 'h1'
+        : style === 'h2'
+        ? 'h2'
+        : style === 'h3'
+        ? 'h3'
+        : style === 'quote'
+        ? 'quote'
+        : 'paragraph'
+    const updated = docBlocks.map((b) =>
+      b.id === blockId ? { ...b, type: newType, content: '' } : b
+    )
+    commitBlocksChange(updated)
+    setSlashMenuBlock(null)
+    setSlashQuery('')
+  }
+
+  // Saat pengguna mengetik di blok teks: buka/tutup slash menu berdasarkan awalan "/".
+  const handleBlockTextChange = (index: number, blockId: string, value: string) => {
+    updateBlockContent(blockId, value)
+    if (value.startsWith('/')) {
+      setSlashMenuBlock(blockId)
+      setSlashQuery(value.slice(1))
+      setActiveBlockIndex(index)
+    } else if (slashMenuBlock === blockId) {
+      setSlashMenuBlock(null)
+      setSlashQuery('')
+    }
+  }
+
   const applyAlignment = (align: 'left' | 'center' | 'right' | 'justify') => {
-    const updated = docBlocks.map((b) => {
-      if (b.id !== activeBlock.id) return b
+    const updated = docBlocks.map((b, i) => {
+      if (i !== activeIndex) return b
       return { ...b, align }
     })
     commitBlocksChange(updated)
@@ -1803,8 +1889,8 @@ export default function ProjectDetailPage() {
   }
 
   const toggleStyle = (styleKey: keyof NonNullable<DocBlock['styles']>, value?: any) => {
-    const updated = docBlocks.map((b) => {
-      if (b.id !== activeBlock.id) return b
+    const updated = docBlocks.map((b, i) => {
+      if (i !== activeIndex) return b
       const curStyles = b.styles || {}
       const nextStyles = { ...curStyles }
       if (typeof value !== 'undefined') {
@@ -1818,8 +1904,8 @@ export default function ProjectDetailPage() {
   }
 
   const applyListType = (type: 'bullet-list' | 'numbered-list' | 'checklist') => {
-    const updated = docBlocks.map((b): DocBlock => {
-      if (b.id !== activeBlock.id) return b
+    const updated = docBlocks.map((b, i): DocBlock => {
+      if (i !== activeIndex) return b
       if (b.type === type) return { ...b, type: 'paragraph' as BlockType, items: undefined }
       const existingItems =
         b.items ||
@@ -1838,8 +1924,8 @@ export default function ProjectDetailPage() {
   }
 
   const insertMention = (member: (typeof members)[0]) => {
-    const updated = docBlocks.map((b) => {
-      if (b.id !== activeBlock.id) return b
+    const updated = docBlocks.map((b, i) => {
+      if (i !== activeIndex) return b
       return { ...b, content: (b.content || '') + ` @${member.name} ` }
     })
     commitBlocksChange(updated)
@@ -3438,6 +3524,7 @@ export default function ProjectDetailPage() {
                   <div className="relative">
                     <button
                       type="button"
+                      onMouseDown={captureSelectionFromFocus}
                       onClick={() => setShowTextStyleDropdown(!showTextStyleDropdown)}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 hover:text-white hover:bg-neutral-800/60 rounded-md transition cursor-pointer text-xs font-medium border border-transparent hover:border-neutral-700/60"
                       title="Change text size / style"
