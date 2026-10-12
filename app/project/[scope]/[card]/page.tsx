@@ -3378,6 +3378,19 @@ export default function ProjectDetailPage() {
                           <span className="text-[11px] text-neutral-500 font-normal ml-1">
                             ({group.items.length})
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setNewTaskGroup(group.id)
+                              setShowNewItemModal(true)
+                            }}
+                            className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
+                            title="Tambah task"
+                            aria-label="Tambah task"
+                          >
+                            <Plus size={14} strokeWidth={2.5} />
+                          </button>
                         </div>
 
                         {/* Table View (When Expanded) */}
