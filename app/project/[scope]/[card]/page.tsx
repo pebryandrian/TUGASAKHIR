@@ -1346,6 +1346,12 @@ export default function ProjectDetailPage() {
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showMentionMenu, setShowMentionMenu] = useState(false)
 
+  // Slash command menu ("/" untuk ganti tipe blok) — blockId yang sedang membuka menu.
+  const [slashMenuBlock, setSlashMenuBlock] = useState<string | null>(null)
+  const [slashQuery, setSlashQuery] = useState('')
+  // Blok yang baru ditambah, supaya kursor langsung fokus (seperti doc asli).
+  const [focusBlockId, setFocusBlockId] = useState<string | null>(null)
+
   // ======================== STATUS LABEL MANAGEMENT ========================
 
   const handleAddLabel = async () => {
@@ -2038,25 +2044,26 @@ export default function ProjectDetailPage() {
         newBlock = {
           id,
           type: 'paragraph',
-          content: 'Tulis paragraf baru di sini...',
+          content: '',
           align: 'left',
           styles: {},
         }
         break
     }
     commitBlocksChange([...docBlocks, newBlock])
-    setActiveBlockId(newBlock.id)
+    setActiveBlockIndex(docBlocks.length)
+    setFocusBlockId(newBlock.id)
     setShowAddMenu(false)
   }
 
-  const deleteBlock = (blockId: string) => {
+  const deleteBlock = (index: number) => {
     if (docBlocks.length <= 1) {
       alert('Dokumen minimal memiliki satu blok konten.')
       return
     }
-    const updated = docBlocks.filter((b) => b.id !== blockId)
+    const updated = docBlocks.filter((_, i) => i !== index)
     commitBlocksChange(updated)
-    if (activeBlockId === blockId) setActiveBlockId(updated[0]?.id || '')
+    if (index === activeIndex) setActiveBlockIndex(Math.max(0, index - 1))
   }
 
   const updateBlockContent = (blockId: string, content: string) => {
@@ -3997,16 +4004,68 @@ export default function ProjectDetailPage() {
                             block.type === 'h2' ||
                             block.type === 'h3' ||
                             block.type === 'quote') && (
-                            <div className="w-full">
-                              <textarea
+                            <div className="w-full relative">
+                              <DocTextarea
                                 value={block.content}
-                                onChange={(e) => updateBlockContent(block.id, e.target.value)}
-                                rows={block.type === 'paragraph' || block.type === 'quote' ? 3 : 1}
-                                className={`w-full bg-transparent resize-none border-none outline-none focus:ring-0 ${getBlockStyleClasses(
-                                  block
-                                )}`}
-                                placeholder="Type text here..."
+                                blockIndex={index}
+                                onChange={(v) => handleBlockTextChange(index, block.id, v)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape' && slashMenuBlock === block.id) {
+                                    e.preventDefault()
+                                    setSlashMenuBlock(null)
+                                    setSlashQuery('')
+                                  }
+                                }}
+                                className={getBlockStyleClasses(block)}
+                                placeholder="Type '/' for commands or start writing..."
+                                autoFocus={focusBlockId === block.id}
                               />
+
+                              {/* Slash command menu ("/") */}
+                              {slashMenuBlock === block.id && (() => {
+                                const opts = textStyleOptions.filter((o) =>
+                                  (o.label + ' ' + o.short)
+                                    .toLowerCase()
+                                    .includes(slashQuery.toLowerCase())
+                                )
+                                return (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-30"
+                                      onClick={() => {
+                                        setSlashMenuBlock(null)
+                                        setSlashQuery('')
+                                      }}
+                                    />
+                                    <div className="absolute left-0 top-full mt-1 w-64 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+                                      <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
+                                        Text
+                                      </div>
+                                      <div className="p-1 space-y-0.5">
+                                        {opts.length === 0 && (
+                                          <p className="px-3 py-2 text-xs text-neutral-500">
+                                            Tidak ada hasil.
+                                          </p>
+                                        )}
+                                        {opts.map((opt) => (
+                                          <button
+                                            key={opt.type}
+                                            type="button"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => applySlashStyle(block.id, opt.type)}
+                                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                                          >
+                                            <span className="w-7 h-7 rounded-md bg-[#202227] border border-neutral-700/80 text-neutral-300 font-bold text-[11px] flex items-center justify-center shrink-0">
+                                              {opt.short}
+                                            </span>
+                                            <span className="font-medium">{opt.label}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </>
+                                )
+                              })()}
                             </div>
                           )}
 
