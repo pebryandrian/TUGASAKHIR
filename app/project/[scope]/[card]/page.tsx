@@ -1372,6 +1372,7 @@ export default function ProjectDetailPage() {
   const [newTaskAssignee, setNewTaskAssignee] = useState<string>('')
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('')
   const [newTaskDate, setNewTaskDate] = useState<string>('Feb 4, 12:00 AM')
+  const [newTaskPriority, setNewTaskPriority] = useState<string>('medium')
 
   // Modal Popover dropdown states (matching slides)
   const [showGroupDropdown, setShowGroupDropdown] = useState(false)
@@ -1642,6 +1643,7 @@ export default function ProjectDetailPage() {
         description: 'Tugas baru dibuat via toolbar New Item.',
         due_date: toISODate(newTaskDate),
         assignee_id: selectedMember?.id ?? null,
+        priority: newTaskPriority as Priority,
       }).catch(() => null)
       if (row) id = row.id
     }
@@ -1656,6 +1658,7 @@ export default function ProjectDetailPage() {
       status: statusLabel,
       date: newTaskDate,
       checked: false,
+      priority: newTaskPriority,
       expanded: false,
     }
 
@@ -5460,6 +5463,24 @@ export default function ProjectDetailPage() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Row 5: Priority */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 w-20 shrink-0">
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-[#e11d48]/20 text-[#fb7185]">
+                      <Flag size={12} />
+                    </span>
+                    <span className="text-xs text-neutral-300 font-medium">Priority</span>
+                  </div>
+                  <div className="flex-1 flex items-center gap-3">
+                    <PriorityMenu
+                      value={newTaskPriority}
+                      onSelect={setNewTaskPriority}
+                      showLabel
+                      align="left"
+                    />
                   </div>
                 </div>
 
