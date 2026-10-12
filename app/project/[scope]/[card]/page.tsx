@@ -358,7 +358,7 @@ const initialDocBlocks: DocBlock[] = [
     type: 'file',
     content: '',
     fileData: {
-      name: 'harga-Makanan-terbaru.docx',
+      name: 'harga Makanan terbaru.docx',
       size: '245 KB',
       icon: 'W',
     },
@@ -3932,21 +3932,13 @@ export default function ProjectDetailPage() {
                 <div className="max-w-4xl space-y-6">
                   {/* Doc Title Heading & Metadata Header */}
                   <div>
-                    <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mb-3">
+                    <h1 className="text-2xl font-bold text-white tracking-tight mb-3">
                       Doc
                     </h1>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
-                      <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 bg-neutral-800 shrink-0">
-                          <Image
-                            src="/images/clients/SUNDDAE.jpg"
-                            alt="George"
-                            width={20}
-                            height={20}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
+                      <div className="flex items-center gap-1.5">
+                        <Clock size={13} className="text-neutral-500" />
                         <span>
                           Creator <strong className="text-white font-semibold">George</strong>
                         </span>
@@ -3954,7 +3946,7 @@ export default function ProjectDetailPage() {
 
                       <div className="flex items-center gap-1.5 text-neutral-400">
                         <span>Created</span>
-                        <span className="text-neutral-200">Apr 13, 2026, 20:56</span>
+                        <span className="text-neutral-200">Apr 13,2026, 20:56</span>
                       </div>
 
                       <div className="flex items-center gap-1.5 text-neutral-400">
@@ -3962,35 +3954,27 @@ export default function ProjectDetailPage() {
                         <span>Last updated</span>
                         <span className="text-neutral-200">{lastUpdated}</span>
                       </div>
-
-                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400/90 font-medium ml-1">
-                        <Check size={12} />
-                        <span>Saved</span>
-                      </span>
                     </div>
                   </div>
 
                   {/* Real Document Blocks Stream */}
-                  <div className="space-y-4">
-                    {docBlocks.map((block) => {
-                      const isActive = activeBlockId === block.id
+                  <div className="space-y-2">
+                    {docBlocks.map((block, index) => {
+                      const isHeading =
+                        block.type === 'h1' || block.type === 'h2' || block.type === 'h3'
 
                       return (
                         <div
                           key={block.id}
-                          onClick={() => setActiveBlockId(block.id)}
-                          className={`group/block relative rounded-xl transition-all p-2 -mx-2 ${
-                            isActive
-                              ? 'ring-1 ring-blue-500/30 bg-white/[0.01]'
-                              : 'hover:bg-white/[0.01]'
-                          }`}
+                          onClick={() => setActiveBlockIndex(index)}
+                          className={`group/block relative ${isHeading ? 'mt-5' : ''}`}
                         >
-                          <div className="absolute right-2 -top-2 opacity-0 group-hover/block:opacity-100 transition-opacity flex items-center gap-1 z-10">
+                          <div className="absolute right-0 -top-3 opacity-0 group-hover/block:opacity-100 transition-opacity flex items-center gap-1 z-10">
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                deleteBlock(block.id)
+                                deleteBlock(index)
                               }}
                               className="p-1 rounded bg-neutral-800 hover:bg-rose-900/60 text-neutral-400 hover:text-rose-300 transition cursor-pointer shadow"
                               title="Delete block"
@@ -4166,8 +4150,8 @@ export default function ProjectDetailPage() {
                           )}
 
                           {block.type === 'file' && block.fileData && (
-                            <div className="w-56 rounded-xl overflow-hidden border border-neutral-800 bg-[#16171b] hover:border-neutral-700 hover:shadow-lg transition-all cursor-pointer group">
-                              <div className="h-28 bg-[#3b82f6] flex items-center justify-center relative group-hover:brightness-105 transition">
+                            <div className="w-36 rounded-lg overflow-hidden border border-neutral-800 bg-[#16171b] hover:border-neutral-700 hover:shadow-lg transition-all cursor-pointer group">
+                              <div className="h-24 bg-[#3b82f6] flex items-center justify-center relative group-hover:brightness-105 transition">
                                 <span className="text-4xl font-extrabold text-white font-serif tracking-tighter drop-shadow-sm select-none">
                                   {block.fileData.icon}
                                 </span>
@@ -4196,12 +4180,9 @@ export default function ProjectDetailPage() {
                                 </button>
                               </div>
 
-                              <div className="px-3.5 py-2.5 bg-[#141517] border-t border-neutral-800/80">
-                                <p className="text-xs text-neutral-300 font-medium truncate group-hover:text-blue-400 transition">
+                              <div className="px-2.5 py-2 bg-[#141517] border-t border-neutral-800/80">
+                                <p className="text-[11px] text-neutral-300 font-medium truncate group-hover:text-blue-400 transition">
                                   {block.fileData.name}
-                                </p>
-                                <p className="text-[10px] text-neutral-500 mt-0.5">
-                                  {block.fileData.size}
                                 </p>
                               </div>
                             </div>
@@ -4209,12 +4190,12 @@ export default function ProjectDetailPage() {
 
                           {block.type === 'image' && block.imageUrl && (
                             <div className="space-y-1.5">
-                              <div className="w-64 h-40 rounded-xl overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
+                              <div className="w-40 h-28 rounded-lg overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
                                 <Image
                                   src={block.imageUrl}
                                   alt={block.content || 'Image preview'}
-                                  width={256}
-                                  height={160}
+                                  width={160}
+                                  height={112}
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                 />
                               </div>
