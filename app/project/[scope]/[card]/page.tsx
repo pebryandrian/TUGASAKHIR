@@ -6162,6 +6162,18 @@ export default function ProjectDetailPage() {
                         </>
                       )}
                     </div>
+
+                    {/* Priority */}
+                    <div className="flex items-center gap-4 relative">
+                      <Flag size={17} className="text-neutral-400 shrink-0" />
+                      <span className="w-24 shrink-0 text-sm text-neutral-400">Priority</span>
+                      <PriorityMenu
+                        value={task.priority ?? 'medium'}
+                        onSelect={(p) => setTaskPriority(group.id, task.id, p)}
+                        showLabel
+                        align="left"
+                      />
+                    </div>
                   </div>
 
                   <div className="my-7 border-t border-[#1e2025]" />
