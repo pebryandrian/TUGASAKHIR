@@ -6604,6 +6604,21 @@ export default function ProjectDetailPage() {
           </div>
         )
       })()}
+
+      {/* Notifikasi gagal simpan (mis. kolom subtask belum dimigrasi) */}
+      {notice && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] max-w-md flex items-start gap-3 px-4 py-2.5 rounded-lg bg-rose-600/95 text-white text-xs shadow-2xl">
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="p-0.5 hover:opacity-80 transition cursor-pointer"
+            aria-label="Tutup notifikasi"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
