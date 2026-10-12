@@ -1755,7 +1755,29 @@ export default function ProjectDetailPage() {
     setDocBlocks(history[nextIdx])
   }
 
-  const activeBlock = docBlocks.find((b) => b.id === activeBlockId) || docBlocks[0]
+  // Shortcut keyboard: Ctrl/Cmd+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo
+  // (sama seperti tombol Undo/Redo di toolbar).
+  useEffect(() => {
+    if (activeTab !== 'Doc') return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        handleUndo()
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault()
+        handleRedo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeTab, handleUndo, handleRedo])
+
+  // Blok aktif ditandai lewat POSISI (index), bukan id — supaya tetap benar walau
+  // ada blok dengan id kembar (data lama), dan styling hanya mengubah satu blok.
+  const activeIndex = docBlocks.length ? Math.min(activeBlockIndex, docBlocks.length - 1) : 0
+  const activeBlock = docBlocks[activeIndex]
 
   const textStyleOptions: {
     type: TextStyleType
