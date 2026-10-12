@@ -95,8 +95,8 @@ export interface StatusDef {
   colorCode: string
 }
 
-// Kolom Kanban baku sesuai skripsi: To Do -> In Progress -> Review -> Done.
-// Daftar ini dipakai bersama oleh Main Table, dropdown status, dan papan Kanban.
+// Kolom status baku sesuai skripsi: To Do -> In Progress -> Review -> Done.
+// Daftar ini dipakai bersama oleh Main Table dan dropdown status.
 export const initialStatusList: StatusDef[] = [
   { id: 'todo',        label: 'To Do',       colorCode: '#64748b' },
   { id: 'in-progress', label: 'In Progress', colorCode: '#3b82f6' },
@@ -1007,7 +1007,7 @@ function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTas
         )
       })()}
 
-      {/* Status Legend matching the Kanban columns */}
+      {/* Keterangan warna status */}
       <div className="mt-8 flex flex-wrap items-center justify-center gap-6 py-2">
         {statusList.map((s) => (
           <div key={s.id} className="flex items-center gap-2">
@@ -1020,113 +1020,9 @@ function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTas
   )
 }
 
-// ======================== KANBAN BOARD VIEW COMPONENT ========================
-interface KanbanViewProps {
-  groups: TaskGroup[]
-  statusList: StatusDef[]
-  onMoveTask: (taskId: string, groupId: string, newStatus: string) => void
-  onAddTask: (statusLabel: string) => void
-  onOpenTask: (groupId: string, taskId: string) => void
-}
 
-function KanbanView({ groups, statusList, onMoveTask, onAddTask, onOpenTask }: KanbanViewProps) {
-  const [dragged, setDragged] = useState<{ taskId: string; groupId: string } | null>(null)
-  const [overStatus, setOverStatus] = useState<string | null>(null)
-
-  const flat = groups.flatMap((g) => g.items.map((t) => ({ task: t, group: g })))
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-6 -mx-1 px-1">
-      {statusList.map((status) => {
-        const column = flat.filter((x) => x.task.status === status.label)
-        const isOver = overStatus === status.id
-        return (
-          <div
-            key={status.id}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setOverStatus(status.id)
-            }}
-            onDragLeave={(e) => {
-              if (e.currentTarget === e.target) setOverStatus((s) => (s === status.id ? null : s))
-            }}
-            onDrop={(e) => {
-              e.preventDefault()
-              if (dragged) onMoveTask(dragged.taskId, dragged.groupId, status.label)
-              setDragged(null)
-              setOverStatus(null)
-            }}
-            className={`w-72 shrink-0 rounded-xl border bg-[#191a1e] flex flex-col transition-colors ${
-              isOver ? 'border-blue-500/80' : 'border-neutral-800/80'
-            }`}
-          >
-            {/* Column header */}
-            <div className="flex items-center justify-between px-3.5 py-3 border-b border-neutral-800/70">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: status.colorCode }} />
-                <span className="text-sm font-semibold text-white truncate">{status.label}</span>
-                <span className="text-xs text-neutral-500">{column.length}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => onAddTask(status.label)}
-                className="text-neutral-400 hover:text-white hover:bg-neutral-800/60 p-1 rounded-md transition cursor-pointer"
-                aria-label={`Tambah tugas ke ${status.label}`}
-              >
-                <Plus size={15} />
-              </button>
-            </div>
-
-            {/* Cards */}
-            <div className="flex-1 space-y-2.5 p-3 min-h-[120px]">
-              {column.length === 0 && (
-                <p className="text-xs text-neutral-600 text-center py-6 select-none">Tidak ada tugas</p>
-              )}
-              {column.map(({ task, group }) => (
-                <div
-                  key={task.id}
-                  draggable
-                  onDragStart={() => setDragged({ taskId: task.id, groupId: group.id })}
-                  onDragEnd={() => {
-                    setDragged(null)
-                    setOverStatus(null)
-                  }}
-                  onClick={() => onOpenTask(group.id, task.id)}
-                  className="bg-[#1b1c20] border border-neutral-800/70 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-blue-500/40 transition-colors"
-                >
-                  <p className="text-sm font-medium text-white leading-snug line-clamp-2">{task.title}</p>
-                  {task.description && (
-                    <p className="mt-1 text-xs text-neutral-500 leading-relaxed line-clamp-2">{task.description}</p>
-                  )}
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1 text-[10px] text-neutral-400 min-w-0">
-                      <Folder size={11} className="shrink-0" />
-                      <span className="truncate max-w-[110px]">{group.title}</span>
-                    </span>
-                    <span className="text-[10px] text-neutral-400 whitespace-nowrap">{task.date}</span>
-                  </div>
-                  {task.personNames && task.personNames.length > 0 && (
-                    <div className="mt-2.5 flex items-center gap-2">
-                      <div className="flex items-center -space-x-2">
-                        {task.personAvatars.slice(0, 4).map((src, i) => (
-                          <span
-                            key={i}
-                            className="relative w-5 h-5 rounded-full border border-[#1b1c20] overflow-hidden bg-neutral-700"
-                          >
-                            <Image src={src} alt={task.personNames?.[i] || 'Member'} fill sizes="20px" className="object-cover" />
-                          </span>
-                        ))}
-                      </div>
-                      <span className="text-[10px] text-neutral-400 truncate">{task.personNames.join(', ')}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -1444,26 +1340,7 @@ export default function ProjectDetailPage() {
     setActiveStatusPicker(null)
   }
 
-  // ======================== KANBAN DRAG & DROP ========================
-  // Pindahkan tugas antar kolom Kanban (native HTML5 drag & drop).
-  const handleMoveTask = (taskId: string, groupId: string, newStatus: string) => {
-    if (projectId) {
-      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(() => {})
-    }
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId
-          ? { ...g, items: g.items.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)) }
-          : g
-      )
-    )
-  }
-
-  // Buka modal New Item dengan status kolom yang ditekan.
-  const handleAddTaskInStatus = (statusLabel: string) => {
-    setNewTaskStatus(statusLabel)
-    setShowNewItemModal(true)
-  }
+  // ======================== TASK LIST HANDLERS ========================
 
   // Toggle assignee membership on a task
   const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof members)[0]) => {
@@ -2397,22 +2274,6 @@ export default function ProjectDetailPage() {
                   )}
                 </button>
 
-                {/* Kanban Tab */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('Kanban')}
-                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
-                    activeTab === 'Kanban'
-                      ? 'border-white text-white font-semibold'
-                      : 'border-transparent text-neutral-400 hover:text-neutral-200'
-                  }`}
-                >
-                  <span>Kanban</span>
-                  {activeTab === 'Kanban' && (
-                    <MoreHorizontal size={14} className="text-neutral-500" />
-                  )}
-                </button>
-
                 {/* Custom view tabs */}
                 {customViews.map((cv) => (
                   <button
@@ -2479,17 +2340,6 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
             </div>
-
-            {/* TAB: KANBAN BOARD */}
-            {activeTab === 'Kanban' && (
-              <KanbanView
-                groups={processedGroups}
-                statusList={statusList}
-                onMoveTask={handleMoveTask}
-                onAddTask={handleAddTaskInStatus}
-                onOpenTask={openTaskDetail}
-              />
-            )}
 
             {/* TAB 1: MAIN TABLE */}
             {activeTab === 'Main Table' && (
