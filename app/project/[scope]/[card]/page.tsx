@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
@@ -1020,9 +1020,51 @@ function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTas
   )
 }
 
+// Textarea yang tingginya mengikuti isi, supaya dokumen terasa mengalir
+// seperti aplikasi doc (bukan kotak terpisah per paragraf).
+const newBlockId = () => `block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
+function DocTextarea({
+  value,
+  onChange,
+  onKeyDown,
+  className,
+  placeholder,
+  autoFocus,
+  blockIndex,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  className?: string
+  placeholder?: string
+  autoFocus?: boolean
+  blockIndex?: number
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  const resize = () => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  useEffect(resize, [value])
 
   return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      autoFocus={autoFocus}
+      data-block-index={blockIndex}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      onInput={resize}
+      placeholder={placeholder}
+      className={`w-full bg-transparent resize-none border-none outline-none focus:ring-0 overflow-hidden ${className ?? ''}`}
+    />
   )
 }
 
@@ -1152,9 +1194,17 @@ export default function ProjectDetailPage() {
         )
       }
       if (board.docBlocks.length) {
-        setDocBlocks(board.docBlocks as DocBlock[])
-        setHistory([board.docBlocks as DocBlock[]])
+        // Pastikan tiap blok punya id unik (data lama/seed bisa tanpa id).
+        const seen = new Set<string>()
+        const loaded = (board.docBlocks as DocBlock[]).map((b, i) => {
+          const id = b.id && !seen.has(b.id) ? b.id : `block-${Date.now()}-${i}`
+          seen.add(id)
+          return { ...b, id }
+        })
+        setDocBlocks(loaded)
+        setHistory([loaded])
         setHistoryIndex(0)
+        setActiveBlockIndex(0)
       }
     })().catch(() => {})
     return () => {
@@ -1798,7 +1848,7 @@ export default function ProjectDetailPage() {
 
   const insertNewBlock = (type: BlockType) => {
     let newBlock: DocBlock
-    const id = `block-${Date.now()}`
+    const id = newBlockId()
     switch (type) {
       case 'h1':
         newBlock = { id, type: 'h1', content: 'Judul Baru', align: 'left', styles: {} }
