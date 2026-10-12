@@ -44,12 +44,26 @@ statuses     (id, project_id, label, color_code, position)     -- kolom Kanban (
 tasks        (id, project_id, group_id, status_id, title, description,
               priority ENUM['low','medium','high'], due_date, assignee_id, position, checked)
 comments     (id, task_id, author_id, body, created_at)
+subtasks     (id, task_id, parent_id, text, done, position,
+              assignee_id, status_id, due_date, priority)      -- parent_id = sub-subtask (nesting)
 docs         (id, project_id, blocks JSONB, updated_at)         -- isi tab "Doc"
 ```
 
 > Catatan: skripsi menyebut kolom Kanban tetap (To Do/In Progress/Review/Done). Kode kini sudah
 > memakai 4 status baku tersebut (`initialStatusList`). Fitur tambah label kustom tetap ada sebagai
 > pelengkap, tapi baku default = 4 kolom skripsi.
+
+> **Migrasi yang perlu dijalankan manual** (di Supabase → SQL Editor) supaya assignee/status/due
+> date/priority pada baris subtask bisa disimpan. Sebelum ini dijalankan, kolomnya kosong & edit
+> subtask tidak tersimpan (UI tetap jalan, tidak error).
+>
+> ```sql
+> alter table public.subtasks
+>   add column if not exists assignee_id uuid,
+>   add column if not exists status_id   uuid,
+>   add column if not exists due_date    date,
+>   add column if not exists priority    text;
+> ```
 
 **Implementasi nyata (Supabase, sudah jalan):** `profiles` (ekstensi `auth.users`), `workspaces`,
 `workspace_members`, `projects`, `project_members`, `task_groups`, `statuses`, `tasks`, `subtasks`,
@@ -114,6 +128,90 @@ Berdasarkan audit kode `app/`.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-10-12** — Konsistensi kolom: **Priority kini bisa diubah di semua tempat** (sebelumnya hanya di
+  baris subtask, baris task menampilkan teks statis "Medium"). Ditambahkan komponen bersama
+  `PriorityMenu` (flag + popover High/Medium/Low) yang dipakai di: baris task (kolom Priority),
+  baris subtask, panel detail task, dan modal New Item. `TaskItem.priority` di-load dari
+  `tasks.priority` (NOT NULL default `medium`, jadi tidak ada opsi "kosong"), handler `setTaskPriority`,
+  dan kolom **Priority sekarang tampil default** di Main Table (`extraColumns` awal `['Priority']`) sesuai
+  desain. Nilai palsu kolom "Timeline" (`2 Days`) dihapus → kolom tanpa data menampilkan `-`.
+  Kegagalan simpan subtask tidak lagi senyap: muncul notifikasi merah (`notice`) berisi pesan error.
+  Verifikasi browser (Edge/CDP): flag task medium→high bertahan setelah reload, flag subtask
+  neutral→low, panel detail "PriorityHigh"→"PriorityMedium", modal New Item punya baris Priority.
+  `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-12** — Main Table: baris subtask kini punya sel yang **bisa diubah** seperti baris task —
+  Assignee (popover pilih member), Status (chip + popover dari `statusList`), Date (input date), dan
+  Priority (flag High/Medium/Low). `lib/db.ts`: `SubTask` + `assignee_id`/`status_id`/`due_date`/
+  `priority`, fungsi `updateSubtask()`, dan `loadBoard` pakai `select('*')` untuk subtasks supaya tetap
+  jalan sebelum migrasi dijalankan. Handler: `updateSubtaskField()` (optimistic + simpan ke Supabase).
+  Perlu migrasi manual (lihat §2). Verifikasi browser (Edge/CDP): menu assignee terbuka & member bisa
+  dipilih, status → "In Progress", priority → flag `text-rose-500`, date → "Nov 20, 2026"; tanpa error
+  runtime. `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-12** — Main Table: (a) ikon **`+` di samping judul grup** untuk menambah task (membuka modal
+  New Item dengan grup itu sudah terpilih); (b) **indentasi baris subtask** diperjelas — nama subtask
+  menjorok `(depth+1)*24px` (task 0, subtask 24, sub-subtask 48) sementara kolom checkbox tetap rata,
+  agar task vs subtask mudah dibedakan. Verifikasi browser (Edge/CDP): paddingLeft nama = 0/24/48px,
+  tombol `+` header grup membuka modal. `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-12** — Main Table: subtask ditampilkan sebagai **baris tabel bersarang** (seperti gambar
+  referensi), bukan lagi daftar kecil di dalam sel. Migrasi DB `subtasks_parent_id`: kolom `parent_id`
+  (self-reference, on delete cascade) + index. `lib/db.ts`: `SubTask.parent_id`, `addSubtask(...,
+  parentId)`. `app/project/[scope]/[card]/page.tsx`: baris task menampilkan jumlah subtask + tombol "+",
+  baris subtask punya chevron (buka sub-subtask), tombol "+" (tambah sub-subtask), dan tombol hapus;
+  hapus subtask ikut menghapus turunannya. Ada baris **"Add Task"** di bawah tiap grup. Verifikasi:
+  `scripts/db-check.mjs` meng-assert subtask bersarang; repro browser (Edge/CDP) — expand task →
+  tampil baris NFR 01/NFR 02, expand NFR 01 → tampil 3 anak, tambah sub-subtask → tersimpan dengan
+  `parent_id` yang benar. `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-12** — Ctrl+Z (undo) & Ctrl+Shift+Z / Ctrl+Y (redo) kini berfungsi di tab Doc. Sebelumnya
+  tombol Undo/Redo sudah ada tetapi tidak ada shortcut keyboard, sehingga Ctrl+Z hanya memicu undo bawaan
+  browser pada textarea (yang hilang saat re-render). Ditambahkan listener `keydown` di
+  `app/project/[scope]/[card]/page.tsx` (aktif hanya saat tab Doc) yang memanggil `handleUndo`/`handleRedo`
+  dan `preventDefault`. Verifikasi: repro browser (Edge/CDP) — mengetik " ABC" lalu Ctrl+Z mengembalikan
+  ke "Hello", Ctrl+Shift+Z mengembalikan ke "Hello ABC", Ctrl+Z lagi ke "Hello".
+
+- **2026-10-12** — Mengganti ukuran font (dropdown T/H1/H2/H3) kini mengubah **hanya teks yang di-blok**
+  (diseleksi), bukan seluruh blok/dokumen. Di `app/project/[scope]/[card]/page.tsx`: saat mouse ditekan
+  pada tombol "Format Text Style", posisi seleksi (`selectionStart/End`) + index blok yang sedang fokus
+  diambil (`captureSelectionFromFocus`, `data-block-index`); jika ada teks terpilih, blok **dipecah**
+  menjadi `[sebelum] + [teks terpilih] + [sesudah]` (tiap pecahan dapat id baru) dan hanya bagian
+  terpilih yang berubah tipe/ukurannya. Jika tidak ada seleksi, hanya blok yang sedang fokus yang berubah
+  (index-based). Verifikasi: repro browser (Edge/CDP) pada dokumen default "Studio" — memilih
+  "Platform ini dirancang" lalu memilih Large Title menghasilkan `Platform ini dirancang` (30px, H1) +
+  ` untuk membantu ...` (14px); tidak ada blok lain yang berubah, tanpa warning duplicate key.
+  `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-12** — Perbaikan bug: mengganti ukuran/tipe font di satu blok ikut mengubah **semua** blok.
+  Akar masalah (direproduksi): blok aktif dicocokkan lewat `b.id === activeBlock.id`; dokumen lama bisa
+  punya beberapa blok dengan `id` kembar, sehingga guard lolos untuk semua blok. Perbaikan di
+  `app/project/[scope]/[card]/page.tsx`: (1) blok aktif kini dilacak lewat **posisi/index**
+  (`activeBlockIndex`), bukan id — jadi hanya blok yang diklik yang berubah walau id kembar;
+  (2) saat dimuat dari Supabase, `id` blok dinormalisasi agar unik; (3) id blok baru anti-tabrakan.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, dan repro browser (Edge/CDP) pada dokumen
+  ber-id kembar menunjukkan hanya blok yang diklik yang berubah.
+
+- **2026-10-12** — Tab **Doc** dibuat mengalir seperti aplikasi doc asli (bukan kotak per paragraf):
+  blok tidak lagi bergaya kartu (ring/border/background per blok dihapus), jarak antar blok dirapatkan,
+  dan tiap blok teks pakai **textarea auto-grow** (`DocTextarea`) sehingga tinggi mengikuti isi dan
+  paragraf menyambung. Blok heading diberi jarak atas. Menambah blok (tombol "+ Add" / "Type something")
+  langsung memfokuskan kursor ke blok baru. Slash command "/" tetap berfungsi.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, rute balas 200.
+
+- **2026-10-12** — Tab **Doc** disesuaikan dengan desain + fitur slash command. Tampilan: judul "Doc"
+  lebih ringkas, baris meta (Creator/ Created/ Last updated) dengan ikon jam, kartu file lebih kecil
+  (kotak biru + nama), dan ukuran gambar diperkecil. Fitur baru: mengetik **"/"** di blok teks membuka
+  menu perintah (Normal text / Large title / Medium text / Small text / Quote) yang mengubah tipe blok
+  dan menghapus "/" otomatis; bisa difilter dengan mengetik setelah "/", ditutup dengan Esc/klik luar.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, rute balas 200.
+
+- **2026-10-10** — Halaman project: **tab & komponen Kanban dihapus** (daftar tugas + statusnya sudah
+  ditangani Main Table), dan di Main Table tiap baris tugas kini punya **tombol `+`** untuk menambah
+  **subtask** langsung (daftar subtask tampil di panel expand tiap tugas, bisa dicentang/dihapus,
+  tersimpan ke DB via `addSubtask`/`setSubtaskDone`/`deleteSubtask`).
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses.
 
 - **2026-10-10** — Halaman auth (`app/signin/page.tsx`): minimum password diturunkan dari 14 → **8 karakter**
   (label + validasi saat submit), dan pesan **429 email rate limit** dari Supabase kini diterjemahkan jadi
