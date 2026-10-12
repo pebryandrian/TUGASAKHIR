@@ -19,12 +19,14 @@ import {
   addSubtask as addSubtaskRow,
   setSubtaskDone,
   deleteSubtask as deleteSubtaskRow,
+  updateSubtask as updateSubtaskRow,
   addComment as addCommentRow,
   likeComment,
   saveDoc,
   addMemberByEmail,
   getSessionProfile,
   type Workspace,
+  type Priority,
 } from '@/lib/db'
 import {
   Bell,
@@ -1162,10 +1164,20 @@ export default function ProjectDetailPage() {
                   status: board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do',
                   date: fromISODate(t.due_date),
                   checked: t.checked,
+                  priority: t.priority ?? null,
                   expanded: false,
                   subtasks: board.subtasks
                     .filter((s) => s.task_id === t.id)
-                    .map((s) => ({ id: s.id, text: s.text, done: s.done })),
+                    .map((s) => ({
+                      id: s.id,
+                      text: s.text,
+                      done: s.done,
+                      parentId: s.parent_id,
+                      assigneeId: s.assignee_id ?? null,
+                      statusId: s.status_id ?? null,
+                      date: fromISODate(s.due_date ?? null),
+                      priority: s.priority ?? null,
+                    })),
                   attachments: board.attachments
                     .filter((a) => a.task_id === t.id)
                     .map((a) => ({ id: a.id, name: a.name })),
@@ -1261,6 +1273,16 @@ export default function ProjectDetailPage() {
     groupId: string
     taskId: string
   } | null>(null)
+
+  // Inline "add subtask" di Main Table (key: `${groupId}:${taskId}`)
+  const [openSubtaskFor, setOpenSubtaskFor] = useState<string | null>(null)
+  const [subtaskDrafts, setSubtaskDrafts] = useState<Record<string, string>>({})
+  // Subtask yang sedang dibuka (menampilkan sub-subtask-nya).
+  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
+  // Popover sel subtask (assignee/status/date/priority), key: `${subId}:${field}`.
+  const [subCellMenu, setSubCellMenu] = useState<string | null>(null)
+  // Notifikasi ringkas kalau penyimpanan ke Supabase gagal.
+  const [notice, setNotice] = useState<string | null>(null)
 
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
@@ -1595,6 +1617,424 @@ export default function ProjectDetailPage() {
           : g
       )
     )
+  }
+
+  // ======================== SUBTASK QUICK-ADD (Main Table) ========================
+  const addTaskSubtask = async (
+    groupId: string,
+    taskId: string,
+    text: string,
+    parentId: string | null = null,
+  ) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+    const subs = task?.subtasks || []
+    let id = `sub-${Date.now()}`
+    if (projectId) {
+      const row = await addSubtaskRow(taskId, trimmed, subs.length, parentId).catch(() => null)
+      if (row) id = row.id
+    }
+    updateTask(groupId, taskId, {
+      subtasks: [...subs, { id, text: trimmed, done: false, parentId }],
+    })
+  }
+
+  const toggleTaskSubtask = (groupId: string, taskId: string, subId: string) => {
+    const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+    const sub = (task?.subtasks || []).find((s) => s.id === subId)
+    if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+    updateTask(groupId, taskId, {
+      subtasks: (task?.subtasks || []).map((s) => (s.id === subId ? { ...s, done: !s.done } : s)),
+    })
+  }
+
+  const deleteTaskSubtask = (groupId: string, taskId: string, subId: string) => {
+    if (projectId) deleteSubtaskRow(subId).catch(() => {})
+    const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+    const all = task?.subtasks || []
+    // Buang subtask ini beserta seluruh turunannya (DB sudah cascade).
+    const doomed = new Set<string>([subId])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const s of all) {
+        if (s.parentId && doomed.has(s.parentId) && !doomed.has(s.id)) {
+          doomed.add(s.id)
+          grew = true
+        }
+      }
+    }
+    updateTask(groupId, taskId, { subtasks: all.filter((s) => !doomed.has(s.id)) })
+  }
+
+  // ======================== NESTED SUBTASK ROWS (Main Table) ========================
+  // Ubah meta subtask (assignee/status/due date/priority) dari baris Main Table.
+  const updateSubtaskField = (
+    groupId: string,
+    taskId: string,
+    subId: string,
+    appPatch: Partial<{
+      assigneeId: string | null
+      statusId: string | null
+      date: string | null
+      priority: string | null
+    }>,
+    dbPatch: Parameters<typeof updateSubtaskRow>[1],
+  ) => {
+    if (projectId)
+      updateSubtaskRow(subId, dbPatch).catch((e: unknown) => {
+        const msg =
+          e && typeof e === 'object' && 'message' in e
+            ? String((e as { message: unknown }).message)
+            : ''
+        setNotice(`Gagal menyimpan perubahan subtask: ${msg || 'penyimpanan tidak tersedia'}`)
+      })
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id !== groupId
+          ? g
+          : {
+              ...g,
+              items: g.items.map((t) =>
+                t.id !== taskId
+                  ? t
+                  : {
+                      ...t,
+                      subtasks: (t.subtasks || []).map((s) =>
+                        s.id === subId ? { ...s, ...appPatch } : s,
+                      ),
+                    },
+              ),
+            },
+      ),
+    )
+    setSubCellMenu(null)
+  }
+
+  // Anak langsung dari sebuah parent (task -> parentId null, subtask -> subId).
+  const subChildren = (task: TaskItem, parentId: string | null) =>
+    (task.subtasks || []).filter((s) => (s.parentId ?? null) === parentId)
+
+  const toggleSubExpand = (id: string) =>
+    setExpandedSubs((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  // Render subtask sebagai baris tabel (indentasi sesuai kedalaman) + input tambah.
+  const renderSubtaskRows = (
+    groupId: string,
+    task: TaskItem,
+    parentId: string | null,
+    depth: number,
+  ): React.ReactNode[] => {
+    const rows: React.ReactNode[] = []
+    for (const s of subChildren(task, parentId)) {
+      const kids = subChildren(task, s.id)
+      const isOpen = expandedSubs.has(s.id)
+      const inputKey = `sub:${s.id}`
+      const blanks = (
+        <>
+          <td className="border-r border-neutral-800/80" />
+          <td className="border-r border-neutral-800/80" />
+          <td className="border-r border-neutral-800/80" />
+          {extraColumns.map((c) => (
+            <td key={c} className="border-r border-neutral-800/80" />
+          ))}
+          <td />
+        </>
+      )
+
+      // Sel meta subtask yang bisa diubah: Assignee, Status, Date, Priority.
+      const assigneeMember = members.find((m) => m.id === s.assigneeId)
+      const statusDef = statusList.find((st) => st.id === s.statusId)
+      const isMenuOpen = (field: string) => subCellMenu === `sub:${s.id}:${field}`
+      const toggleMenu = (field: string) =>
+        setSubCellMenu(isMenuOpen(field) ? null : `sub:${s.id}:${field}`)
+      const closeOverlay = (
+        <div className="fixed inset-0 z-20" onClick={() => setSubCellMenu(null)} />
+      )
+      const metaCells = (
+        <>
+          {/* Assignee */}
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+            <button
+              type="button"
+              onClick={() => toggleMenu('assignee')}
+              className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
+              title="Ubah assignee subtask"
+            >
+              {assigneeMember?.avatar ? (
+                <div className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700">
+                  <Image
+                    src={assigneeMember.avatar}
+                    alt={assigneeMember.name}
+                    width={24}
+                    height={24}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <UserIcon size={14} className="text-neutral-500" />
+              )}
+            </button>
+            {isMenuOpen('assignee') && (
+              <>
+                {closeOverlay}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
+                  <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                    Assign Member
+                  </div>
+                  <div className="space-y-1 max-h-56 overflow-y-auto no-scrollbar">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSubtaskField(groupId, task.id, s.id, { assigneeId: null }, { assignee_id: null })
+                      }
+                      className="w-full px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                    >
+                      — Tidak ada
+                    </button>
+                    {members.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() =>
+                          updateSubtaskField(
+                            groupId,
+                            task.id,
+                            s.id,
+                            { assigneeId: m.id },
+                            { assignee_id: m.id },
+                          )
+                        }
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                      >
+                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                          <Image src={m.avatar} alt={m.name} width={20} height={20} className="w-full h-full object-cover" />
+                        </div>
+                        <span className="text-neutral-200 text-xs">{m.name}</span>
+                        {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </td>
+
+          {/* Status */}
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+            <button
+              type="button"
+              onClick={() => toggleMenu('status')}
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium hover:opacity-80 transition cursor-pointer"
+              style={{
+                color: statusDef?.colorCode || '#94a3b8',
+                backgroundColor: `${statusDef?.colorCode || '#94a3b8'}1a`,
+              }}
+              title="Ubah status subtask"
+            >
+              {statusDef?.label || '—'}
+            </button>
+            {isMenuOpen('status') && (
+              <>
+                {closeOverlay}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
+                  {statusList.map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() =>
+                        updateSubtaskField(
+                          groupId,
+                          task.id,
+                          s.id,
+                          { statusId: statusIdByLabel(st.label) },
+                          { status_id: statusIdByLabel(st.label) },
+                        )
+                      }
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                    >
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.colorCode }} />
+                      <span className="text-neutral-200">{st.label}</span>
+                      {s.statusId === statusIdByLabel(st.label) && (
+                        <Check size={12} className="ml-auto text-blue-400" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </td>
+
+          {/* Date */}
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+            <button
+              type="button"
+              onClick={() => toggleMenu('date')}
+              className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-200 transition cursor-pointer"
+              title="Ubah tanggal subtask"
+            >
+              {s.date ? <span className="text-[11px]">{s.date}</span> : <CalendarDays size={14} className="text-neutral-500" />}
+            </button>
+            {isMenuOpen('date') && (
+              <>
+                {closeOverlay}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
+                  <input
+                    type="date"
+                    className="w-full bg-[#282a32] border border-neutral-700/60 rounded-md px-2 py-1 text-xs text-neutral-200 outline-none"
+                    onChange={(e) =>
+                      updateSubtaskField(
+                        groupId,
+                        task.id,
+                        s.id,
+                        { date: e.target.value ? fromISODate(e.target.value) : null },
+                        { due_date: e.target.value || null },
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateSubtaskField(groupId, task.id, s.id, { date: null }, { due_date: null })
+                    }
+                    className="w-full mt-1 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                  >
+                    Hapus tanggal
+                  </button>
+                </div>
+              </>
+            )}
+          </td>
+
+          {/* Priority */}
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+            <PriorityMenu
+              value={s.priority ?? null}
+              onSelect={(p) =>
+                updateSubtaskField(groupId, task.id, s.id, { priority: p }, { priority: p })
+              }
+            />
+          </td>
+
+          {extraColumns.map((c) => (
+            <td key={c} className="border-r border-neutral-800/80" />
+          ))}
+          <td />
+        </>
+      )
+
+      rows.push(
+        <tr
+          key={s.id}
+          className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/sub"
+        >
+          <td className="px-3 py-2 text-center border-r border-neutral-800/80">
+            <button
+              type="button"
+              onClick={() => toggleTaskSubtask(groupId, task.id, s.id)}
+              className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer mx-auto ${
+                s.done ? 'bg-blue-600 border-blue-500 text-white' : 'border-neutral-600 hover:border-neutral-400'
+              }`}
+            >
+              {s.done && <Check size={12} strokeWidth={3} />}
+            </button>
+          </td>
+          <td className="px-4 py-2 border-r border-neutral-800/80">
+            <div className="flex items-center gap-1.5" style={{ paddingLeft: (depth + 1) * 24 }}>
+              {kids.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => toggleSubExpand(s.id)}
+                  className="p-0.5 text-neutral-500 hover:text-neutral-300 transition cursor-pointer"
+                  title="Expand subtask"
+                >
+                  <ChevronRight
+                    size={13}
+                    className={`transition-transform duration-200 ${isOpen ? 'rotate-90 text-blue-400' : ''}`}
+                  />
+                </button>
+              ) : (
+                <span className="w-[18px] shrink-0" />
+              )}
+              <span className={`text-xs ${s.done ? 'text-neutral-500 line-through' : 'text-neutral-300'}`}>
+                {s.text}
+              </span>
+              {kids.length > 0 && (
+                <span className="text-[10px] text-neutral-500">({kids.length})</span>
+              )}
+              <button
+                type="button"
+                onClick={() => setOpenSubtaskFor(inputKey)}
+                className="ml-auto p-0.5 rounded text-neutral-500 hover:text-blue-400 opacity-0 group-hover/sub:opacity-100 transition cursor-pointer"
+                title="Tambah sub-subtask"
+                aria-label="Tambah sub-subtask"
+              >
+                <Plus size={13} strokeWidth={2.5} />
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteTaskSubtask(groupId, task.id, s.id)}
+                className="p-0.5 rounded text-neutral-600 hover:text-rose-400 opacity-0 group-hover/sub:opacity-100 transition cursor-pointer"
+                title="Hapus subtask"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </td>
+          {metaCells}
+        </tr>,
+      )
+
+      if (openSubtaskFor === inputKey) {
+        rows.push(
+          <tr key={`${s.id}-input`} className="border-b border-neutral-800/60">
+            <td className="border-r border-neutral-800/80" />
+            <td className="px-4 py-1.5 border-r border-neutral-800/80">
+              <div className="flex items-center gap-2" style={{ paddingLeft: (depth + 2) * 24 }}>
+                <input
+                  type="text"
+                  autoFocus
+                  value={subtaskDrafts[inputKey] || ''}
+                  onChange={(e) => setSubtaskDrafts((d) => ({ ...d, [inputKey]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addTaskSubtask(groupId, task.id, subtaskDrafts[inputKey] || '', s.id)
+                      setSubtaskDrafts((d) => ({ ...d, [inputKey]: '' }))
+                    }
+                    if (e.key === 'Escape') setOpenSubtaskFor(null)
+                  }}
+                  placeholder="Add subtask..."
+                  className="flex-1 bg-transparent text-xs text-neutral-200 placeholder:text-neutral-500 outline-none border-b border-neutral-700/60 pb-0.5"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    addTaskSubtask(groupId, task.id, subtaskDrafts[inputKey] || '', s.id)
+                    setSubtaskDrafts((d) => ({ ...d, [inputKey]: '' }))
+                  }}
+                  className="text-[10px] font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+            </td>
+            {blanks}
+          </tr>,
+        )
+      }
+
+      if (isOpen && kids.length > 0) {
+        rows.push(...renderSubtaskRows(groupId, task, s.id, depth + 1))
+      }
+    }
+    return rows
   }
 
   // Bulk actions count
@@ -3034,10 +3474,12 @@ export default function ProjectDetailPage() {
                                   const isDatePickerOpen =
                                     activeDatePicker?.groupId === group.id &&
                                     activeDatePicker?.taskId === item.id
+                                  const subKey = `task:${item.id}`
+                                  const subtaskOpen = openSubtaskFor === subKey
 
                                   return (
+                                    <Fragment key={item.id}>
                                     <tr
-                                      key={item.id}
                                       className="border-b border-neutral-800/60 hover:bg-white/[0.02] transition-colors group/row"
                                     >
                                       {/* Checkbox */}
@@ -3084,17 +3526,30 @@ export default function ProjectDetailPage() {
                                           >
                                             {item.title}
                                           </span>
+
+                                          {/* Jumlah subtask */}
+                                          {(item.subtasks || []).length > 0 && (
+                                            <span className="text-[10px] text-neutral-500">
+                                              ({subChildren(item, null).length})
+                                            </span>
+                                          )}
+
+                                          {/* Tombol + untuk menambah subtask */}
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              if (!item.expanded) toggleTaskExpand(group.id, item.id)
+                                              setOpenSubtaskFor(subKey)
+                                            }}
+                                            className="ml-auto p-0.5 rounded text-neutral-500 hover:text-blue-400 opacity-0 group-hover/row:opacity-100 transition cursor-pointer"
+                                            title="Tambah subtask"
+                                            aria-label="Tambah subtask"
+                                          >
+                                            <Plus size={14} strokeWidth={2.5} />
+                                          </button>
                                         </div>
 
-                                        {/* Expanded sub-details */}
-                                        {item.expanded && (
-                                          <div className="mt-2 pl-6 text-[11px] text-neutral-400 italic border-l border-neutral-700/60 ml-1 py-1 space-y-1">
-                                            <p>{item.description || 'Tidak ada deskripsi tambahan.'}</p>
-                                            <p className="text-[10px] text-neutral-500">
-                                              Assignees: {(item.personNames || ['George']).join(', ')}
-                                            </p>
-                                          </div>
-                                        )}
                                       </td>
 
                                       {/* Person Avatars (Interactive Assignee Picker) */}
