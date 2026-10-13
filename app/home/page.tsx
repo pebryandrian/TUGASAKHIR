@@ -112,10 +112,10 @@ export default function DashboardPage() {
         )
       : initialScopes
 
-  const cardsForScope = (title: string): ProjectCard[] => {
-    const rows = projects.filter((p) => p.scope === title)
-    if (rows.length === 0) return generateCards(title)
-    return rows.map((p) => ({
+  const cardsFrom = (title: string, rows: Project[]): ProjectCard[] => {
+    const scoped = rows.filter((p) => p.scope === title)
+    if (scoped.length === 0) return generateCards(title)
+    return scoped.map((p) => ({
       id: p.id,
       name: p.name,
       description: p.description ?? '',
@@ -124,6 +124,8 @@ export default function DashboardPage() {
       starred: false,
     }))
   }
+
+  const cardsForScope = (title: string): ProjectCard[] => cardsFrom(title, projects)
 
   const openScopeModal = (item: ScopeItem) => {
     setSelectedScope(item)
