@@ -91,12 +91,18 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [showNewScopeModal, setShowNewScopeModal] = useState(false)
   const [newScopeName, setNewScopeName] = useState('')
+  const [showNewCardModal, setShowNewCardModal] = useState(false)
+  const [newCardName, setNewCardName] = useState('')
+  const [newCardDesc, setNewCardDesc] = useState('')
 
   const refreshProjects = useCallback(async () => {
     try {
-      setProjects(await listProjects())
+      const rows = await listProjects()
+      setProjects(rows)
+      return rows
     } catch {
       setProjects([])
+      return []
     }
   }, [])
 
@@ -143,18 +149,31 @@ export default function DashboardPage() {
     setShowNewScopeModal(false)
   }
 
-  const handleNewCard = async () => {
+  const openNewCardModal = () => {
+    setNewCardName('')
+    setNewCardDesc('')
+    setShowNewCardModal(true)
+  }
+
+  const handleCreateCard = async (e: React.FormEvent) => {
+    e.preventDefault()
     if (!selectedScope) return
-    const name = prompt('Card name:', 'New Project')
-    if (!name?.trim()) return
-    await createProject({ name: name.trim(), scope: selectedScope.title })
-    await refreshProjects()
-    setModalCards(cardsForScope(selectedScope.title))
+    const name = newCardName.trim()
+    if (!name) return
+    await createProject({
+      name,
+      scope: selectedScope.title,
+      description: newCardDesc.trim() || undefined,
+    })
+    const rows = await refreshProjects()
+    setModalCards(cardsFrom(selectedScope.title, rows))
+    setShowNewCardModal(false)
   }
 
   const closeScopeModal = () => {
     setSelectedScope(null)
     setModalCards([])
+    setShowNewCardModal(false)
   }
 
   const toggleStar = (card: ProjectCard, scopeTitle: string) => {
@@ -495,6 +514,65 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* =================== CREATE NEW CARD MODAL =================== */}
+      {showNewCardModal && selectedScope && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowNewCardModal(false)}
+          />
+          <form
+            onSubmit={handleCreateCard}
+            className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Create New Card</h2>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Scope: <span className="text-neutral-200 font-medium">{selectedScope.title}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewCardModal(false)}
+                className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer -mt-1"
+                aria-label="Close"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                type="text"
+                autoFocus
+                value={newCardName}
+                onChange={(e) => setNewCardName(e.target.value)}
+                placeholder="card name"
+                className="w-full h-14 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+              />
+              <textarea
+                rows={3}
+                value={newCardDesc}
+                onChange={(e) => setNewCardDesc(e.target.value)}
+                placeholder="description (optional)"
+                className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end pt-6">
+              <button
+                type="submit"
+                disabled={!newCardName.trim()}
+                className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* =================== SCOPE DETAIL MODAL =================== */}
       {selectedScope && (
         <div
@@ -543,7 +621,7 @@ export default function DashboardPage() {
               </div>
               <button
                 type="button"
-                onClick={handleNewCard}
+                onClick={openNewCardModal}
                 className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
               >
                 <Plus size={15} strokeWidth={2.5} />
