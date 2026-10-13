@@ -129,6 +129,14 @@ Berdasarkan audit kode `app/`.
 
 ## 7. Riwayat perubahan
 
+- **2026-10-13** — Home / Scope Of Work: tombol **"New Card"** tidak lagi memakai `window.prompt`,
+  tapi membuka modal **"Create New Card"** (gaya sama dengan modal "Create New Scope"): input nama
+  (wajib) + deskripsi (opsional), tombol Create disabled kalau nama kosong. `createProject({ name,
+  scope, description })` menyimpan ke Supabase, lalu daftar kartu di-refresh dari hasil query terbaru
+  (`cardsFrom(title, rows)`, bukan dari state `projects` yang masih basi). Verifikasi browser
+  (Edge/CDP): modal muncul dengan input + textarea, submit menutup modal & kartu tampil di grid,
+  kartu tetap ada setelah reload. `tsc --noEmit` bersih, `next build` sukses.
+
 - **2026-10-12** — Konsistensi kolom: **Priority kini bisa diubah di semua tempat** (sebelumnya hanya di
   baris subtask, baris task menampilkan teks statis "Medium"). Ditambahkan komponen bersama
   `PriorityMenu` (flag + popover High/Medium/Low) yang dipakai di: baris task (kolom Priority),
