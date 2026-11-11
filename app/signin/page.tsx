@@ -30,6 +30,10 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
   const [rememberMe, setRememberMe] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
+  // Set when the recovery link already opened a session: the email field is then
+  // not needed, we only have to set the new password.
+  const [hasRecoverySession, setHasRecoverySession] = useState(false)
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
@@ -39,6 +43,17 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (mode !== 'forgot') return
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setHasRecoverySession(!!data.session)
+    })
+    return () => {
+      active = false
+    }
+  }, [mode, supabase])
 
   // Password validation checks
   const isMin8 = password.length >= 8
@@ -218,17 +233,19 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               </div>
             )}
 
-            <div>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email"
-                required
-                className="w-full h-11 px-4 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
-              />
-            </div>
+            {!(mode === 'forgot' && hasRecoverySession) && (
+              <div>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email"
+                  required
+                  className="w-full h-11 px-4 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
+                />
+              </div>
+            )}
 
             <div className="relative">
               <input
@@ -254,7 +271,7 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
             {(mode === 'signup' || mode === 'forgot') && (
               <div className="pt-1 pb-1 space-y-1.5 text-xs">
                 <p className="font-semibold text-neutral-800">
-                  Passowrd must contains :
+                  Password must contain:
                 </p>
                 <div className="flex items-center gap-2">
                   {isMin8 ? (
