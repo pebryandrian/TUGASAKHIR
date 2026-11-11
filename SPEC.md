@@ -137,6 +137,24 @@ Berdasarkan audit kode `app/`.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-12** – Perbaikan konsistensi frontend (data contoh dihapus, semua kontrol aktif):
+  (a) `findProject` mencocokkan **slug** URL dengan `scope`/`name` di database, sehingga kartu
+  project benar-benar membuka board-nya (sebelumnya selalu gagal dan jatuh ke data contoh);
+  (b) hapus fallback demo di board (`initialGroups`/`initialMembers`/`initialDocBlocks`,
+  workspace `seed-*`, `CURRENT_USER`) dan di Home (scope/kartu/member contoh);
+  (c) tab **Kanban** dipulihkan: 4 kolom + drag & drop native, tersimpan ke `tasks.status_id`;
+  (d) autosave tab Doc tidak lagi jalan sebelum dokumen selesai dimuat (tidak menimpa isi DB
+  dengan dokumen kosong);
+  (e) Home: profil & tanggal nyata, favorit tersimpan di `localStorage`, **My Member** dibaca dari
+  `profiles` dengan search + sort berfungsi, progress kartu dihitung dari `tasks`;
+  (f) Profile: email & role read-only, **ubah password** berfungsi, kegagalan simpan ditampilkan;
+  (g) `prompt()`/`confirm()`/`alert()` diganti modal (tambah grup, hapus massal, undang anggota);
+  (h) kegagalan simpan tidak lagi ditelan `.catch(() => {})` — muncul notifikasi alasan gagal;
+  (i) signin: checkbox "Remember me" yang tidak berefek dihapus; alur reset password dibedakan
+  antara **kirim link** dan **set password baru**.
+  Verifikasi: `npx tsc --noEmit` bersih, `next build` sukses; `/` dan `/signin` balas 200,
+  `/home` dan `/project` balas 307 (redirect ke signin) saat belum login.
+
 - **2026-10-14** – Dokumen skripsi: dibuat `docs/LaporanTA-PebryAndrian-revisi3.docx` dari
   `revisi2.docx`. Perbaikan konsistensi Bab 1–4: (a) Tabel 3.1 disamakan jadi **6 tahap** sesuai
   Gambar 1.1 dan Subbab 1.5 (sebelumnya 7 tahap sehingga tidak cocok); (b) kunci sitasi

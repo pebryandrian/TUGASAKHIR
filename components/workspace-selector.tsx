@@ -12,7 +12,7 @@ import {
 
 // Pemilih workspace dengan dropdown (search + recent) dan modal "Buat Workspace Baru".
 // Dipakai bersama oleh sidebar Home, Profile, dan halaman project.
-export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: string }) {
+export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [selected, setSelected] = useState(initial)
   const [open, setOpen] = useState(false)
@@ -23,12 +23,15 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
   const [dialog, setDialog] = useState<null | 'rename' | 'delete'>(null)
   const [editName, setEditName] = useState('')
   const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     listWorkspaces()
       .then((rows) => {
         setWorkspaces(rows)
-        if (rows.length > 0 && !rows.some((w) => w.name === initial)) {
+        if (rows.length === 0) {
+          setSelected('')
+        } else if (!rows.some((w) => w.name === initial)) {
           setSelected(rows[0].name)
         }
       })
@@ -42,12 +45,20 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = name.trim()
-    if (!trimmed) return
-    const created = await createWorkspace(trimmed)
-    setWorkspaces((prev) => [...prev, created])
-    setSelected(created.name)
-    setName('')
-    setShowModal(false)
+    if (!trimmed || creating) return
+    setCreating(true)
+    setError('')
+    try {
+      const created = await createWorkspace(trimmed)
+      setWorkspaces((prev) => [...prev, created])
+      setSelected(created.name)
+      setName('')
+      setShowModal(false)
+    } catch (err: any) {
+      setError(err?.message || 'Gagal membuat workspace.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const selectedWs = workspaces.find((w) => w.name === selected)
@@ -88,10 +99,16 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
             className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
           >
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                I
-              </span>
-              <span className="text-xs font-semibold text-white truncate">{selected}</span>
+              {selected ? (
+                <>
+                  <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    {selected.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs font-semibold text-white truncate">{selected}</span>
+                </>
+              ) : (
+                <span className="text-xs text-neutral-500 truncate">Belum ada workspace</span>
+              )}
             </div>
             <ChevronDown size={15} className="text-neutral-400 shrink-0" />
           </button>
@@ -248,6 +265,8 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
               className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
 
+            {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+
             <div className="flex items-center justify-end gap-3 pt-5">
               <button
                 type="button"
@@ -258,10 +277,10 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
               </button>
               <button
                 type="submit"
-                disabled={!name.trim()}
+                disabled={!name.trim() || creating}
                 className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>

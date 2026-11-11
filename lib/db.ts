@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
+import { slugify } from '@/lib/utils'
 
 // Lazy: no client is constructed at module load, so importing this from a Server
 // Component never creates a browser client during SSR.
@@ -139,6 +140,16 @@ export async function updateProfile(patch: Partial<Pick<Profile, 'name' | 'avata
   if (error) throw error
 }
 
+// Daftar anggota (dipakai section "My Member" di Home).
+export async function listProfiles(): Promise<Profile[]> {
+  const { data, error } = await supabase()
+    .from('profiles')
+    .select('id, name, email, role, avatar_url')
+    .order('name')
+  if (error) throw error
+  return (data as Profile[]) ?? []
+}
+
 export async function changePassword(password: string) {
   const { error } = await supabase().auth.updateUser({ password })
   if (error) throw error
@@ -206,12 +217,45 @@ export async function createProject(input: {
   return data as Project
 }
 
+// Ringkasan progres per project: jumlah tugas & yang sudah dicentang.
+// Dipakai kartu di Home supaya progress bar mencerminkan data nyata.
+export async function listProjectTaskStats(): Promise<
+  Record<string, { total: number; done: number }>
+> {
+  const { data, error } = await supabase().from('tasks').select('project_id, checked')
+  if (error) throw error
+  const stats: Record<string, { total: number; done: number }> = {}
+  for (const row of (data ?? []) as { project_id: string | null; checked: boolean }[]) {
+    if (!row.project_id) continue
+    const entry = (stats[row.project_id] ??= { total: 0, done: 0 })
+    entry.total += 1
+    if (row.checked) entry.done += 1
+  }
+  return stats
+}
+
+// URL memakai slug ("/project/studio-client/aqua"), sedangkan database menyimpan
+// nilai asli ("Studio Client", "Aqua"). Karena itu pencocokan dilakukan lewat slug,
+// bukan perbandingan string mentah — kalau tidak, project tidak pernah ketemu dan
+// halaman jatuh ke data contoh.
 export async function findProject(scope: string, card?: string): Promise<Project | null> {
   const db = supabase()
-  let q = db.from('projects').select('*')
-  q = card ? q.eq('scope', scope).eq('name', card) : q.eq('id', scope)
-  const { data } = await q.limit(1).maybeSingle()
-  return (data as Project) ?? null
+
+  if (!card) {
+    const { data } = await db.from('projects').select('*').eq('id', scope).maybeSingle()
+    return (data as Project) ?? null
+  }
+
+  const { data, error } = await db.from('projects').select('*')
+  if (error) throw error
+
+  const targetScope = slugify(scope)
+  const targetCard = slugify(card)
+  return (
+    ((data as Project[]) ?? []).find(
+      (p) => slugify(p.scope) === targetScope && slugify(p.name) === targetCard,
+    ) ?? null
+  )
 }
 
 // ======================== BOARD ========================
@@ -389,6 +433,23 @@ export async function addComment(taskId: string, body: string, parentId?: string
 
 export async function likeComment(id: string, likes: number): Promise<void> {
   const { error } = await supabase().from('comments').update({ likes }).eq('id', id)
+  if (error) throw error
+}
+
+export async function addAttachment(taskId: string, name: string): Promise<Attachment> {
+  const db = supabase()
+  const { data: { user } } = await db.auth.getUser()
+  const { data, error } = await db
+    .from('attachments')
+    .insert({ task_id: taskId, name, owner_id: user?.id })
+    .select()
+    .single()
+  if (error) throw error
+  return data as Attachment
+}
+
+export async function deleteAttachment(id: string): Promise<void> {
+  const { error } = await supabase().from('attachments').delete().eq('id', id)
   if (error) throw error
 }
 

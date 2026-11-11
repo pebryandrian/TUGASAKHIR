@@ -22,6 +22,8 @@ import {
   updateSubtask as updateSubtaskRow,
   addComment as addCommentRow,
   likeComment,
+  addAttachment as addAttachmentRow,
+  deleteAttachment as deleteAttachmentRow,
   saveDoc,
   addMemberByEmail,
   getSessionProfile,
@@ -29,6 +31,8 @@ import {
   type Priority,
 } from '@/lib/db'
 import { recordRecentProject } from '@/lib/utils'
+import { NotificationPanel } from '@/components/notification-panel'
+import { signOut } from '@/lib/auth'
 import {
   Bell,
   ThumbsUp,
@@ -88,6 +92,9 @@ import {
   ChevronsRight,
   LayoutGrid,
   Flag,
+  LogOut,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -133,13 +140,6 @@ export const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ]
-
-// Pengguna yang sedang login — dipakai untuk komentar & uploader lampiran.
-export const CURRENT_USER = {
-  name: 'George Frederik',
-  avatar:
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-}
 
 // ======================== TASK & GROUP INTERFACES ========================
 // Helper: get a light text colour for very dark/light bg
@@ -277,114 +277,6 @@ export interface TaskGroup {
   items: TaskItem[]
 }
 
-const initialGroups: TaskGroup[] = [
-  {
-    id: 'group-1',
-    title: 'Tugas Pertama',
-    color: 'text-[#6c7ff5]',
-    collapsed: false,
-    dateRange: 'Mar 28 - 29',
-    items: [
-      {
-        id: 't-1-1',
-        title: 'buat logo aqua',
-        hasChevron: true,
-        description: 'Desain ulang logo Aqua dalam resolusi tinggi dengan variasi warna.',
-        personAvatars: ['/images/clients/SUNDDAE.jpg'],
-        personNames: ['George'],
-        status: 'To Do',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-        subtasks: [
-          { id: 'sub-1', text: 'Kumpulkan referensi logo', done: true },
-          { id: 'sub-2', text: 'Sketsa 3 alternatif', done: false },
-        ],
-        attachments: [
-          { id: 'att-1', name: 'Revisi dari client.pdf', owner: 'George', avatar: '/images/clients/SUNDDAE.jpg' },
-          { id: 'att-2', name: 'Revisi dari client.pdf', owner: 'Puput', avatar: '/images/clients/ASIAN-MOOD.webp' },
-        ],
-        comments: [
-          {
-            id: 'cm-1',
-            author: 'George Frederik',
-            text: 'Perbaiki ini',
-            time: 'Yesterday at 4:10 AM',
-            avatar: CURRENT_USER.avatar,
-            likes: 0,
-          },
-        ],
-      },
-      {
-        id: 't-1-2',
-        title: 'apadah',
-        hasChevron: true,
-        description: 'Eksplorasi konsep dan moodboard visual untuk media sosial.',
-        personAvatars: ['/images/clients/CONTROVERSIAL.webp', '/images/clients/KONA.webp'],
-        personNames: ['Jordan Fufu', 'Puput Atira'],
-        status: 'In Progress',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-  {
-    id: 'group-2',
-    title: 'Tugas Kedua',
-    color: 'text-[#ea384c]',
-    collapsed: false,
-    dateRange: 'Mar 28 - 29',
-    items: [
-      {
-        id: 't-2-1',
-        title: 'apadah',
-        hasChevron: false,
-        description: 'Persiapan materi publikasi dan aset packaging.',
-        personAvatars: ['/images/clients/ASIAN-MOOD.webp'],
-        personNames: ['Puput Atira'],
-        status: 'To Do',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-      {
-        id: 't-2-2',
-        title: 'logo',
-        hasChevron: false,
-        description: 'Finishing logo vector SVG dan guideline brand.',
-        personAvatars: ['/images/clients/SOAR.webp'],
-        personNames: ['Rahmat Sudianto'],
-        status: 'In Progress',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-  {
-    id: 'group-3',
-    title: 'Tugas Ketiga',
-    color: 'text-[#22c55e]',
-    collapsed: true,
-    dateRange: 'Mar 29 - 30',
-    items: [
-      {
-        id: 't-3-1',
-        title: 'Review Brand Assets',
-        hasChevron: false,
-        description: 'Meeting review akhir bersama tim lead.',
-        personAvatars: ['/images/clients/GRIZZLE.webp'],
-        personNames: ['George'],
-        status: 'Review',
-        date: 'Mar 29, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-]
-
 // ======================== DOC BLOCK INTERFACES ========================
 export type TextStyleType = 'normal' | 'h1' | 'h2' | 'h3' | 'quote'
 export type BlockType =
@@ -428,49 +320,12 @@ export interface DocBlock {
   }
 }
 
-const initialDocBlocks: DocBlock[] = [
-  {
-    id: 'block-1',
-    type: 'paragraph',
-    content:
-      'Platform ini dirancang untuk membantu mengelola pekerjaan secara lebih terstruktur dan efisien. Dengan fitur yang intuitif, pengguna dapat mengatur tugas, berkolaborasi dengan tim, serta memantau perkembangan proyek dalam satu tempat yang terintegrasi.',
-    align: 'left',
-    styles: {},
-  },
-  {
-    id: 'block-2',
-    type: 'file',
-    content: '',
-    fileData: {
-      name: 'harga Makanan terbaru.docx',
-      size: '245 KB',
-      icon: 'W',
-    },
-  },
-  {
-    id: 'block-3',
-    type: 'image',
-    content: 'Referensi visual produk',
-    imageUrl:
-      'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=600&auto=format&fit=crop&q=80',
-  },
-]
-
 export interface Member {
   id: string
   name: string
   role: string
   avatar: string
 }
-
-const initialMembers: Member[] = [
-  { id: 'm-0', name: 'Balok Farmer', role: 'Product Manager', avatar: '/images/clients/SUNDDAE.jpg' },
-  { id: 'm-01', name: 'Afira cendera', role: 'Design Lead', avatar: '/images/clients/ASIAN-MOOD.webp' },
-  { id: 'm-1', name: 'George', role: 'Product Lead', avatar: '/images/clients/SUNDDAE.jpg' },
-  { id: 'm-2', name: 'Jordan Fufu', role: 'Senior Designer', avatar: '/images/clients/CONTROVERSIAL.webp' },
-  { id: 'm-3', name: 'Puput Atira', role: 'UI/UX Designer', avatar: '/images/clients/ASIAN-MOOD.webp' },
-  { id: 'm-4', name: 'Rahmat Sudianto', role: 'Illustrator', avatar: '/images/clients/SOAR.webp' },
-]
 
 // ======================== CUSTOM VIEWS (Gantt / Chart) ========================
 interface CustomView {
@@ -486,6 +341,13 @@ function GanttView({ groups, statusList }: { groups: TaskGroup[]; statusList: St
     .filter((n) => !Number.isNaN(n))
   if (tasks.length === 0) {
     return <p className="text-sm text-neutral-500 py-10 text-center">Belum ada tugas untuk ditampilkan.</p>
+  }
+  if (dates.length === 0) {
+    return (
+      <p className="text-sm text-neutral-500 py-10 text-center">
+        Tugas belum punya tanggal, jadi timeline belum bisa digambar.
+      </p>
+    )
   }
   const min = Math.min(...dates)
   const max = Math.max(...dates)
@@ -548,6 +410,129 @@ function ChartView({ groups, statusList }: { groups: TaskGroup[]; statusList: St
   )
 }
 
+// ======================== KANBAN VIEW ========================
+// Papan Kanban 4 kolom (To Do / In Progress / Review / Done) dengan drag & drop
+// native HTML5. Perpindahan kolom langsung disimpan lewat `onMove` (status_id).
+function KanbanView({
+  groups,
+  statusList,
+  onMove,
+  onOpen,
+  onAdd,
+}: {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+  onMove: (groupId: string, taskId: string, statusLabel: string) => void
+  onOpen: (groupId: string, taskId: string) => void
+  onAdd: (statusLabel: string) => void
+}) {
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [overColumn, setOverColumn] = useState<string | null>(null)
+
+  const tasks = groups.flatMap((g) =>
+    g.items.map((task) => ({ task, groupId: g.id, groupTitle: g.title })),
+  )
+
+  return (
+    <div className="flex gap-4 overflow-x-auto pb-2">
+      {statusList.map((status) => {
+        const items = tasks.filter((t) => t.task.status === status.label)
+        const isOver = overColumn === status.label
+        return (
+          <div
+            key={status.id}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setOverColumn(status.label)
+            }}
+            onDragLeave={() => setOverColumn((c) => (c === status.label ? null : c))}
+            onDrop={(e) => {
+              e.preventDefault()
+              const id = e.dataTransfer.getData('text/plain') || draggingId
+              const found = tasks.find((t) => t.task.id === id)
+              if (found) onMove(found.groupId, found.task.id, status.label)
+              setDraggingId(null)
+              setOverColumn(null)
+            }}
+            className={`w-72 shrink-0 rounded-xl border bg-[#191a1e] flex flex-col transition-colors ${
+              isOver ? 'border-blue-500/70 bg-[#1c2130]' : 'border-neutral-800/80'
+            }`}
+          >
+            <header className="flex items-center gap-2 px-3 py-2.5 border-b border-neutral-800/80">
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: status.colorCode }}
+              />
+              <span className="text-xs font-semibold text-neutral-200">{status.label}</span>
+              <span className="ml-auto text-[11px] text-neutral-500">{items.length}</span>
+            </header>
+
+            <div className="flex-1 p-2 space-y-2 min-h-[140px]">
+              {items.map(({ task, groupId, groupTitle }) => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', task.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDraggingId(task.id)
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null)
+                    setOverColumn(null)
+                  }}
+                  onClick={() => onOpen(groupId, task.id)}
+                  className={`rounded-lg border border-neutral-800 bg-[#141517] p-3 cursor-grab active:cursor-grabbing hover:border-blue-500/40 transition ${
+                    draggingId === task.id ? 'opacity-50' : ''
+                  }`}
+                >
+                  <p className="text-xs font-medium text-white leading-snug break-words">
+                    {task.title}
+                  </p>
+                  <p className="mt-1 text-[10px] text-neutral-500 truncate">{groupTitle}</p>
+                  <div className="mt-2 flex items-center gap-2 text-[10px] text-neutral-400">
+                    {task.priority && (
+                      <Flag
+                        size={11}
+                        fill="currentColor"
+                        className={PRIORITY_FLAG[task.priority] ?? 'text-neutral-600'}
+                      />
+                    )}
+                    {task.date && (
+                      <span className="flex items-center gap-1">
+                        <CalendarDays size={11} />
+                        {task.date}
+                      </span>
+                    )}
+                    {task.personAvatars?.[0] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={task.personAvatars[0]}
+                        alt={task.personNames?.[0] ?? 'Assignee'}
+                        className="w-5 h-5 rounded-full object-cover ml-auto border border-neutral-700"
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => onAdd(status.label)}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700/80 py-2 text-[11px] text-neutral-500 hover:text-white hover:border-neutral-600 transition cursor-pointer"
+              >
+                <Plus size={12} strokeWidth={2.5} />
+                Add task
+              </button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ======================== CALENDAR VIEW COMPONENT ========================
 interface CalendarViewProps {
   groups: TaskGroup[]
@@ -559,7 +544,9 @@ interface CalendarViewProps {
 
 function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTask }: CalendarViewProps) {
   const today = new Date()
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1)) // March 2026
+  const [currentMonth, setCurrentMonth] = useState(
+    () => new Date(today.getFullYear(), today.getMonth(), 1),
+  )
   const [hoveredEvent, setHoveredEvent] = useState<{ task: TaskItem; groupTitle: string; rect?: DOMRect } | null>(null)
   const [clickedDay, setClickedDay] = useState<number | null>(null)
 
@@ -622,11 +609,10 @@ function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTas
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1))
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1))
-  const goToday = () => setCurrentMonth(new Date(2026, 2, 1))
+  const goToday = () => setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1))
 
   const isToday = (day: number) =>
-    (day === today.getDate() && month === today.getMonth() && year === today.getFullYear()) ||
-    (year === 2026 && month === 2 && day === 17)
+    day === today.getDate() && month === today.getMonth() && year === today.getFullYear()
 
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -1163,19 +1149,15 @@ export default function ProjectDetailPage() {
   const cardTitle = rawCard.charAt(0).toUpperCase() + rawCard.slice(1).replace(/-/g, ' ')
 
   const [activeTab, setActiveTab] = useState<string>('Main Table')
-  const [groups, setGroups] = useState<TaskGroup[]>(initialGroups)
+  const [groups, setGroups] = useState<TaskGroup[]>([])
   const [activeNav, setActiveNav] = useState('Home')
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([
-    { id: 'seed-1', name: '2026 INVISUAL', owner_id: null },
-    { id: 'seed-2', name: '2025 INVISUAL', owner_id: null },
-    { id: 'seed-3', name: '2024 INVISUAL', owner_id: null },
-  ])
-  const [selectedWorkspace, setSelectedWorkspace] = useState('2026 INVISUAL')
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [selectedWorkspace, setSelectedWorkspace] = useState('')
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false)
   const [workspaceSearch, setWorkspaceSearch] = useState('')
   const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false)
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
-  const [members, setMembers] = useState<Member[]>(initialMembers)
+  const [members, setMembers] = useState<Member[]>([])
   const [customViews, setCustomViews] = useState<CustomView[]>([])
   const [showAddViewMenu, setShowAddViewMenu] = useState(false)
 
@@ -1185,14 +1167,26 @@ export default function ProjectDetailPage() {
   // ======================== SUPABASE LOAD ========================
   const [projectId, setProjectId] = useState<string | null>(null)
   // Pengguna yang sedang login, dipakai untuk komentar & lampiran.
-  const [me, setMe] = useState(CURRENT_USER)
+  const [me, setMe] = useState({ name: '', avatar: '' })
+  const [loadingBoard, setLoadingBoard] = useState(true)
+  const [boardError, setBoardError] = useState('')
+  // Doc baru boleh diautopsave setelah isi aslinya selesai dimuat.
+  const [docLoaded, setDocLoaded] = useState(false)
 
-  // Muat board dari Supabase. Kalau project belum ada di DB, data contoh tetap tampil.
+  // Muat board dari Supabase. Kalau project tidak ditemukan, tampilkan pesan —
+  // bukan data contoh, supaya tidak ada informasi palsu di layar.
   useEffect(() => {
     let alive = true
+    setLoadingBoard(true)
+    setBoardError('')
     ;(async () => {
       const project = await findProject(rawScope, rawCard)
-      if (!project) return
+      if (!alive) return
+      if (!project) {
+        setBoardError('Project tidak ditemukan. Mungkin sudah dihapus atau tautannya salah.')
+        setLoadingBoard(false)
+        return
+      }
       recordRecentProject({
         scope: rawScope,
         card: rawCard,
@@ -1204,13 +1198,17 @@ export default function ProjectDetailPage() {
 
       listWorkspaces()
         .then((rows) => {
-          if (alive && rows.length) setWorkspaces(rows)
+          if (!alive) return
+          setWorkspaces(rows)
+          setSelectedWorkspace((current) =>
+            current && rows.some((w) => w.name === current) ? current : (rows[0]?.name ?? ''),
+          )
         })
         .catch(() => {})
 
       getSessionProfile()
         .then((p) => {
-          if (alive && p) setMe({ name: p.name, avatar: p.avatar_url || CURRENT_USER.avatar })
+          if (alive && p) setMe({ name: p.name, avatar: p.avatar_url ?? '' })
         })
         .catch(() => {})
 
@@ -1293,27 +1291,46 @@ export default function ProjectDetailPage() {
           })),
         )
       }
-      if (board.docBlocks.length) {
-        // Pastikan tiap blok punya id unik (data lama/seed bisa tanpa id).
-        const seen = new Set<string>()
-        const loaded = (board.docBlocks as DocBlock[]).map((b, i) => {
-          const id = b.id && !seen.has(b.id) ? b.id : `block-${Date.now()}-${i}`
-          seen.add(id)
-          return { ...b, id }
-        })
-        setDocBlocks(loaded)
-        setHistory([loaded])
-        setHistoryIndex(0)
-        setActiveBlockIndex(0)
-      }
-    })().catch(() => {})
+      // Pastikan tiap blok punya id unik (data lama/seed bisa tanpa id).
+      const seen = new Set<string>()
+      const loaded = (board.docBlocks as DocBlock[]).map((b, i) => {
+        const id = b.id && !seen.has(b.id) ? b.id : `block-${Date.now()}-${i}`
+        seen.add(id)
+        return { ...b, id }
+      })
+      setDocBlocks(loaded)
+      setHistory([loaded])
+      setHistoryIndex(0)
+      setActiveBlockIndex(0)
+      setDocLoaded(true)
+    })()
+      .catch((err) => {
+        if (alive) setBoardError(err instanceof Error ? err.message : 'Gagal memuat board.')
+      })
+      .finally(() => {
+        if (alive) setLoadingBoard(false)
+      })
     return () => {
       alive = false
     }
   }, [rawScope, rawCard])
 
   // Terjemahkan label status UI -> id kolom `statuses` di DB.
-  const statusIdByLabel = (label: string) => statusList.find((s) => s.label === label)?.id ?? null
+  // Id fallback ('todo', 'in-progress', ...) bukan UUID, jadi tidak boleh dikirim
+  // ke database — kembalikan null supaya update tetap valid.
+  const statusIdByLabel = (label: string) => {
+    const id = statusList.find((s) => s.label === label)?.id ?? null
+    return id && /^[0-9a-f]{8}-/i.test(id) ? id : null
+  }
+
+  // Kegagalan simpan tidak boleh ditelan diam-diam: tampilkan alasannya.
+  const notifySaveError = (err: unknown) => {
+    setNotice(
+      `Gagal menyimpan perubahan: ${
+        err instanceof Error ? err.message : 'penyimpanan tidak tersedia'
+      }`,
+    )
+  }
   const refreshMembers = async () => {
     if (!projectId) return
     const board = await loadBoard(projectId)
@@ -1375,20 +1392,33 @@ export default function ProjectDetailPage() {
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
   const [newTaskTitle, setNewTaskTitle] = useState('New Item')
-  const [newTaskGroup, setNewTaskGroup] = useState<string>('group-1')
+  const [newTaskGroup, setNewTaskGroup] = useState<string>('')
   const [newTaskAssignee, setNewTaskAssignee] = useState<string>('')
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('')
-  const [newTaskDate, setNewTaskDate] = useState<string>('Feb 4, 12:00 AM')
+  const [newTaskDate, setNewTaskDate] = useState<string>('')
   const [newTaskPriority, setNewTaskPriority] = useState<string>('medium')
+
+  // Header (notifikasi & menu pengguna)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+
+  // Modal pengganti prompt()/confirm() bawaan browser agar konsisten dengan UI.
+  const [showAddGroupModal, setShowAddGroupModal] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteError, setInviteError] = useState('')
+  const [inviting, setInviting] = useState(false)
 
   // Modal Popover dropdown states (matching slides)
   const [showGroupDropdown, setShowGroupDropdown] = useState(false)
   const [showPersonDropdown, setShowPersonDropdown] = useState(false)
   const [showStatusDropdown, setShowStatusDropdown] = useState(false)
   const [showDateDropdown, setShowDateDropdown] = useState(false)
-  const [datePickerMonth, setDatePickerMonth] = useState(2) // March
-  const [datePickerYear, setDatePickerYear] = useState(2026)
-  const [datePickerDay, setDatePickerDay] = useState(17)
+  const [datePickerMonth, setDatePickerMonth] = useState(() => new Date().getMonth())
+  const [datePickerYear, setDatePickerYear] = useState(() => new Date().getFullYear())
+  const [datePickerDay, setDatePickerDay] = useState(() => new Date().getDate())
   const [datePickerTime, setDatePickerTime] = useState('12:00 AM')
   const [searchGroupQuery, setSearchGroupQuery] = useState('')
   const [searchPersonQuery, setSearchPersonQuery] = useState('')
@@ -1434,22 +1464,31 @@ export default function ProjectDetailPage() {
   }
 
   // ======================== DOC TAB STATE & HISTORY ========================
-  const [docBlocks, setDocBlocks] = useState<DocBlock[]>(initialDocBlocks)
-  const [history, setHistory] = useState<DocBlock[][]>([initialDocBlocks])
+  const [docBlocks, setDocBlocks] = useState<DocBlock[]>([])
+  const [history, setHistory] = useState<DocBlock[][]>([[]])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [activeBlockIndex, setActiveBlockIndex] = useState(0)
+  // Input file tersembunyi untuk blok gambar (gambar disimpan sebagai data URL).
+  const docImageInputRef = useRef<HTMLInputElement>(null)
+  const [imageTargetBlock, setImageTargetBlock] = useState<string | null>(null)
   // Seleksi teks di dalam blok (untuk mengubah HANYA teks yang di-blok).
   const selectionRef = useRef<{ index: number; start: number; end: number } | null>(null)
-  const [lastUpdated, setLastUpdated] = useState('Apr 13, 2026, 22:43')
+  const [lastUpdated, setLastUpdated] = useState('')
 
   // Simpan isi tab Doc ke Supabase (debounce 800ms).
+  // Jangan jalan sebelum dokumen asli selesai dimuat, kalau tidak isi kosong
+  // akan menimpa dokumen yang sudah tersimpan.
   useEffect(() => {
-    if (!projectId) return
+    if (!projectId || !docLoaded) return
     const t = setTimeout(() => {
-      saveDoc(projectId, docBlocks).catch(() => {})
+      saveDoc(projectId, docBlocks).catch((err) => {
+        setNotice(
+          `Gagal menyimpan dokumen: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+      })
     }, 800)
     return () => clearTimeout(t)
-  }, [projectId, docBlocks])
+  }, [projectId, docBlocks, docLoaded])
 
   // Doc toolbars dropdown states
   const [showAddMenu, setShowAddMenu] = useState(false)
@@ -1482,12 +1521,12 @@ export default function ProjectDetailPage() {
   }
 
   const handleDeleteLabel = (id: string) => {
-    if (projectId) deleteStatus(id).catch(() => {})
+    if (projectId) deleteStatus(id).catch(notifySaveError)
     setStatusList((prev) => prev.filter((s) => s.id !== id))
   }
 
   const handleUpdateLabelColor = (id: string, colorCode: string) => {
-    if (projectId) updateStatusColor(id, colorCode).catch(() => {})
+    if (projectId) updateStatusColor(id, colorCode).catch(notifySaveError)
     setStatusList((prev) => prev.map((s) => (s.id === id ? { ...s, colorCode } : s)))
   }
 
@@ -1496,7 +1535,7 @@ export default function ProjectDetailPage() {
   // Select a status from the ordered dropdown list
   const setTaskStatus = (groupId: string, taskId: string, newStatus: TaskStatus) => {
     if (projectId) {
-      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(() => {})
+      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1517,7 +1556,7 @@ export default function ProjectDetailPage() {
     if (projectId) {
       const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
       const exists = (current?.personNames || []).includes(member.name)
-      updateTaskRow(taskId, { assignee_id: exists ? null : member.id }).catch(() => {})
+      updateTaskRow(taskId, { assignee_id: exists ? null : member.id }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1551,7 +1590,7 @@ export default function ProjectDetailPage() {
 
   // Set prioritas task (dipakai kolom Priority di Main Table & panel detail)
   const setTaskPriority = (groupId: string, taskId: string, priority: string) => {
-    if (projectId) updateTaskRow(taskId, { priority: priority as Priority }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { priority: priority as Priority }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) =>
         g.id !== groupId
@@ -1564,7 +1603,7 @@ export default function ProjectDetailPage() {
   // Set task date
   const setTaskDate = (groupId: string, taskId: string, newDate: string) => {
     if (projectId) {
-      updateTaskRow(taskId, { due_date: toISODate(newDate) }).catch(() => {})
+      updateTaskRow(taskId, { due_date: toISODate(newDate) }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1582,7 +1621,7 @@ export default function ProjectDetailPage() {
   const toggleTaskCheck = (groupId: string, taskId: string) => {
     if (projectId) {
       const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
-      if (current) updateTaskRow(taskId, { checked: !current.checked }).catch(() => {})
+      if (current) updateTaskRow(taskId, { checked: !current.checked }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1597,13 +1636,25 @@ export default function ProjectDetailPage() {
 
   // Toggle all checkboxes in a group
   const toggleAllGroupTasks = (groupId: string) => {
+    const group = groups.find((g) => g.id === groupId)
+    if (!group) return
+    const nextChecked = !group.items.every((t) => t.checked)
+    if (projectId) {
+      group.items.forEach((t) => {
+        if (t.checked === nextChecked) return
+        updateTaskRow(t.id, { checked: nextChecked }).catch((err) => {
+          setNotice(
+            `Gagal menyimpan centang: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+          )
+        })
+      })
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
-        const allChecked = g.items.every((t) => t.checked)
         return {
           ...g,
-          items: g.items.map((t) => ({ ...t, checked: !allChecked })),
+          items: g.items.map((t) => ({ ...t, checked: nextChecked })),
         }
       })
     )
@@ -1631,13 +1682,28 @@ export default function ProjectDetailPage() {
     )
   }
 
+  // Buka modal New Item dengan nilai awal dari data nyata.
+  const openNewItemModal = (date?: string, status?: string) => {
+    setNewTaskTitle('New Item')
+    setNewTaskGroup(groups[0]?.id ?? '')
+    setNewTaskAssignee('')
+    setNewTaskStatus(status ?? statusList[0]?.label ?? '')
+    setNewTaskDate(date ?? '')
+    setNewTaskPriority('medium')
+    setShowGroupDropdown(false)
+    setShowPersonDropdown(false)
+    setShowStatusDropdown(false)
+    setShowDateDropdown(false)
+    setShowNewItemModal(true)
+  }
+
   // Submit new task from modal
   const handleCreateNewTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTaskTitle.trim()) return
 
     const selectedMember = members.find((m) => m.name === newTaskAssignee)
-    const statusLabel = newTaskStatus || 'To Do'
+    const statusLabel = newTaskStatus || statusList[0]?.label || 'To Do'
     const groupId = groups.some((g) => g.id === newTaskGroup) ? newTaskGroup : groups[0]?.id ?? null
     let id = `task-${Date.now()}`
 
@@ -1647,11 +1713,15 @@ export default function ProjectDetailPage() {
         group_id: groupId,
         status_id: statusIdByLabel(statusLabel),
         title: newTaskTitle.trim(),
-        description: 'Tugas baru dibuat via toolbar New Item.',
         due_date: toISODate(newTaskDate),
         assignee_id: selectedMember?.id ?? null,
         priority: newTaskPriority as Priority,
-      }).catch(() => null)
+      }).catch((err) => {
+        setNotice(
+          `Gagal membuat tugas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+        return null
+      })
       if (row) id = row.id
     }
 
@@ -1659,7 +1729,7 @@ export default function ProjectDetailPage() {
       id,
       title: newTaskTitle.trim(),
       hasChevron: true,
-      description: 'Tugas baru dibuat via toolbar New Item.',
+      description: undefined,
       personAvatars: selectedMember ? [selectedMember.avatar] : [],
       personNames: selectedMember ? [selectedMember.name] : [],
       status: statusLabel,
@@ -1686,7 +1756,7 @@ export default function ProjectDetailPage() {
 
   // Inline rename task
   const updateTaskTitle = (groupId: string, taskId: string, newTitle: string) => {
-    if (projectId) updateTaskRow(taskId, { title: newTitle }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { title: newTitle }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -1700,7 +1770,7 @@ export default function ProjectDetailPage() {
 
   // Update task description from the detail modal
   const updateTaskDescription = (groupId: string, taskId: string, description: string) => {
-    if (projectId) updateTaskRow(taskId, { description }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { description }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -1747,14 +1817,14 @@ export default function ProjectDetailPage() {
   const toggleTaskSubtask = (groupId: string, taskId: string, subId: string) => {
     const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
     const sub = (task?.subtasks || []).find((s) => s.id === subId)
-    if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+    if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(notifySaveError)
     updateTask(groupId, taskId, {
       subtasks: (task?.subtasks || []).map((s) => (s.id === subId ? { ...s, done: !s.done } : s)),
     })
   }
 
   const deleteTaskSubtask = (groupId: string, taskId: string, subId: string) => {
-    if (projectId) deleteSubtaskRow(subId).catch(() => {})
+    if (projectId) deleteSubtaskRow(subId).catch(notifySaveError)
     const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
     const all = task?.subtasks || []
     // Buang subtask ini beserta seluruh turunannya (DB sudah cascade).
@@ -2147,19 +2217,38 @@ export default function ProjectDetailPage() {
   const selectedTasks = allTasks.filter((t) => t.checked)
 
   // Bulk delete
-  const handleBulkDelete = () => {
-    if (!confirm(`Delete ${selectedTasks.length} selected tasks?`)) return
-    if (projectId) deleteTasks(selectedTasks.map((t) => t.id)).catch(() => {})
+  const handleBulkDelete = async () => {
+    const ids = selectedTasks.map((t) => t.id)
+    if (projectId && ids.length) {
+      try {
+        await deleteTasks(ids)
+      } catch (err) {
+        setNotice(
+          `Gagal menghapus tugas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+      }
+    }
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
         items: g.items.filter((t) => !t.checked),
       }))
     )
+    setShowBulkDeleteModal(false)
   }
 
   // Bulk set status
   const handleBulkSetStatus = (status: string) => {
+    const statusId = statusIdByLabel(status)
+    if (projectId) {
+      selectedTasks.forEach((t) => {
+        updateTaskRow(t.id, { status_id: statusId }).catch((err) => {
+          setNotice(
+            `Gagal menyimpan status: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+          )
+        })
+      })
+    }
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
@@ -2181,13 +2270,18 @@ export default function ProjectDetailPage() {
 
   // Add new group
   const handleAddNewGroup = async () => {
-    const groupName = prompt('Enter new group name:', 'Tugas Baru')
+    const groupName = newGroupName.trim()
     if (!groupName) return
     const colors = ['text-[#6c7ff5]', 'text-[#ea384c]', 'text-[#22c55e]', 'text-[#f59e0b]', 'text-[#ec4899]']
     const color = colors[groups.length % colors.length]
     let id = `group-${Date.now()}`
     if (projectId) {
-      const row = await createGroup(projectId, groupName, color, groups.length).catch(() => null)
+      const row = await createGroup(projectId, groupName, color, groups.length).catch((err) => {
+        setNotice(
+          `Gagal membuat grup: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+        return null
+      })
       if (row) id = row.id
     }
     const newGroup: TaskGroup = {
@@ -2198,25 +2292,47 @@ export default function ProjectDetailPage() {
       dateRange: '',
       items: [],
     }
-    setGroups([...groups, newGroup])
+    setGroups((prev) => [...prev, newGroup])
+    setNewGroupName('')
+    setShowAddGroupModal(false)
     setShowMoreTableMenu(false)
+  }
+
+  // Invite anggota lewat email (modal, bukan prompt browser).
+  const handleInvite = async () => {
+    const email = inviteEmail.trim()
+    if (!email || !projectId) return
+    setInviting(true)
+    setInviteError('')
+    try {
+      await addMemberByEmail(projectId, email)
+      await refreshMembers()
+      setShowInviteModal(false)
+      setInviteEmail('')
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Gagal mengundang anggota.')
+    } finally {
+      setInviting(false)
+    }
   }
 
   // Export to CSV
   const exportToCSV = () => {
-    const rows = [['Group', 'Item', 'Assignees', 'Status', 'Date']]
+    const cell = (value: string) => `"${(value ?? '').replace(/"/g, '""')}"`
+    const rows: string[][] = [['Group', 'Item', 'Assignees', 'Status', 'Date']]
     groups.forEach((g) => {
       g.items.forEach((item) => {
         rows.push([
           g.title,
           item.title,
-          (item.personNames || ['George']).join('; '),
+          (item.personNames || []).join('; '),
           item.status,
           item.date,
         ])
       })
     })
-    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n')
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + rows.map((row) => row.map(cell).join(',')).join('\n')
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
@@ -2249,7 +2365,7 @@ export default function ProjectDetailPage() {
         }
         // Person filter
         if (personFilter !== 'all') {
-          const names = item.personNames || ['George']
+          const names = item.personNames || []
           if (!names.includes(personFilter)) return false
         }
         // Status filter
@@ -2291,6 +2407,31 @@ export default function ProjectDetailPage() {
 
   const canUndo = historyIndex > 0
   const canRedo = historyIndex < history.length - 1
+
+  // Pilih gambar untuk blok `image` (disimpan sebagai data URL di dalam blocks).
+  const handleDocImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const targetId = imageTargetBlock
+    setImageTargetBlock(null)
+    if (!file || !targetId) return
+    if (!file.type.startsWith('image/')) {
+      setNotice('File harus berupa gambar.')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setNotice('Ukuran gambar maksimal 2 MB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = reader.result as string
+      commitBlocksChange(
+        docBlocks.map((b) => (b.id === targetId ? { ...b, imageUrl: url } : b)),
+      )
+    }
+    reader.readAsDataURL(file)
+  }
 
   const handleUndo = () => {
     if (!canUndo) return
@@ -2488,8 +2629,7 @@ export default function ProjectDetailPage() {
               .filter(Boolean)
               .map((txt, i) => ({ id: `it-${Date.now()}-${i}`, text: txt, checked: false }))
           : [
-              { id: `it-${Date.now()}-1`, text: 'Tentukan tujuan utama proyek', checked: false },
-              { id: `it-${Date.now()}-2`, text: 'Rancang wireframe & prototype awal', checked: false },
+              { id: `it-${Date.now()}-1`, text: '', checked: false },
             ])
       return { ...b, type, items: existingItems }
     })
@@ -2533,8 +2673,7 @@ export default function ProjectDetailPage() {
           type: 'bullet-list',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Item daftar pertama' },
-            { id: `it-${Date.now()}-2`, text: 'Item daftar kedua' },
+            { id: `it-${Date.now()}-1`, text: '' },
           ],
         }
         break
@@ -2544,8 +2683,7 @@ export default function ProjectDetailPage() {
           type: 'numbered-list',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Langkah pertama dalam brief' },
-            { id: `it-${Date.now()}-2`, text: 'Langkah kedua implementasi' },
+            { id: `it-${Date.now()}-1`, text: '' },
           ],
         }
         break
@@ -2555,8 +2693,7 @@ export default function ProjectDetailPage() {
           type: 'checklist',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Briefing awal dengan klien', checked: true },
-            { id: `it-${Date.now()}-2`, text: 'Penyusunan aset visual brand', checked: false },
+            { id: `it-${Date.now()}-1`, text: '', checked: false },
           ],
         }
         break
@@ -2566,9 +2703,9 @@ export default function ProjectDetailPage() {
           type: 'file',
           content: '',
           fileData: {
-            name: 'Dokumen-Spesifikasi-Project.docx',
-            size: '312 KB',
-            icon: 'W',
+            name: 'Dokumen baru',
+            size: '',
+            icon: 'F',
           },
         }
         break
@@ -2576,9 +2713,8 @@ export default function ProjectDetailPage() {
         newBlock = {
           id,
           type: 'image',
-          content: 'Visual mockup referensi proyek',
-          imageUrl:
-            'https://images.unsplash.com/photo-1542744094-3a31f272c490?w=600&auto=format&fit=crop&q=80',
+          content: '',
+          imageUrl: '',
         }
         break
       case 'divider':
@@ -2603,7 +2739,7 @@ export default function ProjectDetailPage() {
 
   const deleteBlock = (index: number) => {
     if (docBlocks.length <= 1) {
-      alert('Dokumen minimal memiliki satu blok konten.')
+      setNotice('Dokumen minimal memiliki satu blok konten.')
       return
     }
     const updated = docBlocks.filter((_, i) => i !== index)
@@ -2709,6 +2845,7 @@ export default function ProjectDetailPage() {
         <div className="flex items-center gap-4 text-neutral-400">
           <button
             type="button"
+            onClick={() => setShowNotifications(true)}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
             aria-label="Notifications"
           >
@@ -2716,27 +2853,86 @@ export default function ProjectDetailPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('Doc')}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
-            aria-label="Team group"
+            aria-label="Tim & kolaborasi"
           >
             <Users size={18} strokeWidth={1.8} />
           </button>
           <button
             type="button"
+            onClick={() => {
+              setActiveTab('Main Table')
+              setShowSearchInput(true)
+            }}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
             aria-label="Search"
           >
             <Search size={18} strokeWidth={1.8} />
           </button>
-          {/* Profile Avatar */}
-          <div className="w-8 h-8 rounded-full overflow-hidden border border-neutral-600/70 ml-1 cursor-pointer hover:border-neutral-400 transition shrink-0">
-            <Image
-              src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
-              alt="User Profile"
-              width={32}
-              height={32}
-              className="w-full h-full object-cover"
-            />
+          {/* Profile Avatar & menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsUserMenuOpen((v) => !v)}
+              className="w-8 h-8 rounded-full overflow-hidden border border-neutral-600/70 ml-1 hover:border-neutral-400 transition shrink-0 bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-200 cursor-pointer"
+              aria-label="User menu"
+            >
+              {me.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={me.avatar} alt={me.name || 'User'} className="w-full h-full object-cover" />
+              ) : (
+                <span>{(me.name || '?').charAt(0).toUpperCase()}</span>
+              )}
+            </button>
+            {isUserMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
+                <div className="absolute right-0 top-11 w-52 bg-[#1b1c20] border border-neutral-800/90 rounded-2xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex flex-col items-center text-center p-2 pb-3 border-b border-neutral-800/80">
+                    <div className="w-12 h-12 rounded-full border border-neutral-600 overflow-hidden bg-neutral-800 flex items-center justify-center mb-2">
+                      {me.avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={me.avatar} alt={me.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-base font-bold text-neutral-300">
+                          {(me.name || '?').charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white tracking-tight">
+                      {me.name || 'Pengguna'}
+                    </p>
+                  </div>
+                  <div className="pt-2 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false)
+                        router.push('/profile')
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-neutral-300 hover:text-white hover:bg-neutral-800/60 transition cursor-pointer text-left"
+                    >
+                      <UserIcon size={15} />
+                      <span>Profile Settings</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsUserMenuOpen(false)
+                        await signOut()
+                        router.push('/signin')
+                        router.refresh()
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
+                    >
+                      <LogOut size={15} />
+                      <span>Log out</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -2765,7 +2961,7 @@ export default function ProjectDetailPage() {
 
               <button
                 type="button"
-                onClick={() => setActiveNav('Favorites')}
+                onClick={() => router.push('/home')}
                 className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
                   activeNav === 'Favorites'
                     ? 'text-white'
@@ -2806,12 +3002,20 @@ export default function ProjectDetailPage() {
                     className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
                   >
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                        I
-                      </span>
-                      <span className="text-xs font-semibold text-white truncate">
-                        {selectedWorkspace}
-                      </span>
+                      {selectedWorkspace ? (
+                        <>
+                          <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                            {selectedWorkspace.charAt(0).toUpperCase()}
+                          </span>
+                          <span className="text-xs font-semibold text-white truncate">
+                            {selectedWorkspace}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-neutral-500 truncate">
+                          Belum ada workspace
+                        </span>
+                      )}
                     </div>
                     <ChevronDown size={15} className="text-neutral-400 shrink-0" />
                   </button>
@@ -2885,7 +3089,10 @@ export default function ProjectDetailPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setShowWorkspaceMenu(false)}
+                            onClick={() => {
+                              setShowWorkspaceMenu(false)
+                              router.push('/home')
+                            }}
                             className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
                           >
                             <LayoutGrid size={13} />
@@ -2932,6 +3139,28 @@ export default function ProjectDetailPage() {
                 <span className="text-white font-bold tracking-tight">{cardTitle}</span>
               </div>
             </div>
+
+            {loadingBoard && (
+              <div className="mb-4 flex items-center gap-2 text-sm text-neutral-400">
+                <Loader2 size={15} className="animate-spin" /> Memuat board…
+              </div>
+            )}
+
+            {boardError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <p>{boardError}</p>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/home')}
+                    className="mt-2 text-xs font-semibold text-red-200 underline hover:text-white"
+                  >
+                    Kembali ke Home
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* View Tabs */}
             <div className="flex items-center justify-between border-b border-neutral-800/80 mb-6">
@@ -2980,6 +3209,22 @@ export default function ProjectDetailPage() {
                 >
                   <span>Doc</span>
                   {activeTab === 'Doc' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
+                </button>
+
+                {/* Kanban Tab */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('Kanban')}
+                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                    activeTab === 'Kanban'
+                      ? 'border-white text-white font-semibold'
+                      : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  <span>Kanban</span>
+                  {activeTab === 'Kanban' && (
                     <MoreHorizontal size={14} className="text-neutral-500" />
                   )}
                 </button>
@@ -3060,7 +3305,7 @@ export default function ProjectDetailPage() {
                   <div className="inline-flex rounded-md shadow-sm">
                     <button
                       type="button"
-                      onClick={() => setShowNewItemModal(true)}
+                      onClick={() => openNewItemModal()}
                       className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
                     >
                       <Plus size={14} strokeWidth={2.5} />
@@ -3068,7 +3313,7 @@ export default function ProjectDetailPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowNewItemModal(true)}
+                      onClick={() => openNewItemModal()}
                       className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
                       aria-label="More new item options"
                     >
@@ -3359,7 +3604,11 @@ export default function ProjectDetailPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={handleAddNewGroup}
+                            onClick={() => {
+                              setShowMoreTableMenu(false)
+                              setNewGroupName('')
+                              setShowAddGroupModal(true)
+                            }}
                             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
                           >
                             <Plus size={14} />
@@ -3425,7 +3674,7 @@ export default function ProjectDetailPage() {
 
                       <button
                         type="button"
-                        onClick={handleBulkDelete}
+                        onClick={() => setShowBulkDeleteModal(true)}
                         className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
                       >
                         <Trash2 size={13} />
@@ -3437,8 +3686,37 @@ export default function ProjectDetailPage() {
 
                 {/* Task Groups Table Container */}
                 <div className="space-y-8 flex-1">
+                  {!loadingBoard && processedGroups.length === 0 && (
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-14 text-center">
+                      <p className="text-sm text-neutral-400">
+                        Belum ada grup tugas di board ini.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewGroupName('')
+                          setShowAddGroupModal(true)
+                        }}
+                        className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-md transition cursor-pointer"
+                      >
+                        <Plus size={14} strokeWidth={2.5} />
+                        <span>Add New Group</span>
+                      </button>
+                    </div>
+                  )}
                   {processedGroups.map((group) => {
                     const totalItems = group.items.length || 1
+                    // Rentang tanggal grup dihitung dari tugas nyata (bukan nilai statis).
+                    const dateTimes = group.items
+                      .map((i) => new Date(i.date).getTime())
+                      .filter((n) => !Number.isNaN(n))
+                    const groupDateRange = dateTimes.length
+                      ? `${fromISODate(
+                          new Date(Math.min(...dateTimes)).toISOString().slice(0, 10),
+                        )} – ${fromISODate(
+                          new Date(Math.max(...dateTimes)).toISOString().slice(0, 10),
+                        )}`
+                      : ''
                     // Dynamic progress bar: compute per-status counts
                     const statusCounts = statusList.map((s) => ({
                       ...s,
@@ -3488,6 +3766,10 @@ export default function ProjectDetailPage() {
                             onClick={(e) => {
                               e.stopPropagation()
                               setNewTaskGroup(group.id)
+                              setShowGroupDropdown(false)
+                              setShowPersonDropdown(false)
+                              setShowStatusDropdown(false)
+                              setShowDateDropdown(false)
                               setShowNewItemModal(true)
                             }}
                             className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
@@ -3900,8 +4182,16 @@ export default function ProjectDetailPage() {
                                               value={item.priority ?? 'medium'}
                                               onSelect={(p) => setTaskPriority(group.id, item.id, p)}
                                             />
+                                          ) : col === 'Timeline' ? (
+                                            item.date || '—'
+                                          ) : col === 'Files' ? (
+                                            `${(item.attachments || []).length} file`
+                                          ) : col === 'Notes' ? (
+                                            <span className="block max-w-[10rem] truncate mx-auto" title={item.description || ''}>
+                                              {item.description || '—'}
+                                            </span>
                                           ) : (
-                                            '-'
+                                            '—'
                                           )}
                                         </td>
                                       ))}
@@ -3969,7 +4259,7 @@ export default function ProjectDetailPage() {
                                   <td className="px-4 py-2 border-r border-neutral-800/80">
                                     <button
                                       type="button"
-                                      onClick={() => setShowNewItemModal(true)}
+                                      onClick={() => openNewItemModal()}
                                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-blue-400 transition cursor-pointer"
                                     >
                                       <Plus size={13} strokeWidth={2.5} />
@@ -4014,7 +4304,7 @@ export default function ProjectDetailPage() {
                                   {/* Date range pill */}
                                   <td className="py-1 px-3 border-r border-neutral-800/80 text-center">
                                     <div className="inline-block px-3 py-1 bg-[#1e2025] border border-neutral-700/60 rounded text-[11px] text-neutral-300 font-normal">
-                                      {group.dateRange}
+                                      {groupDateRange || '—'}
                                     </div>
                                   </td>
 
@@ -4038,7 +4328,18 @@ export default function ProjectDetailPage() {
               </>
             )}
 
-            {/* TAB 2: DOC (CLIENT BRIEF) */}
+            {/* TAB 2: KANBAN */}
+            {activeTab === 'Kanban' && (
+              <KanbanView
+                groups={groups}
+                statusList={statusList}
+                onMove={setTaskStatus}
+                onOpen={openTaskDetail}
+                onAdd={(statusLabel) => openNewItemModal(undefined, statusLabel)}
+              />
+            )}
+
+            {/* TAB 3: DOC (CLIENT BRIEF) */}
             {activeTab === 'Doc' && (
               <div className="flex-1 flex flex-col">
                 {/* Real Docs Full Feature Toolbar */}
@@ -4579,6 +4880,13 @@ export default function ProjectDetailPage() {
 
                 {/* Doc Content Area */}
                 <div className="max-w-4xl space-y-6">
+                  <input
+                    ref={docImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDocImagePick}
+                    className="hidden"
+                  />
                   {/* Doc Title Heading & Metadata Header */}
                   <div>
                     <h1 className="text-2xl font-bold text-white tracking-tight mb-3">
@@ -4589,19 +4897,17 @@ export default function ProjectDetailPage() {
                       <div className="flex items-center gap-1.5">
                         <Clock size={13} className="text-neutral-500" />
                         <span>
-                          Creator <strong className="text-white font-semibold">George</strong>
+                          Creator{' '}
+                          <strong className="text-white font-semibold">
+                            {me.name || 'Pengguna'}
+                          </strong>
                         </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 text-neutral-400">
-                        <span>Created</span>
-                        <span className="text-neutral-200">Apr 13,2026, 20:56</span>
                       </div>
 
                       <div className="flex items-center gap-1.5 text-neutral-400">
                         <Clock size={13} className="text-neutral-500" />
                         <span>Last updated</span>
-                        <span className="text-neutral-200">{lastUpdated}</span>
+                        <span className="text-neutral-200">{lastUpdated || '—'}</span>
                       </div>
                     </div>
                   </div>
@@ -4837,17 +5143,32 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {block.type === 'image' && block.imageUrl && (
+                          {block.type === 'image' && (
                             <div className="space-y-1.5">
-                              <div className="w-40 h-28 rounded-lg overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
-                                <Image
-                                  src={block.imageUrl}
-                                  alt={block.content || 'Image preview'}
-                                  width={160}
-                                  height={112}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setImageTargetBlock(block.id)
+                                  docImageInputRef.current?.click()
+                                }}
+                                className="w-40 h-28 rounded-lg overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-blue-500/60 transition bg-[#191a1e] flex items-center justify-center"
+                                title={block.imageUrl ? 'Ganti gambar' : 'Pilih gambar'}
+                              >
+                                {block.imageUrl ? (
+                                  <Image
+                                    src={block.imageUrl}
+                                    alt={block.content || 'Image preview'}
+                                    width={160}
+                                    height={112}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                ) : (
+                                  <span className="flex flex-col items-center gap-1.5 text-[11px] text-neutral-500 group-hover:text-neutral-300 transition">
+                                    <ImageIcon size={18} />
+                                    Pilih gambar
+                                  </span>
+                                )}
+                              </button>
                               {block.content && (
                                 <p className="text-[11px] text-neutral-500 italic pl-1">
                                   {block.content}
@@ -4901,12 +5222,7 @@ export default function ProjectDetailPage() {
                       setDatePickerYear(parsed.getFullYear())
                     }
                   } catch {}
-                  setNewTaskDate(date ? `${date}, 12:00 AM` : 'Feb 4, 2026, 12:00 AM')
-                  setShowNewItemModal(true)
-                  setShowGroupDropdown(false)
-                  setShowPersonDropdown(false)
-                  setShowStatusDropdown(false)
-                  setShowDateDropdown(false)
+                  openNewItemModal(date)
                 }}
               />
             )}
@@ -5166,16 +5482,11 @@ export default function ProjectDetailPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={async () => {
-                            const email = prompt('Enter email address to invite:')
-                            if (!email || !projectId) return
-                            try {
-                              await addMemberByEmail(projectId, email.trim())
-                              await refreshMembers()
-                            } catch (err) {
-                              alert(err instanceof Error ? err.message : 'Failed to invite member')
-                            }
+                          onClick={() => {
                             setShowPersonDropdown(false)
+                            setInviteEmail('')
+                            setInviteError('')
+                            setShowInviteModal(true)
                           }}
                           className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
                         >
@@ -5770,11 +6081,18 @@ export default function ProjectDetailPage() {
               e.preventDefault()
               const name = newWorkspaceName.trim()
               if (!name) return
-              const created = await createWorkspace(name).catch(() => null)
-              if (created) setWorkspaces((prev) => [...prev, created])
-              setSelectedWorkspace(name)
-              setNewWorkspaceName('')
-              setShowAddWorkspaceModal(false)
+              const created = await createWorkspace(name).catch((err) => {
+                setNotice(
+                  `Gagal membuat workspace: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+                )
+                return null
+              })
+              if (created) {
+                setWorkspaces((prev) => [...prev, created])
+                setSelectedWorkspace(created.name)
+                setNewWorkspaceName('')
+                setShowAddWorkspaceModal(false)
+              }
             }}
             className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
           >
@@ -5852,7 +6170,7 @@ export default function ProjectDetailPage() {
 
         const toggleSubtask = (subId: string) => {
           const sub = (task.subtasks || []).find((s) => s.id === subId)
-          if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+          if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(notifySaveError)
           updateTask(group.id, task.id, {
             subtasks: (task.subtasks || []).map((s) =>
               s.id === subId ? { ...s, done: !s.done } : s
@@ -5861,24 +6179,35 @@ export default function ProjectDetailPage() {
         }
 
         const deleteSubtask = (subId: string) => {
-          if (projectId) deleteSubtaskRow(subId).catch(() => {})
+          if (projectId) deleteSubtaskRow(subId).catch(notifySaveError)
           updateTask(group.id, task.id, {
             subtasks: (task.subtasks || []).filter((s) => s.id !== subId),
           })
         }
 
-        const addAttachment = (name: string) =>
+        const addAttachment = async (name: string) => {
+          let id = `att-${Date.now()}`
+          if (projectId) {
+            const row = await addAttachmentRow(task.id, name).catch((err) => {
+              notifySaveError(err)
+              return null
+            })
+            if (row) id = row.id
+          }
           updateTask(group.id, task.id, {
             attachments: [
               ...(task.attachments || []),
-              { id: `att-${Date.now()}`, name, owner: me.name, avatar: me.avatar },
+              { id, name, owner: me.name, avatar: me.avatar },
             ],
           })
+        }
 
-        const deleteAttachment = (attId: string) =>
+        const deleteAttachment = (attId: string) => {
+          if (projectId) deleteAttachmentRow(attId).catch(notifySaveError)
           updateTask(group.id, task.id, {
             attachments: (task.attachments || []).filter((a) => a.id !== attId),
           })
+        }
 
         const postComment = async () => {
           const text = detailComment.trim()
@@ -5907,20 +6236,13 @@ export default function ProjectDetailPage() {
 
         const toggleCommentLike = (commentId: string) => {
           const current = (task.comments || []).find((c) => c.id === commentId)
-          if (projectId && current) likeComment(commentId, (current.likes || 0) + 1).catch(() => {})
+          if (projectId && current) likeComment(commentId, (current.likes || 0) + 1).catch(notifySaveError)
           updateTask(group.id, task.id, {
             comments: (task.comments || []).map((c) =>
               c.id === commentId ? { ...c, likes: (c.likes || 0) + 1 } : c
             ),
           })
         }
-
-        const toggleCommentReaction = (commentId: string) =>
-          updateTask(group.id, task.id, {
-            comments: (task.comments || []).map((c) =>
-              c.id === commentId ? { ...c, reactions: (c.reactions || 0) + 1 } : c
-            ),
-          })
 
         const addReply = async (commentId: string, text: string) => {
           const trimmed = text.trim()
@@ -6496,15 +6818,6 @@ export default function ProjectDetailPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => toggleCommentReaction(c.id)}
-                                  className="flex items-center gap-1 text-[11px] hover:text-white transition cursor-pointer"
-                                  title="Emoji"
-                                >
-                                  <Smile size={13} />
-                                  {(c.reactions || 0) > 0 && <span>{c.reactions}</span>}
-                                </button>
-                                <button
-                                  type="button"
                                   onClick={() => {
                                     setDetailReplyTo((v) => (v === c.id ? null : c.id))
                                     setDetailReplyText('')
@@ -6627,6 +6940,164 @@ export default function ProjectDetailPage() {
           </button>
         </div>
       )}
+
+      {/* ======================== BULK DELETE CONFIRM ======================== */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowBulkDeleteModal(false)}
+          />
+          <div className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-white">Hapus Tugas Terpilih</h2>
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-neutral-300">
+              Hapus <span className="font-semibold text-white">{selectedTasks.length} tugas</span>{' '}
+              yang dipilih? Tindakan ini tidak bisa dibatalkan.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="h-8 px-4 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================== ADD GROUP MODAL ======================== */}
+      {showAddGroupModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowAddGroupModal(false)}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleAddNewGroup()
+            }}
+            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white">Tambah Grup Tugas</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddGroupModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Nama Grup
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              placeholder="mis. Desain Logo"
+              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+            />
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowAddGroupModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!newGroupName.trim()}
+                className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Tambah
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ======================== INVITE MEMBER MODAL ======================== */}
+      {showInviteModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowInviteModal(false)}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleInvite()
+            }}
+            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white">Undang Anggota</h2>
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Email anggota
+            </label>
+            <input
+              type="email"
+              autoFocus
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="nama@email.com"
+              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+            />
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Anggota harus sudah punya akun di aplikasi ini.
+            </p>
+            {inviteError && <p className="mt-3 text-xs text-red-400">{inviteError}</p>}
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!inviteEmail.trim() || inviting}
+                className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                {inviting ? 'Mengundang…' : 'Undang'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
     </div>
   )
 }

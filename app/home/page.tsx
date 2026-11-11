@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -17,12 +17,31 @@ import {
   X,
   Star,
   LogOut,
+  Loader2,
+  AlertCircle,
+  ArrowUpDown,
+  Check,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
-import { listRecentProjects, type RecentProject } from '@/lib/utils'
+import {
+  listRecentProjects,
+  listFavorites,
+  toggleFavorite,
+  slugify,
+  type RecentProject,
+  type FavoriteProject,
+} from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { createProject, listProjects, type Project } from '@/lib/db'
+import {
+  createProject,
+  getSessionProfile,
+  listProjectTaskStats,
+  listProjects,
+  listProfiles,
+  type Profile,
+  type Project,
+} from '@/lib/db'
 
 interface ScopeItem {
   id: string
@@ -30,84 +49,117 @@ interface ScopeItem {
   image: string
 }
 
-interface MemberItem {
-  id: string
-  name: string
-  email: string
-  lastVisited: string
-  avatarColor: string
-}
-
 interface ProjectCard {
   id: string
   name: string
   description: string
-  progress: number
+  done: number
   total: number
-  starred: boolean
 }
 
-const initialScopes: ScopeItem[] = [
-  { id: '1', title: 'Client', image: '/images/scope/scope-client.jpg' },
-  { id: '2', title: 'Marketplace', image: '/images/scope/scope-marketplace.jpg' },
-  { id: '3', title: 'Mockup', image: '/images/scope/scope-mockup.jpg' },
-  { id: '4', title: 'Studio Client', image: '/images/scope/scope-studio.jpg' },
-  { id: '5', title: 'Font', image: '/images/scope/scope-font.jpg' },
-]
+type MemberSort = 'name-asc' | 'name-desc' | 'email-asc'
 
-// Generate sample project cards for each scope
-const generateCards = (scopeTitle: string): ProjectCard[] => {
-  const names = ['Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua']
-  const progresses = [95, 95, 85, 95, 95, 95, 95]
-  return names.map((name, i) => ({
-    id: `${scopeTitle}-${i}`,
-    name,
-    description: `Kolaborasi dengan ${name.toUpperCase()} untuk merencanakan dan mengelola secara optimal.`,
-    progress: progresses[i],
-    total: 100,
-    starred: false,
-  }))
+const MEMBER_SORT_LABEL: Record<MemberSort, string> = {
+  'name-asc': 'Name (A to Z)',
+  'name-desc': 'Name (Z to A)',
+  'email-asc': 'Email (A to Z)',
 }
 
-const initialMembers: MemberItem[] = [
-  { id: '1', name: 'Jordan Fufu', email: 'Jordan@example.com', lastVisited: 'Today', avatarColor: 'bg-amber-500' },
-  { id: '2', name: 'Puput Atira', email: 'Puput@example.com', lastVisited: 'Yesterday', avatarColor: 'bg-blue-500' },
-  { id: '3', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-purple-500' },
-  { id: '4', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-emerald-500' },
-  { id: '5', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-rose-500' },
+// Gambar hanya dekorasi kartu scope; tidak ada hubungannya dengan data project.
+const SCOPE_IMAGES = [
+  '/images/scope/scope-client.jpg',
+  '/images/scope/scope-marketplace.jpg',
+  '/images/scope/scope-mockup.jpg',
+  '/images/scope/scope-studio.jpg',
+  '/images/scope/scope-font.jpg',
 ]
+
+function Avatar({ name, src, size = 32 }: { name: string; src: string | null; size?: number }) {
+  const initials =
+    name
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || '?'
+
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name}
+        width={size}
+        height={size}
+        className="rounded-full object-cover shrink-0 border border-neutral-700"
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+
+  return (
+    <div
+      className="rounded-full bg-neutral-700 border border-neutral-600 flex items-center justify-center text-xs font-semibold text-neutral-200 shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {initials}
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const router = useRouter()
+  const memberSearchRef = useRef<HTMLInputElement>(null)
+  const membersSectionRef = useRef<HTMLElement>(null)
+
   const [searchMember, setSearchMember] = useState('')
-  const [activeNav, setActiveNav] = useState('Home')
+  const [memberSort, setMemberSort] = useState<MemberSort>('name-asc')
+  const [showMemberSort, setShowMemberSort] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
+  const [today, setToday] = useState('')
+
+  // Data dari Supabase
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [taskStats, setTaskStats] = useState<Record<string, { total: number; done: number }>>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
-  const [modalCards, setModalCards] = useState<ProjectCard[]>([])
   const [modalSearch, setModalSearch] = useState('')
-  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string }[]>([])
+  const [favorites, setFavorites] = useState<FavoriteProject[]>([])
   const [showFavorites, setShowFavorites] = useState(true)
 
-  // Scope Of Work — daftar scope diturunkan dari projects di Supabase.
-  const [projects, setProjects] = useState<Project[]>([])
   const [showNewScopeModal, setShowNewScopeModal] = useState(false)
   const [newScopeName, setNewScopeName] = useState('')
   const [showNewCardModal, setShowNewCardModal] = useState(false)
   const [newCardName, setNewCardName] = useState('')
   const [newCardDesc, setNewCardDesc] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   const refreshProjects = useCallback(async () => {
+    setError('')
     try {
-      const rows = await listProjects()
+      const [rows, people, stats] = await Promise.all([
+        listProjects(),
+        listProfiles().catch(() => [] as Profile[]),
+        listProjectTaskStats().catch(() => ({})),
+      ])
       setProjects(rows)
+      setProfiles(people)
+      setTaskStats(stats)
       return rows
-    } catch {
-      setProjects([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat project.')
       return []
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -117,92 +169,143 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setRecentProjects(listRecentProjects())
+    setFavorites(listFavorites())
+    setToday(
+      new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    )
+    getSessionProfile()
+      .then(setProfile)
+      .catch(() => setProfile(null))
   }, [])
 
-  const scopeImages = initialScopes.map((s) => s.image)
-  const scopes: ScopeItem[] =
-    projects.length > 0
-      ? Array.from(new Set(projects.map((p) => p.scope).filter(Boolean) as string[])).map(
-          (title, i) => ({ id: `scope-${title}`, title, image: scopeImages[i % scopeImages.length] }),
-        )
-      : initialScopes
-
-  const cardsFrom = (title: string, rows: Project[]): ProjectCard[] => {
-    const scoped = rows.filter((p) => p.scope === title)
-    if (scoped.length === 0) return generateCards(title)
-    return scoped.map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description ?? '',
-      progress: p.progress,
-      total: 100,
-      starred: false,
+  // Scope diturunkan dari project nyata. Tidak ada scope contoh.
+  const scopes: ScopeItem[] = useMemo(() => {
+    const titles = Array.from(
+      new Set(projects.map((p) => p.scope).filter((s): s is string => Boolean(s))),
+    )
+    return titles.map((title, i) => ({
+      id: `scope-${title}`,
+      title,
+      image: SCOPE_IMAGES[i % SCOPE_IMAGES.length],
     }))
-  }
+  }, [projects])
 
-  const cardsForScope = (title: string): ProjectCard[] => cardsFrom(title, projects)
+  const cardsFrom = useCallback(
+    (title: string): ProjectCard[] =>
+      projects
+        .filter((p) => p.scope === title)
+        .map((p) => {
+          const stat = taskStats[p.id] ?? { total: 0, done: 0 }
+          return {
+            id: p.id,
+            name: p.name,
+            description: p.description ?? '',
+            done: stat.done,
+            total: stat.total,
+          }
+        }),
+    [projects, taskStats],
+  )
 
   const openScopeModal = (item: ScopeItem) => {
     setSelectedScope(item)
-    setModalCards(cardsForScope(item.title))
     setModalSearch('')
   }
 
   const handleCreateScope = async (e: React.FormEvent) => {
     e.preventDefault()
     const title = newScopeName.trim()
-    if (!title) return
-    await createProject({ name: title, scope: title })
-    await refreshProjects()
-    setNewScopeName('')
-    setShowNewScopeModal(false)
+    if (!title || creating) return
+    if (scopes.some((s) => s.title.toLowerCase() === title.toLowerCase())) {
+      setCreateError('Scope dengan nama itu sudah ada.')
+      return
+    }
+    setCreating(true)
+    setCreateError('')
+    try {
+      await createProject({ name: title, scope: title })
+      await refreshProjects()
+      setNewScopeName('')
+      setShowNewScopeModal(false)
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Gagal membuat scope.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const openNewCardModal = () => {
     setNewCardName('')
     setNewCardDesc('')
+    setCreateError('')
     setShowNewCardModal(true)
   }
 
   const handleCreateCard = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedScope) return
+    if (!selectedScope || creating) return
     const name = newCardName.trim()
     if (!name) return
-    await createProject({
-      name,
-      scope: selectedScope.title,
-      description: newCardDesc.trim() || undefined,
-    })
-    const rows = await refreshProjects()
-    setModalCards(cardsFrom(selectedScope.title, rows))
-    setShowNewCardModal(false)
+    if (cardsFrom(selectedScope.title).some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      setCreateError('Card dengan nama itu sudah ada di scope ini.')
+      return
+    }
+    setCreating(true)
+    setCreateError('')
+    try {
+      await createProject({
+        name,
+        scope: selectedScope.title,
+        description: newCardDesc.trim() || undefined,
+      })
+      await refreshProjects()
+      setShowNewCardModal(false)
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Gagal membuat card.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const closeScopeModal = () => {
     setSelectedScope(null)
-    setModalCards([])
+    setModalSearch('')
     setShowNewCardModal(false)
+    setCreateError('')
   }
 
-  const toggleStar = (card: ProjectCard, scopeTitle: string) => {
-    setFavorites((prev) =>
-      prev.some((f) => f.id === card.id)
-        ? prev.filter((f) => f.id !== card.id)
-        : [...prev, { id: card.id, name: card.name, scope: scopeTitle }]
+  const handleToggleFavorite = (card: ProjectCard, scopeTitle: string) => {
+    setFavorites(toggleFavorite({ id: card.id, name: card.name, scope: scopeTitle }))
+  }
+
+  const modalCards = selectedScope ? cardsFrom(selectedScope.title) : []
+
+  const filteredModalCards = modalCards.filter(
+    (c) =>
+      c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
+      c.description.toLowerCase().includes(modalSearch.toLowerCase()),
+  )
+
+  const filteredMembers = useMemo(() => {
+    const term = searchMember.trim().toLowerCase()
+    const rows = profiles.filter(
+      (m) =>
+        m.name.toLowerCase().includes(term) || (m.email ?? '').toLowerCase().includes(term),
     )
-  }
+    return [...rows].sort((a, b) => {
+      if (memberSort === 'name-desc') return b.name.localeCompare(a.name)
+      if (memberSort === 'email-asc') return (a.email ?? '').localeCompare(b.email ?? '')
+      return a.name.localeCompare(b.name)
+    })
+  }, [profiles, searchMember, memberSort])
 
-  const filteredModalCards = modalCards.filter(c =>
-    c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
-    c.description.toLowerCase().includes(modalSearch.toLowerCase())
-  )
-
-  const filteredMembers = initialMembers.filter(
-    (m) =>
-      m.name.toLowerCase().includes(searchMember.toLowerCase()) ||
-      m.email.toLowerCase().includes(searchMember.toLowerCase())
-  )
+  const displayName = profile?.name || 'there'
+  const firstName = displayName.split(' ')[0]
 
   return (
     <div className="min-h-screen w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
@@ -233,10 +336,20 @@ export default function DashboardPage() {
           >
             <Bell size={18} strokeWidth={1.8} />
           </button>
-          <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Team group">
+          <button
+            type="button"
+            onClick={() => membersSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label="Team group"
+          >
             <Users size={18} strokeWidth={1.8} />
           </button>
-          <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Search">
+          <button
+            type="button"
+            onClick={() => memberSearchRef.current?.focus()}
+            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label="Search member"
+          >
             <Search size={18} strokeWidth={1.8} />
           </button>
           {/* User Profile Avatar & Dropdown Menu */}
@@ -247,23 +360,23 @@ export default function DashboardPage() {
               className="w-8 h-8 rounded-full border border-neutral-600 hover:border-blue-400 overflow-hidden bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-200 transition cursor-pointer ml-1"
               aria-label="User menu"
             >
-              G
+              <Avatar name={displayName} src={profile?.avatar_url ?? null} />
             </button>
 
             {isUserMenuOpen && (
               <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsUserMenuOpen(false)}
-                />
+                <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
                 <div className="absolute right-0 top-11 w-52 bg-[#1b1c20] border border-neutral-800/90 rounded-2xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex flex-col items-center text-center p-2 pb-3 border-b border-neutral-800/80">
                     <div className="w-12 h-12 rounded-full border border-neutral-600 overflow-hidden bg-neutral-800 flex items-center justify-center mb-2">
-                      <span className="text-base font-bold text-neutral-300">G</span>
+                      <Avatar name={displayName} src={profile?.avatar_url ?? null} size={48} />
                     </div>
-                    <p className="text-sm font-semibold text-white tracking-tight">
-                      George Frederic
-                    </p>
+                    <p className="text-sm font-semibold text-white tracking-tight">{displayName}</p>
+                    {profile?.email && (
+                      <p className="text-xs text-neutral-400 mt-0.5 truncate max-w-[180px]">
+                        {profile.email}
+                      </p>
+                    )}
                   </div>
 
                   <div className="pt-2 space-y-1">
@@ -306,10 +419,8 @@ export default function DashboardPage() {
             <nav className="space-y-1">
               <button
                 type="button"
-                onClick={() => setActiveNav('Home')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
-                  activeNav === 'Home' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
-                }`}
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer bg-blue-600 text-white shadow-sm"
               >
                 <Home size={18} strokeWidth={1.8} />
                 <span>Home</span>
@@ -338,9 +449,7 @@ export default function DashboardPage() {
                     favorites.map((f) => (
                       <Link
                         key={f.id}
-                        href={`/project/${f.scope.toLowerCase().replace(/\s+/g, '-')}/${f.name
-                          .toLowerCase()
-                          .replace(/\s+/g, '-')}`}
+                        href={`/project/${slugify(f.scope)}/${slugify(f.name)}`}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
                       >
                         <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
@@ -358,11 +467,6 @@ export default function DashboardPage() {
             <div className="pt-2">
               <div className="flex items-center justify-between text-neutral-400 px-2 mb-3">
                 <span className="text-sm font-medium text-neutral-300">Workspaces</span>
-                <div className="flex items-center gap-2">
-                  <button type="button" className="hover:text-white transition cursor-pointer p-1" aria-label="Search workspace">
-                    <Search size={15} />
-                  </button>
-                </div>
               </div>
 
               <WorkspaceSelector />
@@ -383,7 +487,7 @@ export default function DashboardPage() {
                   recentProjects.map((r) => (
                     <Link
                       key={`${r.scope}/${r.card}`}
-                      href={`/project/${r.scope}/${r.card}`}
+                      href={`/project/${slugify(r.scope)}/${slugify(r.card)}`}
                       className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
                     >
                       <Clock size={13} className="text-neutral-500 shrink-0" />
@@ -402,9 +506,18 @@ export default function DashboardPage() {
         {/* Main Content Area */}
         <main className="flex-1 p-6 sm:p-8 lg:p-10 xl:p-12 overflow-y-auto">
           <div className="mb-8">
-            <p className="text-xs sm:text-sm text-neutral-400 font-normal">Thursday, February 19 2026</p>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">Hello, George</h1>
+            <p className="text-xs sm:text-sm text-neutral-400 font-normal">{today || '\u00a0'}</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">
+              Hello, {firstName}
+            </h1>
           </div>
+
+          {error && (
+            <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* Scope Of Work Section */}
           <section className="mb-12">
@@ -414,6 +527,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => {
                   setNewScopeName('')
+                  setCreateError('')
                   setShowNewScopeModal(true)
                 }}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
@@ -423,39 +537,74 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Grid of Scope Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {scopes.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => openScopeModal(item)}
-                  className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-10">
+                <Loader2 size={16} className="animate-spin" /> Memuat project…
+              </div>
+            ) : scopes.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
+                <p className="text-sm text-neutral-400">
+                  Belum ada scope. Buat scope pertama untuk mulai mengelola project.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewScopeName('')
+                    setCreateError('')
+                    setShowNewScopeModal(true)
+                  }}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
                 >
-                  <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
-                    <Image
-                      src={item.image}
-                      alt={item.title}
-                      fill
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                      className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
-                    />
+                  <Plus size={16} strokeWidth={2.5} />
+                  <span>New Scope</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {scopes.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => openScopeModal(item)}
+                    className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                  >
+                    <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
+                      <Image
+                        src={item.image}
+                        alt={item.title}
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                        className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
+                      />
+                    </div>
+                    <div className="px-4 py-3 bg-[#191a1e] flex items-center justify-between">
+                      <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition">
+                        {item.title}
+                      </h3>
+                      <span className="text-[10px] text-neutral-500">
+                        {cardsFrom(item.title).length} card
+                      </span>
+                    </div>
                   </div>
-                  <div className="px-4 py-3 bg-[#191a1e]">
-                    <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition">{item.title}</h3>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* My Member Section */}
-          <section className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm">
+          <section
+            ref={membersSectionRef}
+            className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
+          >
             <div className="mb-4">
               <h2 className="text-lg font-bold text-white tracking-tight mb-4">My Member</h2>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
                 <div className="relative flex-1 max-w-md">
-                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                  <Search
+                    size={16}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+                  />
                   <input
+                    ref={memberSearchRef}
                     type="text"
                     value={searchMember}
                     onChange={(e) => setSearchMember(e.target.value)}
@@ -463,9 +612,41 @@ export default function DashboardPage() {
                     className="w-full h-10 pl-10 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
                   />
                 </div>
-                <div className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5 self-end sm:self-auto">
-                  <span>Sort by</span>
-                  <ChevronDown size={15} />
+                <div className="relative self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowMemberSort((v) => !v)}
+                    className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5"
+                  >
+                    <ArrowUpDown size={14} />
+                    <span>{MEMBER_SORT_LABEL[memberSort]}</span>
+                    <ChevronDown size={15} />
+                  </button>
+                  {showMemberSort && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setShowMemberSort(false)} />
+                      <div className="absolute right-0 top-full mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                        {(Object.keys(MEMBER_SORT_LABEL) as MemberSort[]).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setMemberSort(key)
+                              setShowMemberSort(false)
+                            }}
+                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                              memberSort === key
+                                ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                : 'text-neutral-300 hover:bg-neutral-800'
+                            }`}
+                          >
+                            <span>{MEMBER_SORT_LABEL[key]}</span>
+                            {memberSort === key && <Check size={14} />}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -475,7 +656,7 @@ export default function DashboardPage() {
                 <thead>
                   <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
                     <th className="pb-3 font-normal">Member Name</th>
-                    <th className="pb-3 text-right font-normal">Last Visited</th>
+                    <th className="pb-3 text-right font-normal">Role</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800/60">
@@ -483,22 +664,30 @@ export default function DashboardPage() {
                     <tr key={member.id} className="group hover:bg-neutral-800/30 transition-colors">
                       <td className="py-3.5 pr-4">
                         <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-lg ${member.avatarColor} text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-xs`}>
-                            {member.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                          </div>
+                          <Avatar
+                            name={member.name}
+                            src={member.avatar_url}
+                            size={36}
+                          />
                           <div>
-                            <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">{member.name}</p>
+                            <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
+                              {member.name}
+                            </p>
                             <p className="text-xs text-neutral-400">{member.email}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="py-3.5 pl-4 text-right text-xs sm:text-sm text-neutral-400 whitespace-nowrap">{member.lastVisited}</td>
+                      <td className="py-3.5 pl-4 text-right text-xs sm:text-sm text-neutral-400 whitespace-nowrap">
+                        {member.role === 'project_manager' ? 'Project Manager' : 'Member'}
+                      </td>
                     </tr>
                   ))}
-                  {filteredMembers.length === 0 && (
+                  {!loading && filteredMembers.length === 0 && (
                     <tr>
                       <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
-                        No members found matching &quot;{searchMember}&quot;
+                        {profiles.length === 0
+                          ? 'Belum ada anggota yang bisa ditampilkan.'
+                          : `No members found matching "${searchMember}"`}
                       </td>
                     </tr>
                   )}
@@ -541,13 +730,15 @@ export default function DashboardPage() {
               className="w-full h-14 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
 
+            {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}
+
             <div className="flex items-center justify-end pt-6">
               <button
                 type="submit"
-                disabled={!newScopeName.trim()}
+                disabled={!newScopeName.trim() || creating}
                 className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>
@@ -600,13 +791,15 @@ export default function DashboardPage() {
               />
             </div>
 
+            {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}
+
             <div className="flex items-center justify-end pt-6">
               <button
                 type="submit"
-                disabled={!newCardName.trim()}
+                disabled={!newCardName.trim() || creating}
                 className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>
@@ -622,10 +815,7 @@ export default function DashboardPage() {
           aria-label={`Scope Of Work - ${selectedScope.title}`}
         >
           {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={closeScopeModal}
-          />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeScopeModal} />
 
           {/* Modal Panel */}
           <div className="relative w-[96vw] h-[94vh] bg-[#111214] border border-neutral-800/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -633,8 +823,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between px-6 sm:px-8 pt-6 pb-4 border-b border-neutral-800/60 shrink-0">
               <div className="flex items-center gap-4">
                 <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Scope Of Work /{' '}
-                  <span className="font-extrabold">{selectedScope.title}</span>
+                  Scope Of Work / <span className="font-extrabold">{selectedScope.title}</span>
                 </h2>
               </div>
               <button
@@ -650,7 +839,10 @@ export default function DashboardPage() {
             {/* Modal Toolbar */}
             <div className="flex items-center gap-3 px-6 sm:px-8 py-4 shrink-0">
               <div className="relative flex-1 max-w-xs">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+                />
                 <input
                   type="text"
                   value={modalSearch}
@@ -672,30 +864,49 @@ export default function DashboardPage() {
             {/* Modal Cards Grid */}
             <div className="flex-1 overflow-y-auto px-6 sm:px-8 pb-6">
               {filteredModalCards.length === 0 ? (
-                <div className="flex items-center justify-center h-40 text-neutral-500 text-sm">
-                  No cards found matching &quot;{modalSearch}&quot;
+                <div className="flex flex-col items-center justify-center h-40 gap-3 text-neutral-500 text-sm">
+                  <span>
+                    {modalCards.length === 0
+                      ? 'Belum ada card di scope ini.'
+                      : `No cards found matching "${modalSearch}"`}
+                  </span>
+                  {modalCards.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={openNewCardModal}
+                      className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
+                    >
+                      <Plus size={15} strokeWidth={2.5} />
+                      <span>New Card</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
                   {filteredModalCards.map((card) => {
-                    const pct = Math.round((card.progress / card.total) * 100)
+                    const pct = card.total ? Math.round((card.done / card.total) * 100) : 0
                     const isStarred = favorites.some((f) => f.id === card.id)
                     return (
                       <div
                         key={card.id}
-                        onClick={() => {
-                          const scopeSlug = selectedScope ? selectedScope.title.toLowerCase().replace(/\s+/g, '-') : 'client'
-                          const cardSlug = card.name.toLowerCase().replace(/\s+/g, '-')
-                          router.push(`/project/${scopeSlug}/${cardSlug}`)
-                        }}
+                        onClick={() =>
+                          router.push(
+                            `/project/${slugify(selectedScope.title)}/${slugify(card.name)}`,
+                          )
+                        }
                         className="group bg-[#1b1c20] border border-neutral-800/70 rounded-xl p-4 hover:border-blue-500/40 hover:shadow-blue-500/5 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3"
                       >
                         {/* Card Top Row */}
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-semibold text-white leading-snug">{card.name}</span>
+                          <span className="text-sm font-semibold text-white leading-snug">
+                            {card.name}
+                          </span>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleStar(card, selectedScope?.title || '') }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleToggleFavorite(card, selectedScope.title)
+                            }}
                             className={`p-0.5 rounded transition cursor-pointer shrink-0 ${
                               isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
                             }`}
@@ -711,7 +922,7 @@ export default function DashboardPage() {
 
                         {/* Description */}
                         <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3 flex-1">
-                          {card.description}
+                          {card.description || 'Belum ada deskripsi.'}
                         </p>
 
                         {/* Progress Bar */}
@@ -723,7 +934,9 @@ export default function DashboardPage() {
                             />
                           </div>
                           <span className="text-xs text-neutral-500">
-                            {card.progress}/{card.total}
+                            {card.total === 0
+                              ? 'Belum ada tugas'
+                              : `${card.done}/${card.total} tugas selesai`}
                           </span>
                         </div>
                       </div>
