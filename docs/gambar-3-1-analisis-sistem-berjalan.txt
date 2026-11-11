@@ -1,0 +1,91 @@
+GAMBAR 3.1 ANALISIS SISTEM BERJALAN DENGAN WORK SYSTEM FRAMEWORK
+(versi teks — siap copy-paste)
+
+Susunan diagram: 9 elemen WSF mengelilingi satu elemen inti (Business Process).
+
+  Customers            Products & Services        Participants
+        \                      |                      /
+         \                     v                     /
+  Information  ------>  BUSINESS PROCESS  <------  Technologies
+         /                     ^                     \
+        /                      |                      \
+  Environment          Infrastructure             Strategies
+
+
+================================================================================
+ELEMEN INTI (TENGAH)
+================================================================================
+
+Business Process
+Pengelolaan tugas dan proyek secara manual dan terpisah
+
+
+================================================================================
+BARIS ATAS
+================================================================================
+
+Customers
+Klien Invisual Studio dan tim internal (manajer proyek, desainer, pengembang, konten)
+
+Products & Services
+Layanan desain visual, ilustrasi, dan identitas brand yang dikelola per proyek
+
+Participants
+Manajer proyek, desainer, pengembang, pembuat konten tanpa pembagian peran baku
+
+
+================================================================================
+BARIS TENGAH (KIRI DAN KANAN)
+================================================================================
+
+Information
+Status tugas, tenggat waktu, dan penanggung jawab masih terpecah di luar sistem
+
+Technologies
+Monday Work Management (pihak ketiga) + media komunikasi terpisah
+
+
+================================================================================
+BARIS BAWAH
+================================================================================
+
+Environment
+Agency kreatif dengan banyak proyek klien berjalan bersamaan
+
+Infrastructure
+Belum ada server/aplikasi internal; bergantung pada infrastruktur vendor
+
+Strategies
+Efisiensi biaya langganan dan fleksibilitas alur kerja internal
+
+
+================================================================================
+DAFTAR RINGKAS (9 ELEMEN)
+================================================================================
+
+1. Customers
+   Klien Invisual Studio dan tim internal (manajer proyek, desainer, pengembang, konten)
+
+2. Products & Services
+   Layanan desain visual, ilustrasi, dan identitas brand yang dikelola per proyek
+
+3. Business Process
+   Pengelolaan tugas dan proyek secara manual dan terpisah
+
+4. Participants
+   Manajer proyek, desainer, pengembang, pembuat konten tanpa pembagian peran baku
+
+5. Information
+   Status tugas, tenggat waktu, dan penanggung jawab masih terpecah di luar sistem
+
+6. Technologies
+   Monday Work Management (pihak ketiga) + media komunikasi terpisah
+
+7. Environment
+   Agency kreatif dengan banyak proyek klien berjalan bersamaan
+
+8. Infrastructure
+   Belum ada server/aplikasi internal; bergantung pada infrastruktur vendor
+
+9. Strategies
+   Efisiensi biaya langganan dan fleksibilitas alur kerja internal

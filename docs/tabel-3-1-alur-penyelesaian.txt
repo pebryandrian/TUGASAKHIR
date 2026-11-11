@@ -1,0 +1,162 @@
+TABEL 3.1 ALUR PENYELESAIAN TUGAS AKHIR
+(versi teks — 6 tahap, siap copy-paste)
+
+Kolom: [1] Tahap dan Hasil | [2] Langkah Penelitian | [3] Literatur dan Referensi
+
+
+================================================================================
+BARIS 1
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 1: Identifikasi Masalah
+
+Hasil:
+• Penentuan topik tugas akhir terkait Work Management pada Invisual Studio.
+• Identifikasi permasalahan pada sistem yang sedang berjalan.
+• Perumusan masalah, tujuan, serta lingkup tugas akhir.
+
+Kontribusi:
+Menjadi dasar dalam menentukan kebutuhan sistem serta arah pengembangan aplikasi Work Management.
+
+[2] Langkah Penelitian:
+• Latar belakang
+• Identifikasi masalah
+• Tujuan tugas akhir
+• Lingkup tugas akhir
+
+[3] Literatur dan Referensi:
+• Observasi awal
+• Wawancara pendahuluan
+
+
+================================================================================
+BARIS 2
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 2: Pengumpulan Data
+
+Hasil:
+• Data hasil observasi proses kerja di Invisual Studio.
+• Hasil wawancara terkait kebutuhan sistem dan kendala yang dihadapi.
+• Referensi teori terkait work management, pengelolaan alur kerja, dan teknologi pengembangan sistem.
+
+Kontribusi:
+Memastikan sistem yang dibangun sesuai dengan kebutuhan pengguna serta didukung oleh teori yang relevan.
+
+[2] Langkah Penelitian:
+• Metode pengumpulan data
+• Studi literatur
+• Observasi
+• Wawancara
+• Penelitian terdahulu
+
+[3] Literatur dan Referensi:
+• Teknik pengumpulan data
+• Instrumen pengumpulan data
+
+
+================================================================================
+BARIS 3
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 3: Analisis Sistem Berjalan dengan Work System Framework
+
+Hasil:
+• Pemetaan sembilan elemen sistem kerja yang sedang berjalan.
+• Identifikasi permasalahan pada setiap elemen sistem kerja.
+• Diagram sebab akibat permasalahan dan solusi.
+• Skema analisis input, analisis, dan output.
+
+Kontribusi:
+Menjadi dasar dalam merumuskan solusi yang menjawab seluruh elemen sistem kerja secara menyeluruh.
+
+[2] Langkah Penelitian:
+• Analisis masalah
+• Analisis solusi
+• Skema analisis
+
+[3] Literatur dan Referensi:
+• Work System Framework [ALT13]
+• Analisis sebab akibat
+
+
+================================================================================
+BARIS 4
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 4: Pengembangan Sistem dengan Metode Prototyping (Communication, Quick Plan, Modeling Quick Design, Construction of Prototype, Deployment Delivery & Feedback)
+
+Hasil:
+• Spesifikasi kebutuhan fungsional dan non-fungsional sistem.
+• Perancangan alur kerja berbasis status To Do, In Progress, Review, dan Done.
+• Perancangan arsitektur sistem, basis data, dan antarmuka pengguna.
+• Implementasi aplikasi Work Management berbasis web menggunakan Next.js, TypeScript, dan Supabase.
+• Evaluasi sistem berdasarkan penggunaan oleh tim Invisual Studio serta perbaikan secara iteratif.
+
+Kontribusi:
+Menghasilkan aplikasi fungsional yang sesuai dengan kebutuhan pengguna, sehingga pengembangan berjalan terarah dan sesuai ekspektasi visual pengguna.
+
+[2] Langkah Penelitian:
+• Analisis kebutuhan sistem
+• Perancangan arsitektur sistem
+• Perancangan basis data
+• Perancangan antarmuka pengguna
+• Implementasi aplikasi
+• Teknologi Next.js dan TypeScript
+• Integrasi Supabase
+• Evaluasi sistem
+
+[3] Literatur dan Referensi:
+• Metode Prototyping [PRE20]
+• Unified Modeling Language
+• Entity Relationship Diagram
+• Dokumentasi Next.js [NOV23]
+• Dokumentasi Supabase [NUG26]
+
+
+================================================================================
+BARIS 5
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 5: Pengujian Fungsional (Black Box Testing)
+
+Hasil:
+• Hasil pengujian sistem menggunakan metode Black Box Testing.
+• Identifikasi kekurangan dan perbaikan sistem.
+
+Kontribusi:
+Memastikan sistem berjalan sesuai dengan kebutuhan dan bebas dari kesalahan.
+
+[2] Langkah Penelitian:
+• Pengujian black box
+• Analisis hasil pengujian
+
+[3] Literatur dan Referensi:
+• Black Box Testing [PRA21]
+
+
+================================================================================
+BARIS 6
+================================================================================
+
+[1] Tahap dan Hasil:
+Tahap 6: Penyusunan Kesimpulan dan Saran
+
+Hasil:
+• Kesimpulan komprehensif dari hasil pembangunan dan pengujian sistem Work Management.
+• Saran dan rekomendasi untuk pengembangan sistem di masa mendatang.
+
+Kontribusi:
+Menutup rangkaian penelitian dengan memberikan dokumentasi hasil akhir dan panduan untuk penyempurnaan aplikasi selanjutnya.
+
+[2] Langkah Penelitian:
+• Analisis hasil pengujian
+• Kesimpulan dan saran
+
+[3] Literatur dan Referensi:
+• Hasil penelitian

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, Check, Circle } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 interface AuthPageProps {
   initialMode?: 'signup' | 'login' | 'forgot'
@@ -11,8 +12,11 @@ interface AuthPageProps {
 
 export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
   const router = useRouter()
+  const supabase = useMemo(() => createClient(), [])
   const [mode, setMode] = useState<'signup' | 'login' | 'forgot'>(initialMode)
   const [isExiting, setIsExiting] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [noticeIsError, setNoticeIsError] = useState(false)
 
   // Form states
   const [name, setName] = useState('')
@@ -37,7 +41,7 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
   }, [])
 
   // Password validation checks
-  const isMin14 = password.length >= 14
+  const isMin8 = password.length >= 8
   const hasMixedChars =
     /[0-9]/.test(password) &&
     /[a-zA-Z]/.test(password) &&
@@ -52,25 +56,73 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
     }, 650)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
+    setNotice('')
+    setNoticeIsError(false)
 
     if ((mode === 'signup' || mode === 'forgot') && password !== confirmPassword) {
-      alert('Passwords do not match!')
-      setIsLoading(false)
+      setNoticeIsError(true)
+      setNotice('Passwords do not match!')
       return
     }
 
-    setTimeout(() => {
-      setIsLoading(false)
-      if (mode === 'signup' || mode === 'login') {
+    if ((mode === 'signup' || mode === 'forgot') && password.length < 8) {
+      setNoticeIsError(true)
+      setNotice('Password must be at least 8 characters.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { name },
+            emailRedirectTo: `${window.location.origin}/auth/confirm`,
+          },
+        })
+        if (error) throw error
+        if (!data.session) {
+          setNotice('Account created. Check your email to confirm before logging in.')
+          return
+        }
         router.push('/home')
+        router.refresh()
+      } else if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) throw error
+        router.push('/home')
+        router.refresh()
       } else {
-        alert(`New password set successfully for ${email}! Please log in.`)
-        setMode('login')
+        // Recovery link lands here with an active session; otherwise email a reset link.
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) {
+          const { error } = await supabase.auth.updateUser({ password })
+          if (error) throw error
+          setNotice('Password updated. You can now log in.')
+          setMode('login')
+        } else {
+          const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/auth/confirm?next=/forgot-password`,
+          })
+          if (error) throw error
+          setNotice('Reset link sent. Check your email.')
+        }
       }
-    }, 400)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong'
+      setNoticeIsError(true)
+      setNotice(
+        /rate limit/i.test(msg)
+          ? 'Batas kirim email Supabase tercapai (429 email rate limit). Tunggu sekitar 1 jam, atau matikan "Confirm email" di Supabase → Authentication → Sign In / Providers untuk mode development.'
+          : msg,
+      )
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -205,13 +257,13 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
                   Passowrd must contains :
                 </p>
                 <div className="flex items-center gap-2">
-                  {isMin14 ? (
+                  {isMin8 ? (
                     <Check size={14} className="text-emerald-600 shrink-0" strokeWidth={2.5} />
                   ) : (
                     <Circle size={11} className="text-neutral-600 shrink-0" />
                   )}
-                  <span className={isMin14 ? 'text-emerald-700 font-medium' : 'text-neutral-700 font-normal'}>
-                    Minimum 14 Character
+                  <span className={isMin8 ? 'text-emerald-700 font-medium' : 'text-neutral-700 font-normal'}>
+                    Minimum 8 Character
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -271,6 +323,17 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               </div>
             )}
 
+            {/* Auth notice / error */}
+            {notice && (
+              <p
+                className={`text-xs sm:text-sm pt-1 ${
+                  noticeIsError ? 'text-red-600' : 'text-emerald-700'
+                }`}
+              >
+                {notice}
+              </p>
+            )}
+
             {/* Primary Submit Button */}
             <div className="pt-2">
               <button
@@ -303,7 +366,12 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               <div>
                 <button
                   type="button"
-                  onClick={() => router.push('/home')}
+                  onClick={() =>
+                    supabase.auth.signInWithOAuth({
+                      provider: 'google',
+                      options: { redirectTo: `${window.location.origin}/auth/confirm` },
+                    })
+                  }
                   className="w-full h-12 border border-neutral-300 hover:border-neutral-400 hover:bg-neutral-50/80 active:scale-[0.99] text-neutral-700 text-sm font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-3 cursor-pointer shadow-xs"
                 >
                   <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
