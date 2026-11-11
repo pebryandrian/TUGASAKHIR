@@ -1,8 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, LayoutGrid, Plus, Search, X } from 'lucide-react'
-import { createWorkspace, listWorkspaces, type Workspace } from '@/lib/db'
+import { ChevronDown, LayoutGrid, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import {
+  createWorkspace,
+  deleteWorkspace,
+  listWorkspaces,
+  renameWorkspace,
+  type Workspace,
+} from '@/lib/db'
 
 // Pemilih workspace dengan dropdown (search + recent) dan modal "Buat Workspace Baru".
 // Dipakai bersama oleh sidebar Home, Profile, dan halaman project.
@@ -13,6 +19,10 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
   const [query, setQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [name, setName] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [dialog, setDialog] = useState<null | 'rename' | 'delete'>(null)
+  const [editName, setEditName] = useState('')
+  const [error, setError] = useState('')
 
   useEffect(() => {
     listWorkspaces()
@@ -40,9 +50,37 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
     setShowModal(false)
   }
 
+  const selectedWs = workspaces.find((w) => w.name === selected)
+
+  const handleRename = async () => {
+    const trimmed = editName.trim()
+    if (!selectedWs || !trimmed) return
+    try {
+      await renameWorkspace(selectedWs.id, trimmed)
+      setWorkspaces((prev) => prev.map((w) => (w.id === selectedWs.id ? { ...w, name: trimmed } : w)))
+      setSelected(trimmed)
+      setDialog(null)
+    } catch (err: any) {
+      setError(err?.message || 'Gagal mengganti nama workspace.')
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!selectedWs) return
+    try {
+      await deleteWorkspace(selectedWs.id)
+      const rest = workspaces.filter((w) => w.id !== selectedWs.id)
+      setWorkspaces(rest)
+      setSelected(rest[0]?.name ?? '')
+      setDialog(null)
+    } catch (err: any) {
+      setError(err?.message || 'Gagal menghapus workspace.')
+    }
+  }
+
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="relative flex items-center gap-1.5">
         <div className="relative flex-1">
           <button
             type="button"
@@ -132,15 +170,49 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
 
         <button
           type="button"
+          disabled={!selectedWs}
           onClick={() => {
-            setName('')
-            setShowModal(true)
+            setError('')
+            setMenuOpen((v) => !v)
           }}
-          className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
-          aria-label="Add workspace"
+          className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer shrink-0"
+          aria-label="Opsi workspace"
         >
-          <Plus size={18} strokeWidth={2.5} />
+          <MoreHorizontal size={16} />
         </button>
+
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
+            <div className="absolute right-0 top-full mt-1.5 z-30 w-44 bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 animate-in fade-in zoom-in-95 duration-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setError('')
+                  setEditName(selectedWs?.name ?? '')
+                  setDialog('rename')
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer text-left"
+              >
+                <Pencil size={13} />
+                Rename
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setError('')
+                  setDialog('delete')
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
+              >
+                <Trash2 size={13} />
+                Delete
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {showModal && (
@@ -190,6 +262,72 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
                 className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
                 Create
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {dialog && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setDialog(null)}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (dialog === 'rename') handleRename()
+              else handleDelete()
+            }}
+            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white">
+                {dialog === 'rename' ? 'Ganti Nama Workspace' : 'Hapus Workspace'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setDialog(null)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {dialog === 'rename' ? (
+              <input
+                type="text"
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+              />
+            ) : (
+              <p className="text-sm text-neutral-300">
+                Hapus workspace <span className="font-semibold text-white">{selectedWs?.name}</span>?
+                Project di dalamnya tidak ikut terhapus, tapi akan lepas dari workspace ini.
+              </p>
+            )}
+
+            {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setDialog(null)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={dialog === 'rename' && !editName.trim()}
+                className={`h-8 px-4 text-xs font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95 ${
+                  dialog === 'delete' ? 'bg-red-600 hover:bg-red-500' : 'bg-[#0073ea] hover:bg-blue-600'
+                }`}
+              >
+                {dialog === 'rename' ? 'Simpan' : 'Hapus'}
               </button>
             </div>
           </form>

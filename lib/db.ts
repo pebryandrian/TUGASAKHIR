@@ -167,6 +167,18 @@ export async function createWorkspace(name: string): Promise<Workspace> {
   return data as Workspace
 }
 
+export async function renameWorkspace(id: string, name: string): Promise<void> {
+  const { error } = await supabase().from('workspaces').update({ name }).eq('id', id)
+  if (error) throw error
+}
+
+// `projects.workspace_id` ON DELETE SET NULL: project TIDAK ikut terhapus, hanya
+// kehilangan workspace-nya. `workspace_members` CASCADE, jadi keanggotaan ikut hilang.
+export async function deleteWorkspace(id: string): Promise<void> {
+  const { error } = await supabase().from('workspaces').delete().eq('id', id)
+  if (error) throw error
+}
+
 // ======================== PROJECTS ========================
 
 export async function listProjects(workspaceId?: string): Promise<Project[]> {
@@ -378,6 +390,45 @@ export async function addComment(taskId: string, body: string, parentId?: string
 export async function likeComment(id: string, likes: number): Promise<void> {
   const { error } = await supabase().from('comments').update({ likes }).eq('id', id)
   if (error) throw error
+}
+
+export interface NotificationItem {
+  id: string
+  task_id: string
+  body: string
+  likes: number
+  created_at: string
+  author_name: string
+  author_avatar: string | null
+  scope: string
+  board: string
+  group_title: string
+  task_title: string
+}
+
+// Notifikasi = komentar pada semua task yang boleh dibaca user (RLS `cm_all`).
+export async function listNotifications(): Promise<NotificationItem[]> {
+  const { data, error } = await supabase()
+    .from('comments')
+    .select(
+      'id, task_id, body, likes, created_at, profiles(name, avatar_url), tasks(title, task_groups(title), projects(name, scope))',
+    )
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (error) throw error
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    task_id: row.task_id,
+    body: row.body,
+    likes: row.likes ?? 0,
+    created_at: row.created_at,
+    author_name: row.profiles?.name ?? 'Unknown',
+    author_avatar: row.profiles?.avatar_url ?? null,
+    scope: row.tasks?.projects?.scope ?? '',
+    board: row.tasks?.projects?.name ?? '',
+    group_title: row.tasks?.task_groups?.title ?? '',
+    task_title: row.tasks?.title ?? '',
+  }))
 }
 
 // ======================== DOC ========================

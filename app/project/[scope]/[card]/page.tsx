@@ -28,6 +28,7 @@ import {
   type Workspace,
   type Priority,
 } from '@/lib/db'
+import { recordRecentProject } from '@/lib/utils'
 import {
   Bell,
   ThumbsUp,
@@ -1192,6 +1193,12 @@ export default function ProjectDetailPage() {
     ;(async () => {
       const project = await findProject(rawScope, rawCard)
       if (!project) return
+      recordRecentProject({
+        scope: rawScope,
+        card: rawCard,
+        name: project.name,
+        scopeTitle: project.scope ?? rawScope,
+      })
       const board = await loadBoard(project.id)
       if (!alive) return
 
@@ -1924,18 +1931,19 @@ export default function ProjectDetailPage() {
           </td>
 
           {/* Status */}
-          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+          <td className="p-0 border-r border-neutral-800/80 relative">
             <button
               type="button"
               onClick={() => toggleMenu('status')}
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium hover:opacity-80 transition cursor-pointer"
+              className="w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 hover:brightness-90"
               style={{
-                color: statusDef?.colorCode || '#94a3b8',
-                backgroundColor: `${statusDef?.colorCode || '#94a3b8'}1a`,
+                backgroundColor: statusDef?.colorCode || '#94a3b8',
+                color: getContrastText(statusDef?.colorCode || '#94a3b8'),
               }}
               title="Ubah status subtask"
             >
-              {statusDef?.label || '—'}
+              <span>{statusDef?.label || '—'}</span>
+              <ChevronDown size={12} className="opacity-70" />
             </button>
             {isMenuOpen('status') && (
               <>

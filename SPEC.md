@@ -94,24 +94,32 @@ Berdasarkan audit kode `app/`.
 
 ---
 
-## 4. Status dokumen skripsi (`LaporanTA-PebryAndrian-revisi.docx`)
+## 4. Status dokumen skripsi
+
+**Draft aktif: `docs/LaporanTA-PebryAndrian-revisi3.docx`** (turunan `revisi2.docx`, 14 Okt 2026).
+`revisi2.docx` = revisi yang sudah memakai pendekatan WSF dan Gambar 1.1 baru. `revisi.docx`
+(di luar repo, `D:\KULIAH\Skipsi-TA\TugasAkhir\`) adalah draft lama dan sudah tidak dipakai.
 
 | Bagian | Kondisi | Perlu |
 |--------|---------|-------|
-| Bab 1 Pendahuluan | ✅ lengkap | — |
-| Bab 2 Landasan Teori | ✅ lengkap (+ Tabel 2.1 penelitian terdahulu) | — |
-| Bab 3 Skema Penelitian | ✅ lengkap | — |
-| Bab 4 Analisis & Perancangan | ⚠️ baru bagian analisis | **Perancangan**: arsitektur, ERD, Use Case, Activity, Sequence, UI |
-| Bab 5 Implementasi & Evaluasi | ❌ kosong | Hasil implementasi, screenshot, Black Box, evaluasi |
+| Bab 1 Pendahuluan | ✅ lengkap (6 tahap: Prototyping + WSF) | — |
+| Bab 2 Landasan Teori | ✅ lengkap (+ Tabel 2.1 WSF, Tabel 2.2 penelitian terdahulu) | — |
+| Bab 3 Skema Penelitian | ✅ lengkap (WSF, fishbone, skema analisis, Tabel 3.5 black box) | — |
+| Bab 4 Analisis & Perancangan | ✅ lengkap (kebutuhan F/NF, use case, arsitektur, ERD, kamus data, activity, sequence, UI) | — |
+| Bab 5 Implementasi & Evaluasi | ❌ kosong | Hasil implementasi, screenshot, hasil Black Box, evaluasi |
 | Bab 6 Kesimpulan & Saran | ❌ kosong | Isi kesimpulan + saran |
-| Daftar Pustaka | ❌ kosong | Sitasi (kode sitasi sudah ada, mis. [PRE20], [NUG26] belum ada entri) |
-| Lampiran | ❌ kosong | Kuesioner, hasil uji |
+| Daftar Pustaka | ✅ 19 entri, semuanya dirujuk | — |
+| Lampiran | ✅ Lampiran 1 (skrip SQL), Lampiran 2 (kode `lib/db.ts`) | — |
 
-**Inkonsistensi teks yang harus dibetulkan:**
-- Judul Bab 4 di Daftar Isi beda dengan Sistematika Penulisan (FRONT).
-- Daftar Tabel: "Tabel 4.1 Skala Likert" dan "Tabel 4.2 IdentifikasiFitur" tidak cocok dengan isi Bab 4 (4.1 = Analisis Kebutuhan Sistem, 4.2 = Identifikasi Fitur).
-- Judul skripsi: teks isi menulis "(STUDI KASUS : INVISUAL STUDIO)"; nama perusahaan di bab lain "Invisual Studio" (tanpa "Studio" ganda). Samakan.
-- Typo: "PenelitianTerdahulu", "TujuanTugas Akhir", "Passowrd", spasi ganda, tanda titik dobel.
+**Perbaikan yang sudah dilakukan pada `revisi3`:**
+- Tabel 3.1 disamakan menjadi **6 tahap** (sebelumnya 7) agar cocok dengan Gambar 1.1 dan Subbab 1.5.
+- Kunci sitasi dibetulkan: `[NOR23]` → `[NOV23]`, `[PRE21]` → `[PRA21]`.
+- Sitasi ditambahkan pada Tabel 2.2 sehingga seluruh entri Daftar Pustaka dirujuk.
+
+**Sisa yang belum beres:**
+- Daftar Isi belum memuat BAB 5 dan BAB 6 (memang belum ditulis; tambahkan saat bab itu dibuat).
+- Nomor halaman pada Daftar Isi/Tabel/Gambar memakai field `PAGEREF`. Perlu diperbarui di Word
+  (Ctrl+A lalu F9) setiap kali isi berubah, sebelum dicetak.
 
 ---
 
@@ -128,6 +136,56 @@ Berdasarkan audit kode `app/`.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-10-14** – Dokumen skripsi: dibuat `docs/LaporanTA-PebryAndrian-revisi3.docx` dari
+  `revisi2.docx`. Perbaikan konsistensi Bab 1–4: (a) Tabel 3.1 disamakan jadi **6 tahap** sesuai
+  Gambar 1.1 dan Subbab 1.5 (sebelumnya 7 tahap sehingga tidak cocok); (b) kunci sitasi
+  `[NOR23]` → `[NOV23]` dan `[PRE21]` → `[PRA21]` (dua sitasi sebelumnya tidak punya entri di
+  Daftar Pustaka); (c) Tabel 2.2 diberi kunci sitasi `[PRA23] [SAR22] [SAP23] [FAU24] [MAH24]
+  [KUS22]` supaya seluruh 19 entri Daftar Pustaka dirujuk. Catatan terbuka: **F-02 Dashboard
+  monitoring** (Tabel 4.2/4.4, UC-06, Tabel 4.8) belum ada di kode — `/home` masih grid
+  "Scope Of Work" tanpa ringkasan tugas selesai/deadline terdekat. Perlu diputuskan: bangun
+  fiturnya atau sesuaikan dokumen. `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-14** – `WorkspaceSelector`: tombol **`⋯`** yang tadinya mati (di header "Workspaces",
+  `app/home/page.tsx`) kini berfungsi sebagai menu opsi workspace dan **dipindah ke dalam
+  komponen selector** (di samping trigger) — karena hanya komponen itu yang tahu workspace mana
+  yang sedang aktif. Efeknya fitur ini ikut jalan di `/profile` dan halaman project. Isi menu:
+  **Rename** (modal, `renameWorkspace()`) dan **Delete** (modal konfirmasi, `deleteWorkspace()`).
+  Catatan penting: `projects.workspace_id` ternyata **ON DELETE SET NULL** (bukan CASCADE),
+  jadi menghapus workspace **tidak** menghapus project — project hanya lepas dari workspace.
+  Teks konfirmasi dan assertion `scripts/db-check.mjs` disesuaikan dengan perilaku ini
+  (rename lolos RLS `ws_write`, delete berhasil, project tetap ada dengan `workspace_id` NULL).
+  `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-14** – `WorkspaceSelector`: tombol **`+`** di samping trigger workspace dihapus
+  (redundan — "Add Workspace" sudah ada di dalam dropdown "Browse All"). Modal tambah
+  workspace tetap ada dan tetap bisa dibuka dari item "Add Workspace" di dropdown.
+  `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-14** – Home sidebar: bagian **History** (di bawah **Workspaces**) menampilkan project
+  yang terakhir dibuka
+  (ikon + nama project + badge scope, klik → `/project/<scope>/<card>`). Disimpan di
+  `localStorage` (`invisual.recent-projects`) lewat `lib/utils.ts`:
+  `recordRecentProject()` dipanggil saat `findProject()` sukses di halaman card,
+  `listRecentProjects()` dibaca di sidebar — maksimal 8 entri, tanpa duplikat, terbaru di
+  depan. Tanpa tabel/migrasi baru. `tsc --noEmit` bersih, `next build` sukses.
+
+- **2026-10-14** – Home: ikon **Bell** tidak lagi tombol mati. Klik → overlay `Notification`
+  (`components/notification-panel.tsx`) bergaya gambar referensi — **panel besar terpusat**
+  (padding `12px` dari tepi layar, `max-h-92vh`, sudut membulat) jadi hampir penuh tapi masih
+  menyisakan tepi halaman asli seperti di gambar; tutup via tombol X atau Escape. Isinya:
+  judul "Notification", tab
+  **All Notification / I got a mention / Bookmarked**, sidebar **Sort by Board**, tombol
+  "Show Unread notification", plus kartu berisi avatar + nama + waktu relatif, breadcrumb
+  `scope › grup › task`, isi komentar, baris **Like / Reply**, dan input **Write a reply**.
+  Sumber data nyata (bukan dummy): `lib/db.ts` → `listNotifications()` = `comments` + embed
+  `profiles`/`tasks`/`task_groups`/`projects` (RLS `cm_all` sudah membatasi ke project user).
+  Reply memakai `addComment(task_id, body, parent_id)`, Like memakai `likeComment()`.
+  Bookmark + penanda "sudah dibaca" disimpan di `localStorage` (`invisual.notifications`),
+  bukan tabel baru — jadi tanpa migrasi. **Di luar cakupan skripsi** (bonus).
+  `scripts/db-check.mjs` ditambah assertion embed notifikasi. `tsc --noEmit` bersih,
+  `next build` sukses.
 
 - **2026-10-13** — Home / Scope Of Work: tombol **"New Card"** tidak lagi memakai `window.prompt`,
   tapi membuka modal **"Create New Card"** (gaya sama dengan modal "Create New Scope"): input nama

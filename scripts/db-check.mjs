@@ -56,6 +56,16 @@ try {
   assert.ok(!ws.error, `workspace insert failed: ${ws.error?.message}`)
   workspaceId = ws.data.id
 
+  // ws_write RLS: owner boleh rename workspace-nya (dipakai menu opsi workspace).
+  const renamedWs = await supabase
+    .from('workspaces')
+    .update({ name: 'Check WS Renamed' })
+    .eq('id', ws.data.id)
+    .select('name')
+    .single()
+  assert.ok(!renamedWs.error, `workspace rename failed: ${renamedWs.error?.message}`)
+  assert.equal(renamedWs.data.name, 'Check WS Renamed')
+
   const { data: user } = await supabase.auth.getUser()
   const project = await supabase
     .from('projects')
@@ -64,6 +74,15 @@ try {
     .single()
   assert.ok(!project.error, `project insert failed: ${project.error?.message}`)
   projectId = project.data.id
+
+  // `projects.workspace_id` ON DELETE SET NULL → hapus workspace TIDAK menghapus project,
+  // project hanya kehilangan workspace-nya. Ini yang dijanjikan dialog konfirmasi di UI.
+  const delWs = await supabase.from('workspaces').delete().eq('id', ws.data.id).select('id')
+  assert.ok(!delWs.error, `workspace delete failed: ${delWs.error?.message}`)
+  assert.equal(delWs.data.length, 1, 'workspace harus benar-benar terhapus')
+  workspaceId = null
+  const orphan = await supabase.from('projects').select('workspace_id').eq('id', projectId).single()
+  assert.equal(orphan.data.workspace_id, null, 'project harus tetap ada dengan workspace_id NULL')
 
   // projects_seed trigger: 4 statuses, 1 group, 1 doc row.
   const statuses = await supabase.from('statuses').select('id, label, position').eq('project_id', projectId).order('position')
@@ -113,6 +132,20 @@ try {
 
   const comment = await supabase.from('comments').insert({ task_id: task.data.id, body: 'hi', author_id: user.user.id }).select().single()
   assert.ok(!comment.error, `comment insert failed: ${comment.error?.message}`)
+
+  // Embed notifikasi (dipakai panel Notification di /home): komentar + author + task + grup + project.
+  const notif = await supabase
+    .from('comments')
+    .select(
+      'id, task_id, body, likes, created_at, profiles(name, avatar_url), tasks(title, task_groups(title), projects(name, scope))',
+    )
+    .eq('id', comment.data.id)
+    .single()
+  assert.ok(!notif.error, `notification embed failed: ${notif.error?.message}`)
+  assert.equal(notif.data.profiles.name, 'Check User')
+  assert.equal(notif.data.tasks.title, 'Check Task')
+  assert.equal(notif.data.tasks.projects.scope, 'check')
+  assert.ok(notif.data.tasks.task_groups.title, 'group title harus ikut ter-embed')
 
   // Doc tab autosave (upsert on project_id).
   const docSave = await supabase

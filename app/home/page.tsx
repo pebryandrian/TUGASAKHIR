@@ -10,14 +10,17 @@ import {
   Search,
   Home,
   ChevronDown,
+  History,
+  Clock,
   Settings,
-  MoreHorizontal,
   Plus,
   X,
   Star,
   LogOut,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
+import { NotificationPanel } from '@/components/notification-panel'
+import { listRecentProjects, type RecentProject } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
 import { createProject, listProjects, type Project } from '@/lib/db'
 
@@ -79,6 +82,8 @@ export default function DashboardPage() {
   const [searchMember, setSearchMember] = useState('')
   const [activeNav, setActiveNav] = useState('Home')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
 
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
@@ -109,6 +114,10 @@ export default function DashboardPage() {
   useEffect(() => {
     refreshProjects()
   }, [refreshProjects])
+
+  useEffect(() => {
+    setRecentProjects(listRecentProjects())
+  }, [])
 
   const scopeImages = initialScopes.map((s) => s.image)
   const scopes: ScopeItem[] =
@@ -216,7 +225,12 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-4 text-neutral-400">
-          <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Notifications">
+          <button
+            type="button"
+            onClick={() => setShowNotifications(true)}
+            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label="Notifications"
+          >
             <Bell size={18} strokeWidth={1.8} />
           </button>
           <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Team group">
@@ -345,9 +359,6 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between text-neutral-400 px-2 mb-3">
                 <span className="text-sm font-medium text-neutral-300">Workspaces</span>
                 <div className="flex items-center gap-2">
-                  <button type="button" className="hover:text-white transition cursor-pointer p-1" aria-label="Workspace options">
-                    <MoreHorizontal size={16} />
-                  </button>
                   <button type="button" className="hover:text-white transition cursor-pointer p-1" aria-label="Search workspace">
                     <Search size={15} />
                   </button>
@@ -355,6 +366,35 @@ export default function DashboardPage() {
               </div>
 
               <WorkspaceSelector />
+            </div>
+
+            {/* History: project yang terakhir dibuka (localStorage). */}
+            <div className="pt-2">
+              <div className="flex items-center gap-2 px-2 mb-3 text-neutral-400">
+                <History size={15} strokeWidth={1.8} />
+                <span className="text-sm font-medium text-neutral-300">History</span>
+              </div>
+              <div className="pl-3 space-y-0.5">
+                {recentProjects.length === 0 ? (
+                  <p className="px-4 py-1.5 text-xs text-neutral-600">
+                    Belum ada project yang dibuka.
+                  </p>
+                ) : (
+                  recentProjects.map((r) => (
+                    <Link
+                      key={`${r.scope}/${r.card}`}
+                      href={`/project/${r.scope}/${r.card}`}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
+                    >
+                      <Clock size={13} className="text-neutral-500 shrink-0" />
+                      <span className="truncate">{r.name}</span>
+                      <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
+                        {r.scopeTitle}
+                      </span>
+                    </Link>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </aside>
@@ -695,6 +735,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
     </div>
   )
 }
