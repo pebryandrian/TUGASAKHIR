@@ -1,133 +1,94 @@
 # Audit Konsistensi Laporan TA ↔ Aplikasi
 
-Dokumen ini memetakan setiap klaim di `docs/LaporanTA-PebryAndrian-revisi3.docx` ke kondisi
-nyata kode dan database. Tujuannya: **tidak ada klaim di laporan yang tidak bisa dibuktikan
-saat sidang.**
+Acuan: **`LaporanTA-PebryAndrian-revisi13.docx`** (13 November 2026, 4,31 MB) —
+file laporan terbaru, berada di folder induk `TUGASAKHIR/`, **bukan** di `invisual/docs/`.
 
-Tanggal audit: 13 November 2026
-Diperbarui: 13 November 2026 (implementasi F-02, F-03, F-12, F-13, UC-03)
-Metode: ekstraksi teks laporan + pembacaan kode `app/`, `lib/` + query langsung ke Supabase.
+> Catatan: `invisual/docs/LaporanTA-PebryAndrian-revisi2.docx` dan `revisi3.docx` adalah
+> salinan lama (versi 0,6–0,8 MB) yang sudah tidak dipakai. Audit sebelumnya sempat
+> memakai revisi3 sehingga beberapa temuan tidak relevan lagi.
+
+Metode: ekstraksi teks `word/document.xml` + pembacaan kode `app/`, `lib/` + query langsung
+ke Supabase (13 November 2026).
 
 Legenda: ✅ sesuai · ⚠️ sebagian · ❌ belum ada
 
 ---
 
-## 0. Status setelah implementasi 13 November 2026
+## 1. Kebutuhan fungsional (Tabel 4.2 revisi13)
 
-| # | Klaim laporan | Kondisi sebelumnya | Kondisi sekarang |
+| Kode | Kebutuhan | Implementasi di kode | Status |
 |---|---|---|---|
-| 1 | F-02 Dashboard monitoring | ❌ tidak ada | ✅ 4 kartu statistik + deadline terdekat + aktivitas terbaru di `/home` |
-| 2 | F-03 Mengubah & menghapus proyek | ❌ hanya buat | ✅ tombol ubah (nama+deskripsi) & hapus (konfirmasi) pada kartu project |
-| 3 | F-13 Hak akses PM/Member di antarmuka | ❌ tidak dibedakan | ✅ badge peran + gating tombol; RLS diperketat lewat migrasi |
-| 4 | UC-03 Menetapkan peran anggota | ❌ selalu `member` | ✅ pilihan peran saat undang + modal Anggota Project untuk ubah peran |
-| 5 | F-12 Unggah lampiran | ⚠️ hanya nama berkas | ✅ unggah ke Supabase Storage + signed URL (perlu migrasi bucket) |
-| 6 | Favorit di `project_members.favorite` | ⚠️ `localStorage` | ✅ kolom database dipakai |
-| 7 | Lampiran 1 SQL `subtasks` | ❌ 6 kolom | ⚠️ perlu diperbarui manual di laporan (kode sudah 10 kolom) |
-| 8 | Kanban | ⚠️ ada di kode, tak tercatat | ⚠️ tetap dipertahankan sebagai fitur tambahan; perlu diputuskan |
-| 9 | Bab 5 & Bab 6 | ❌ belum ada isi | ⚠️ di luar lingkup kode |
+| F-01 | Landing page, registrasi, login, logout, pemulihan kata sandi, proteksi rute | `app/page.tsx` (landing), `app/signin` (signup/login/reset + Google), `proxy.ts`, **Remember me** berfungsi lewat `cookieOptions.maxAge` | ✅ |
+| F-02 | Home = Scope of Work (kartu proyek + progres selesai/total) + My Member | `app/home/page.tsx`; progres dari `listProjectTaskStats()`, My Member dari `listProfiles()` | ✅ |
+| F-03 | Buat, ubah, hapus proyek, tandai favorit, **pengaturan jadwal** | `createProject`, `updateProject` (nama, deskripsi, `start_date`, `due_date`), `deleteProject`, `setProjectFavorite` | ✅ |
+| F-04 | Tambah anggota lewat email + penetapan peran | `addMemberByEmail(projectId, email, role)` + pilihan peran pada modal undang | ✅ |
+| F-05 | CRUD tugas (nama, deskripsi, prioritas, tenggat, status, penanggung jawab) | `createTask`, `updateTask`, `deleteTasks`, panel detail tugas | ✅ |
+| F-06 | Subtask bertingkat dengan penanggung jawab, status, tenggat, prioritas | Tabel `subtasks` 10 kolom (4 kolom meta sudah dimigrasi) + baris subtask di Main Table | ✅ |
+| F-07 | Alur kerja 4 status baku + ubah status (**Kanban**) | Tab Main Table & **Kanban** (drag & drop → `tasks.status_id`) | ✅ |
+| F-08 | Pengelompokan tugas + penanda warna | Tabel `task_groups` (`color`, `position`) | ✅ |
+| F-09 | Kalender bulanan + agenda | `CalendarView` (mode Month/Agenda, filter, sort, legenda status) | ✅ |
+| F-10 | Gantt + Chart | `GanttView` & `ChartView` (tab tambahan lewat tombol `+`) | ✅ |
+| F-11 | Doc: sunting teks, sisipkan gambar & berkas, autosave | Editor blok + `uploadDocFile()` ke bucket `project-docs`, autosave ke `docs.blocks` | ✅ |
+| F-12 | Komentar bertingkat + suka + unggah lampiran | `addComment`, `likeComment`, `uploadAttachment()` ke bucket `task-attachments` | ✅ |
+| F-13 | Hak akses Project Manager vs Member | `lib/permissions.ts` (baca `project_members.role`, owner = PM) + gating tombol + RLS | ✅ |
+| F-14 | Ubah nama, foto profil, kata sandi | `updateProfile`, `changePassword`, `uploadAvatar()` ke bucket `avatars` | ✅ |
+| F-15 | Buat, ubah nama, hapus, dan **memilih workspace aktif** | `WorkspaceSelector` terkendali; workspace aktif menyaring `listProjects(workspaceId)` | ✅ |
 
-**Tindakan manual yang masih diperlukan di Supabase (SQL Editor):**
+## 2. Kebutuhan non-fungsional (Tabel 4.3)
 
-1. `supabase/migrations/20261114000000_rls_roles.sql` — menutup lubang RLS (member bisa
-   membuat/menghapus grup dan menambah label) + policy PM untuk ubah/hapus project & peran anggota.
-2. `supabase/migrations/20261114000001_attachments_storage.sql` — membuat bucket
-   `task-attachments` beserta policy-nya. Tanpa ini, unggah lampiran menampilkan pesan
-   "Penyimpanan lampiran belum siap".
+| Kode | Aspek | Bukti | Status |
+|---|---|---|---|
+| NF-01 | Kinerja | `loadBoard()` memuat 6 query paralel lalu 3 query lanjutan | ✅ |
+| NF-02 | Keamanan | HTTPS (Supabase) + RLS per keanggotaan proyek | ✅ |
+| NF-03 | Kemudahan penggunaan | Satu pola modal/dropdown di seluruh halaman | ✅ |
+| NF-04 | Responsif | Kelas `sm:`/`lg:`/`xl:` pada semua halaman | ✅ |
+| NF-05 | Pemeliharaan | TypeScript `strict`, lapisan `lib/db.ts` terpisah dari UI | ✅ |
+| NF-06 | Ketersediaan | Supabase + Vercel (cloud) | ✅ |
 
----
+## 3. Basis data (Tabel 4.6)
 
-## 1. Ringkasan temuan
+Dua belas tabel terverifikasi: `workspaces`, `workspace_members`, `profiles`, `projects`,
+`project_members`, `statuses`, `task_groups`, `tasks`, `subtasks`, `comments`,
+`attachments`, `docs`.
 
-| # | Klaim di laporan | Lokasi laporan | Kondisi kode | Status |
-|---|---|---|---|---|
-| 1 | Dashboard: jumlah proyek, jumlah tugas, tugas selesai, deadline terdekat, aktivitas terbaru | Tabel 4.2 F-02, Tabel 4.4, Tabel 4.5 UC-06, §4.2.4, instrumen #8 | **Tidak ada sama sekali.** `/home` hanya grid Scope Of Work + tabel My Member | ❌ |
-| 2 | Mengubah & menghapus proyek | Tabel 4.2 F-03, Tabel 4.4 | Hanya buat proyek; tidak ada UI ubah/hapus | ❌ |
-| 3 | Membedakan hak akses Project Manager vs Member pada antarmuka | Tabel 4.2 F-13, Tabel 4.1, §1.4 | UI **tidak** membedakan; semua tombol tampil untuk semua peran | ❌ |
-| 4 | Menetapkan peran anggota tim | Tabel 4.5 UC-03 | `addMemberByEmail()` selalu `role='member'`; tidak ada UI ubah peran | ❌ |
-| 5 | Pengunggahan lampiran tugas | Tabel 4.2 F-12 | Hanya menyimpan **nama berkas**; tidak ada unggah ke Storage | ⚠️ |
-| 6 | Proyek favorit tersimpan pada basis data (`project_members.favorite`) | Tabel 4.7 kamus data | Kolom `favorite` **ada di DB** tetapi kode memakai `localStorage` | ⚠️ |
-| 7 | Subtask memiliki penanggung jawab, status, tenggat, prioritas | Tabel 4.2 F-06, §1.4 | ✅ ada di kode dan DB (kolom dimigrasikan 13 Nov 2026) | ✅ |
-| 8 | Lampiran 1 SQL: tabel `subtasks` hanya 6 kolom | Lampiran 1 | DB nyata punya 10 kolom (4 kolom meta ditambahkan) | ❌ |
-| 9 | Papan Kanban | tidak disebut sebagai fitur | Kode punya tab **Kanban** + drag & drop | ⚠️ |
-| 10 | Autentikasi, profil, doc autosave, Gantt, Chart, Calendar, komentar bertingkat | F-01, F-09, F-10, F-11, F-14 | ✅ sesuai | ✅ |
-| 11 | 12 tabel basis data | Tabel 4.6 | ✅ 12 tabel terverifikasi | ✅ |
-| 12 | Trigger: profil otomatis, 4 status + 1 grup + 1 doc, owner jadi PM, `docs_touch` | §4.2.2 | ✅ terverifikasi lewat uji insert | ✅ |
-| 13 | RLS: baca/ubah hanya proyek yang diikuti; hapus hanya PM | §4.2.2 | ⚠️ isolasi antar-proyek aman, tetapi **member masih bisa membuat/menghapus grup dan menambah label status** | ⚠️ |
-
----
-
-## 2. Bukti teknis
-
-### 2.1 Kolom nyata di database (diverifikasi 13 Nov 2026)
-
-```
-profiles          : id, name, email, role, avatar_url, created_at
-workspaces        : id, name, owner_id, created_at
-workspace_members : workspace_id, user_id
-projects          : id, workspace_id, name, description, scope, progress,
-                    start_date, due_date, owner_id, created_at
-project_members   : project_id, user_id, role, favorite
-task_groups       : id, project_id, title, color, position
-statuses          : id, project_id, label, color_code, position
-tasks             : id, project_id, group_id, status_id, title, description,
-                    priority, due_date, assignee_id, position, checked, created_at
-subtasks          : id, task_id, parent_id, text, done, position,
-                    assignee_id, status_id, due_date, priority
-attachments       : id, task_id, name, storage_path, owner_id, created_at
-comments          : id, task_id, author_id, parent_id, body, likes, created_at
-docs              : id, project_id, blocks, updated_at
-```
-
-### 2.2 Hasil uji RLS (dua akun nyata)
-
-| Aksi member | Hasil |
+| Catatan | Detail |
 |---|---|
-| baca tugas pada proyek yang diikuti | ✅ 1 baris |
-| baca proyek/tugas proyek lain | ✅ 0 baris (terisolasi) |
-| ubah judul/status tugas **miliknya** | ✅ berhasil |
-| ubah/hapus tugas orang lain | ✅ 0 baris (ditolak) |
-| tambah subtask & komentar | ✅ berhasil |
-| **buat grup baru** | ⚠️ berhasil (seharusnya PM) |
-| **hapus grup** | ⚠️ berhasil (seharusnya PM) |
-| **tambah label status** | ⚠️ berhasil (seharusnya PM) |
-| hapus tugas | ✅ 0 baris |
-| undang anggota | ✅ ditolak |
-| ubah/hapus proyek | ✅ 0 baris |
+| ✅ `project_members.favorite` | Ada dan dipakai (`listFavoriteProjects`, `setProjectFavorite`) |
+| ✅ `attachments.storage_path` | Ada dan dipakai (path di bucket `task-attachments`) |
+| ⚠️ `workspace_members` | Laporan menyebut "beserta perannya", tetapi tabel hanya punya `workspace_id` + `user_id` (tanpa kolom peran). Peran tersimpan di `project_members.role`. |
 
----
+## 4. Hal yang perlu diputuskan
 
-## 3. Rekomendasi
+| # | Temuan | Pilihan |
+|---|---|---|
+| 1 | **Login memakai Supabase client di browser**, sedangkan Gambar 4.12 menyebut "data dikirim ke server action Next.js" | (a) ubah kode jadi server action, atau (b) sesuaikan kalimat di laporan |
+| 2 | **UC-03 disebut "halaman Anggota Proyek"**, implementasi berupa modal di halaman proyek | (a) jadikan halaman terpisah, atau (b) sebut "panel/modal Anggota Proyek" di laporan |
+| 3 | **Kartu statistik + panel Deadline/Aktivitas** di Home adalah tambahan di luar F-02 revisi13 | (a) biarkan sebagai pengembangan tambahan, atau (b) dihapus agar persis seperti laporan |
+| 4 | `workspace_members` tanpa kolom peran | (a) tambah kolom `role`, atau (b) perbaiki kalimat Tabel 4.6 |
+| 5 | **Lampiran 1** revisi13 tidak lagi memuat SQL (diganti daftar pertanyaan wawancara) | Tidak perlu tindakan |
 
-### Prioritas 1 — bangun di kode (laporan tidak perlu diubah)
+## 5. Tindakan manual yang masih diperlukan (Supabase → SQL Editor)
 
-1. **Dashboard monitoring (F-02).** Muncul di 5 tempat laporan (Tabel 4.2, 4.4, 4.5 UC-06,
-   §4.2.4, instrumen penelitian #8), jadi ini klaim yang paling sering dijanjikan.
-   Isi: kartu jumlah proyek, jumlah tugas, tugas selesai, deadline terdekat, aktivitas terbaru.
-2. **Ubah & hapus proyek (F-03).** Menu opsi pada kartu proyek.
-3. **Hak akses PM/Member (F-13) + tutup 2 lubang RLS.** Gating tombol di UI + migrasi RLS
-   agar buat/hapus grup dan tambah label hanya untuk PM.
-4. **Favorit ke kolom `project_members.favorite`** agar sesuai kamus data Tabel 4.7.
+| File migrasi | Fungsi |
+|---|---|
+| `supabase/migrations/20261114000000_rls_roles.sql` | Menutup lubang RLS: member tidak lagi bisa membuat/menghapus grup dan menambah label status; menambah policy PM untuk ubah/hapus proyek dan ubah peran anggota |
+| `supabase/migrations/20261114000001_attachments_storage.sql` | Membuat bucket `task-attachments` (lampiran tugas) |
+| `supabase/migrations/20261114000002_storage_avatars_docs.sql` | Membuat bucket `avatars` (foto profil) dan `project-docs` (gambar/berkas tab Doc) |
 
-### Prioritas 2 — perlu keputusan
+Diverifikasi 13 November 2026: **ketiga bucket belum ada** (`upload` → `Bucket not found`).
+Tanpa migrasi ini, unggah lampiran, foto profil, dan berkas Doc akan menampilkan pesan
+"penyimpanan belum siap" (bukan error mentah).
 
-5. **Peran anggota (UC-03).** Pilihan: (a) tambah dropdown peran di daftar anggota, atau
-   (b) ubah kalimat UC-03 menjadi "mengundang anggota dengan peran Member".
-6. **Unggah lampiran (F-12).** Pilihan: (a) implementasi Supabase Storage (butuh bucket +
-   policy), atau (b) ubah kalimat menjadi "mencatat lampiran tugas".
-7. **Kanban.** Pilihan: (a) tambahkan ke Tabel 4.2/4.4/4.8 sebagai F-15, atau
-   (b) sembunyikan tab Kanban dari aplikasi.
+## 6. Bukti pengujian terakhir
 
-### Prioritas 3 — perbarui laporan saja
-
-8. **Lampiran 1**: tambahkan 4 kolom meta pada definisi tabel `subtasks`.
-9. **Tabel 4.8**: sebutkan Kanban bila dipilih opsi 7(a); perjelas bahwa Gantt/Chart adalah
-   tampilan tambahan yang dibuka lewat tombol `+`, bukan tab tetap.
-
----
-
-## 4. Catatan
-
-- Bab 5 (Implementasi dan Evaluasi) dan Bab 6 (Kesimpulan dan Saran) sudah disebut pada
-  Sistematika Penulisan, tetapi belum ada isinya di `revisi3.docx`. Saat menulis Bab 5,
-  gunakan tabel di dokumen ini sebagai daftar bukti agar konsisten.
-- Setiap kali fitur di kode berubah, perbarui `SPEC.md` §3 dan dokumen ini bersamaan.
+| Uji | Hasil |
+|---|---|
+| `npx tsc --noEmit` | bersih |
+| `next build` | sukses (12 rute) |
+| Join `assignee` pada query deadline | OK |
+| Query aktivitas (tugas + komentar) | OK |
+| Statistik dashboard | OK |
+| Favorit (update baris `project_members` milik owner) | OK |
+| Ubah jadwal proyek (`start_date` → `due_date`) | OK |
+| Filter proyek per workspace aktif | OK |
+| Unggah ke `task-attachments` / `avatars` / `project-docs` | gagal — bucket belum dibuat |

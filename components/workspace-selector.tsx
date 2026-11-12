@@ -13,9 +13,21 @@ import {
 
 // Pemilih workspace dengan dropdown (search + recent) dan modal "Buat Workspace Baru".
 // Dipakai bersama oleh sidebar Home, Profile, dan halaman project.
-export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
+//
+// Mendukung mode terkendali (`value` + `onChange`) supaya halaman bisa memakai
+// workspace aktif untuk menyaring daftar proyek (F-15).
+export function WorkspaceSelector({
+  initial = '',
+  value,
+  onChange,
+}: {
+  initial?: string
+  value?: string
+  onChange?: (workspace: Workspace | null) => void
+}) {
+  const controlled = value !== undefined
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  const [selected, setSelected] = useState(initial)
+  const [selected, setSelected] = useState(value ?? initial)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -26,20 +38,38 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
 
+  // Saat terkendali, tampilan mengikuti prop `value`.
+  useEffect(() => {
+    if (controlled) setSelected(value ?? '')
+  }, [controlled, value])
+
   useEffect(() => {
     // Pastikan akun punya minimal satu workspace, lalu tampilkan daftarnya.
     ensureDefaultWorkspace()
-      .then((created) => listWorkspaces().then((rows) => ({ rows, created })))
-      .then(({ rows }) => {
+      .then(() => listWorkspaces())
+      .then((rows) => {
         setWorkspaces(rows)
         if (rows.length === 0) {
-          setSelected('')
-        } else if (!rows.some((w) => w.name === initial)) {
-          setSelected(rows[0].name)
+          if (!controlled) setSelected('')
+          onChange?.(null)
+          return
+        }
+        const current = controlled ? value : selected
+        if (!current || !rows.some((w) => w.name === current)) {
+          const fallback = rows[0]
+          if (!controlled) setSelected(fallback.name)
+          onChange?.(fallback)
         }
       })
       .catch(() => setWorkspaces([]))
-  }, [initial])
+    // onChange sengaja tidak jadi dependency agar tidak memicu loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial, controlled])
+
+  const selectWorkspace = (ws: Workspace) => {
+    if (!controlled) setSelected(ws.name)
+    onChange?.(ws)
+  }
 
   const filtered = workspaces.filter((ws) =>
     ws.name.toLowerCase().includes(query.toLowerCase())
@@ -54,7 +84,8 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
     try {
       const created = await createWorkspace(trimmed)
       setWorkspaces((prev) => [...prev, created])
-      setSelected(created.name)
+      if (!controlled) setSelected(created.name)
+      onChange?.(created)
       setName('')
       setShowModal(false)
     } catch (err: any) {
@@ -72,7 +103,8 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
     try {
       await renameWorkspace(selectedWs.id, trimmed)
       setWorkspaces((prev) => prev.map((w) => (w.id === selectedWs.id ? { ...w, name: trimmed } : w)))
-      setSelected(trimmed)
+      if (!controlled) setSelected(trimmed)
+      onChange?.({ ...selectedWs, name: trimmed })
       setDialog(null)
     } catch (err: any) {
       setError(err?.message || 'Gagal mengganti nama workspace.')
@@ -85,7 +117,8 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
       await deleteWorkspace(selectedWs.id)
       const rest = workspaces.filter((w) => w.id !== selectedWs.id)
       setWorkspaces(rest)
-      setSelected(rest[0]?.name ?? '')
+      if (!controlled) setSelected(rest[0]?.name ?? '')
+      onChange?.(rest[0] ?? null)
       setDialog(null)
     } catch (err: any) {
       setError(err?.message || 'Gagal menghapus workspace.')
@@ -141,7 +174,7 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
                       key={ws.id}
                       type="button"
                       onClick={() => {
-                        setSelected(ws.name)
+                        selectWorkspace(ws)
                         setOpen(false)
                         setQuery('')
                       }}

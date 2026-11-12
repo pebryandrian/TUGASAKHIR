@@ -26,6 +26,8 @@ import {
   uploadAttachment,
   getAttachmentUrl,
   deleteAttachmentWithFile,
+  uploadDocFile,
+  getDocFileUrl,
   updateMemberRole,
   removeMember,
   saveDoc,
@@ -315,6 +317,8 @@ export interface DocBlock {
     name: string
     size: string
     icon: string
+    /** Path berkas di Supabase Storage (bucket project-docs). */
+    path?: string
   }
   imageUrl?: string
   align?: 'left' | 'center' | 'right' | 'justify'
@@ -1525,9 +1529,14 @@ export default function ProjectDetailPage() {
   const [history, setHistory] = useState<DocBlock[][]>([[]])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [activeBlockIndex, setActiveBlockIndex] = useState(0)
-  // Input file tersembunyi untuk blok gambar (gambar disimpan sebagai data URL).
+  // Input file tersembunyi untuk blok gambar & berkas pada tab Doc.
   const docImageInputRef = useRef<HTMLInputElement>(null)
+  const docFileInputRef = useRef<HTMLInputElement>(null)
   const [imageTargetBlock, setImageTargetBlock] = useState<string | null>(null)
+  const [docFileTarget, setDocFileTarget] = useState<string | null>(null)
+  const [docUploading, setDocUploading] = useState(false)
+  // Cache URL bertanda tangan untuk berkas Doc (path Storage -> URL).
+  const [docFileUrls, setDocFileUrls] = useState<Record<string, string>>({})
   // Seleksi teks di dalam blok (untuk mengubah HANYA teks yang di-blok).
   const selectionRef = useRef<{ index: number; start: number; end: number } | null>(null)
   const [lastUpdated, setLastUpdated] = useState('')
@@ -2509,13 +2518,14 @@ export default function ProjectDetailPage() {
   const canUndo = historyIndex > 0
   const canRedo = historyIndex < history.length - 1
 
-  // Pilih gambar untuk blok `image` (disimpan sebagai data URL di dalam blocks).
-  const handleDocImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Pilih gambar untuk blok `image`. Berkas diunggah ke Supabase Storage
+  // (bucket project-docs) dan blok menyimpan path-nya, sesuai Subbab 4.2.1.
+  const handleDocImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     const targetId = imageTargetBlock
     setImageTargetBlock(null)
-    if (!file || !targetId) return
+    if (!file || !targetId || !projectId) return
     if (!file.type.startsWith('image/')) {
       setNotice('File harus berupa gambar.')
       return
@@ -2524,15 +2534,88 @@ export default function ProjectDetailPage() {
       setNotice('Ukuran gambar maksimal 2 MB.')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = reader.result as string
+    setDocUploading(true)
+    try {
+      const uploaded = await uploadDocFile(projectId, file)
       commitBlocksChange(
-        docBlocks.map((b) => (b.id === targetId ? { ...b, imageUrl: url } : b)),
+        docBlocks.map((b) => (b.id === targetId ? { ...b, imageUrl: uploaded.url } : b)),
       )
+    } catch (err) {
+      setNotice(
+        `Gagal mengunggah gambar: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setDocUploading(false)
     }
-    reader.readAsDataURL(file)
   }
+
+  // Unggah berkas untuk blok `file` pada tab Doc.
+  const handleDocFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const targetId = docFileTarget
+    setDocFileTarget(null)
+    if (!file || !targetId || !projectId) return
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice('Ukuran berkas maksimal 5 MB.')
+      return
+    }
+    setDocUploading(true)
+    try {
+      const uploaded = await uploadDocFile(projectId, file)
+      commitBlocksChange(
+        docBlocks.map((b) =>
+          b.id === targetId
+            ? {
+                ...b,
+                fileData: {
+                  name: uploaded.name,
+                  size: uploaded.size,
+                  icon: (uploaded.name.split('.').pop() || 'F').charAt(0).toUpperCase(),
+                  path: uploaded.url,
+                },
+              }
+            : b,
+        ),
+      )
+    } catch (err) {
+      setNotice(
+        `Gagal mengunggah berkas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
+  // Blok Doc menyimpan path Storage; URL bertanda tangan dibuat sekali per path.
+  useEffect(() => {
+    const paths = new Set<string>()
+    for (const b of docBlocks) {
+      if (b.type === 'image' && b.imageUrl && !/^(https?:|data:)/.test(b.imageUrl)) {
+        paths.add(b.imageUrl)
+      }
+      if (b.type === 'file' && b.fileData?.path) paths.add(b.fileData.path)
+    }
+    if (paths.size === 0) return
+
+    let alive = true
+    ;(async () => {
+      const entries = await Promise.all(
+        [...paths].map(async (path) => [path, await getDocFileUrl(path)] as const),
+      )
+      if (!alive) return
+      setDocFileUrls((prev) => {
+        const next = { ...prev }
+        for (const [path, url] of entries) {
+          if (url) next[path] = url
+        }
+        return next
+      })
+    })()
+    return () => {
+      alive = false
+    }
+  }, [docBlocks])
 
   const handleUndo = () => {
     if (!canUndo) return
@@ -5050,6 +5133,12 @@ export default function ProjectDetailPage() {
                     onChange={handleDocImagePick}
                     className="hidden"
                   />
+                  <input
+                    ref={docFileInputRef}
+                    type="file"
+                    onChange={handleDocFilePick}
+                    className="hidden"
+                  />
                   {/* Doc Title Heading & Metadata Header */}
                   <div>
                     <h1 className="text-2xl font-bold text-white tracking-tight mb-3">
@@ -5273,35 +5362,47 @@ export default function ProjectDetailPage() {
                                 <span className="text-4xl font-extrabold text-white font-serif tracking-tighter drop-shadow-sm select-none">
                                   {block.fileData.icon}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    const name = block.fileData?.name || 'dokumen.txt'
-                                    const blob = new Blob(
-                                      [`${name}\nUkuran: ${block.fileData?.size || '-'}\n\n(Contoh berkas dari tab Doc.)`],
-                                      { type: 'text/plain' }
-                                    )
-                                    const url = URL.createObjectURL(blob)
-                                    const a = document.createElement('a')
-                                    a.href = url
-                                    a.download = name
-                                    document.body.appendChild(a)
-                                    a.click()
-                                    document.body.removeChild(a)
-                                    URL.revokeObjectURL(url)
-                                  }}
-                                  className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                                  title="Download document"
-                                >
-                                  <Download size={14} />
-                                </button>
+                                {block.fileData.path ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const url = docFileUrls[block.fileData!.path!]
+                                      if (!url) {
+                                        setNotice('Berkas sedang disiapkan, coba lagi sebentar.')
+                                        return
+                                      }
+                                      window.open(url, '_blank', 'noopener,noreferrer')
+                                    }}
+                                    className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                    title="Unduh berkas"
+                                  >
+                                    <Download size={14} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setDocFileTarget(block.id)
+                                      docFileInputRef.current?.click()
+                                    }}
+                                    className="absolute inset-0 flex items-center justify-center bg-black/40 text-[11px] font-semibold text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                  >
+                                    {docUploading ? 'Mengunggah…' : 'Pilih berkas'}
+                                  </button>
+                                )}
                               </div>
 
                               <div className="px-2.5 py-2 bg-[#141517] border-t border-neutral-800/80">
                                 <p className="text-[11px] text-neutral-300 font-medium truncate group-hover:text-blue-400 transition">
                                   {block.fileData.name}
                                 </p>
+                                {block.fileData.size && (
+                                  <p className="text-[10px] text-neutral-500">
+                                    {block.fileData.size}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           )}
@@ -5319,10 +5420,15 @@ export default function ProjectDetailPage() {
                               >
                                 {block.imageUrl ? (
                                   <Image
-                                    src={block.imageUrl}
+                                    src={
+                                      /^(https?:|data:)/.test(block.imageUrl)
+                                        ? block.imageUrl
+                                        : (docFileUrls[block.imageUrl] ?? '')
+                                    }
                                     alt={block.content || 'Image preview'}
                                     width={160}
                                     height={112}
+                                    unoptimized
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
                                 ) : (

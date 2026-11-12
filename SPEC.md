@@ -84,40 +84,38 @@ Berdasarkan audit kode `app/`.
 
 | Fitur | Skripsi minta | Kode sekarang | Status |
 |-------|---------------|---------------|--------|
-| F1 Autentikasi | Supabase Auth, proteksi rute | `signup`/`login`/`reset` via Supabase Auth, logout, `proxy.ts` menjaga `/home`, `/project`, `/profile` | ✅ Nyata |
-| F2 Dashboard monitoring | Jumlah proyek, jumlah tugas, tugas selesai, deadline terdekat, aktivitas terbaru | `/home` menampilkan 4 kartu statistik + panel **Deadline Terdekat** + **Aktivitas Terbaru** (tugas & komentar), semuanya dari query nyata (`getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity`) | ✅ Nyata |
-| F3 Pengelolaan proyek | Buat, ubah, hapus, favorit | Buat (modal), **ubah** (nama + deskripsi), **hapus** (konfirmasi), favorit disimpan di kolom `project_members.favorite` | ✅ Nyata |
-| F4 Pengelolaan anggota | Tambah anggota + peran | Undang via email dengan pilihan peran, modal **Anggota Project** untuk ubah peran/keluarkan anggota (`project_members.role`) | ✅ Nyata |
-| F5 Task management | CRUD tugas + atribut | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata |
-| F6 Pengelolaan subtask | Subtask bertingkat dengan meta | Subtask bertingkat + assignee/status/tenggat/prioritas (`subtasks` 4 kolom meta) | ✅ Nyata |
+| F1 Autentikasi | Landing, registrasi, login, logout, reset, proteksi rute | `app/page.tsx` (landing), `app/signin` (signup/login/reset + Google), `proxy.ts`; **Remember me** mengatur masa berlaku cookie sesi | ✅ Nyata |
+| F2 Dashboard monitoring | Home = Scope of Work + progres tugas + My Member | Kartu proyek dengan progres `selesai/total` dari `tasks`, daftar My Member dari `profiles`. Tambahan (di luar laporan): 4 kartu statistik + panel Deadline/Aktivitas | ✅ Nyata |
+| F3 Pengelolaan proyek | Buat, ubah, hapus, favorit, jadwal | `createProject`, `updateProject` (nama, deskripsi, `start_date`, `due_date`), `deleteProject`, favorit di `project_members.favorite` | ✅ Nyata |
+| F4 Pengelolaan anggota | Tambah anggota + peran | Undang via email dengan pilihan peran; modal Anggota Project untuk ubah peran/keluarkan (`project_members.role`) | ✅ Nyata |
+| F5 Pengelolaan tugas | CRUD tugas + atribut | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata |
+| F6 Pengelolaan subtask | Subtask bertingkat dengan meta | Subtask bertingkat + assignee/status/tenggat/prioritas (`subtasks` 10 kolom) | ✅ Nyata |
 | F7 Alur kerja | 4 status baku + ubah status | Main Table + **Kanban** drag & drop; status tersimpan ke `tasks.status_id` | ✅ Nyata |
 | F8 Pengelompokan tugas | Grup + warna | `task_groups` dengan color & position | ✅ Nyata |
-| F9 Kalender proyek | Bulanan + agenda | Tab Calendar dengan mode Month/Agenda, filter, sort | ✅ Nyata |
+| F9 Kalender proyek | Bulanan + agenda | Tab Calendar dengan mode Month/Agenda, filter, sort, legenda status | ✅ Nyata |
 | F10 Gantt & Chart | Timeline + distribusi status | Tab tambahan Gantt & Chart (tombol `+`) | ✅ Nyata |
-| F11 Dokumen proyek | Editor + autosave | Editor blok + autosave ke `docs.blocks` (JSONB) | ✅ Nyata |
-| F12 Komentar & lampiran | Komentar bertingkat + unggah lampiran | Komentar bertingkat + like; **lampiran diunggah ke Supabase Storage** (`task-attachments`) dan dibuka lewat signed URL | ✅ Nyata |
-| F13 Hak akses | PM vs Member | `lib/permissions.ts` membaca `project_members.role` (+ owner = PM); badge peran di board; tombol struktur pekerjaan hanya untuk PM; RLS diperketat lewat migrasi `20261114000000_rls_roles.sql` | ✅ Nyata |
-| F14 Profil | Nama, foto, kata sandi | `/profile` ubah nama + foto, ganti kata sandi | ✅ Nyata |
-| — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; klien `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
+| F11 Dokumen proyek | Editor + gambar/berkas + autosave | Editor blok; gambar & berkas diunggah ke bucket `project-docs`, autosave ke `docs.blocks` | ✅ Nyata |
+| F12 Komentar & lampiran | Komentar bertingkat + unggah lampiran | Komentar bertingkat + like; lampiran ke bucket `task-attachments`, dibuka via signed URL | ✅ Nyata |
+| F13 Hak akses | PM vs Member | `lib/permissions.ts` (`project_members.role`, owner = PM); badge peran; gating tombol; RLS diperketat | ✅ Nyata |
+| F14 Profil | Nama, foto, kata sandi | `/profile`: ubah nama, foto ke bucket `avatars`, ganti kata sandi | ✅ Nyata |
+| F15 Pengelolaan workspace | Buat, ubah nama, hapus, pilih aktif | `WorkspaceSelector` (create/rename/delete) + mode terkendali; workspace aktif menyaring `listProjects(workspaceId)` | ✅ Nyata |
+| — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
 | — Doc editor | (tidak diminta khusus) | Editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
 
-**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan, tab Kanban.
+**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan, kartu statistik + panel Deadline/Aktivitas di Home.
 
 ---
 
 ## 4. Status dokumen skripsi
-
-**Draft aktif: `docs/LaporanTA-PebryAndrian-revisi3.docx`** (turunan `revisi2.docx`, 14 Okt 2026).
-`revisi2.docx` = revisi yang sudah memakai pendekatan WSF dan Gambar 1.1 baru. `revisi.docx`
-(di luar repo, `D:\KULIAH\Skipsi-TA\TugasAkhir\`) adalah draft lama dan sudah tidak dipakai.
+**Acuan aktif: `LaporanTA-PebryAndrian-revisi13.docx`** (13 Nov 2026, 4,31 MB) — berada di
+folder induk `TUGASAKHIR/`, bukan di `invisual/docs/`. Salinan `revisi2.docx` & `revisi3.docx`
+di `invisual/docs/` adalah versi lama (0,6–0,8 MB) dan **tidak dipakai lagi**.
 
 **Audit konsistensi laporan ↔ kode: `docs/audit-konsistensi-laporan.md`** (13 Nov 2026).
-Dokumen itu memetakan setiap klaim Bab 1, Bab 4, dan Lampiran ke kondisi nyata kode + database,
-beserta bukti teknis. Selisih yang masih terbuka: F-02 dashboard monitoring, ubah/hapus proyek
-(F-03), gating hak akses PM/Member di UI (F-13), penetapan peran anggota (UC-03), unggah
-lampiran (F-12), favorit yang masih di `localStorage` padahal kamus data menyebut kolom
-`project_members.favorite`, Kanban yang belum tercatat sebagai fitur, dan Lampiran 1 SQL
-`subtasks` yang belum memuat 4 kolom meta.
+Dokumen itu memetakan F-01…F-15, NF-01…NF-06, dan 12 tabel basis data ke kondisi nyata kode
+beserta bukti teknis. Sisa hal yang perlu diputuskan: login masih di browser (laporan menyebut
+server action), UC-03 masih berupa modal (laporan menyebut halaman), `workspace_members` tanpa
+kolom peran, dan kartu statistik Home yang merupakan tambahan di luar F-02.
 
 | Bagian | Kondisi | Perlu |
 |--------|---------|-------|
@@ -155,6 +153,25 @@ lampiran (F-12), favorit yang masih di `localStorage` padahal kamus data menyebu
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-13** – Menyelaraskan aplikasi dengan **`LaporanTA-PebryAndrian-revisi13.docx`**
+  (laporan terbaru, ada di folder induk `TUGASAKHIR/`). Audit sebelumnya memakai `revisi3.docx`
+  di `invisual/docs/` yang sudah usang, sehingga sebagian temuan tidak relevan.
+  (a) **F-15 Workspace aktif**: `WorkspaceSelector` menerima `value`/`onChange`; workspace aktif
+  menyaring `listProjects(workspaceId)` dan dipakai saat membuat scope/card.
+  (b) **F-03 Jadwal proyek**: modal Ubah Project menambah `start_date` dan `due_date`.
+  (c) **F-01 Remember me**: checkbox dikembalikan dan benar-benar berfungsi lewat
+  `cookieOptions.maxAge` (30 hari bila dicentang, cookie sesi bila tidak).
+  (d) **F-14 Foto profil**: `uploadAvatar()` mengunggah ke bucket `avatars` lalu menyimpan URL
+  publik; tidak lagi menyimpan base64 di kolom tabel.
+  (e) **F-11 Berkas Doc**: `uploadDocFile()` mengunggah gambar & berkas ke bucket `project-docs`,
+  blok menyimpan path dan ditampilkan lewat signed URL; blok "file" kini bisa memilih berkas
+  sungguhan (sebelumnya hanya membuat blob teks contoh).
+  (f) Migrasi baru `supabase/migrations/20261114000002_storage_avatars_docs.sql`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, jadwal proyek & filter workspace
+  terbukti jalan lewat uji langsung ke Supabase. **Bucket Storage belum dibuat** — unggah
+  ke `task-attachments`, `avatars`, dan `project-docs` masih gagal sampai ketiga migrasi
+  dijalankan.
 
 - **2026-11-13** – Menyelaraskan aplikasi dengan klaim `LaporanTA-...-revisi3.docx`:
   (a) **F-02 Dashboard monitoring** di `/home`: kartu jumlah proyek / total tugas / tugas selesai /

@@ -24,7 +24,7 @@ import {
   Lock,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
-import { getSessionProfile, updateProfile, changePassword } from '@/lib/db'
+import { getSessionProfile, updateProfile, changePassword, uploadAvatar } from '@/lib/db'
 import { signOut } from '@/lib/auth'
 
 type Role = 'Team Member' | 'Project Manager' | 'Admin' | 'Owner'
@@ -73,6 +73,9 @@ export default function ProfilePage() {
   const [saveError, setSaveError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [savedAvatar, setSavedAvatar] = useState<string | null>(null)
+  // Berkas baru yang belum diunggah. Disimpan terpisah dari `avatarPreview`
+  // karena foto profil diunggah ke Supabase Storage (F-14), bukan base64 di DB.
+  const [pendingAvatar, setPendingAvatar] = useState<File | null>(null)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   const isDirty =
@@ -121,11 +124,9 @@ export default function ProfilePage() {
       return
     }
     setSaveError('')
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setAvatarPreview(e.target?.result as string)
-    }
-    reader.readAsDataURL(file)
+    setPendingAvatar(file)
+    // Pratinjau lokal; berkasnya baru diunggah saat Save Changes.
+    setAvatarPreview(URL.createObjectURL(file))
   }, [])
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -134,6 +135,7 @@ export default function ProfilePage() {
   }
 
   const handleRemoveAvatar = () => {
+    setPendingAvatar(null)
     setAvatarPreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -176,12 +178,19 @@ export default function ProfilePage() {
     setSaveStatus('saving')
     setSaveError('')
     try {
+      // Unggah foto baru ke Supabase Storage lebih dulu, lalu simpan URL-nya.
+      let avatarUrl = avatarPreview
+      if (pendingAvatar) {
+        avatarUrl = await uploadAvatar(pendingAvatar)
+      }
       await updateProfile({
         name: `${form.firstName} ${form.lastName}`.trim(),
-        avatar_url: avatarPreview,
+        avatar_url: avatarUrl,
       })
       setProfile({ ...form })
-      setSavedAvatar(avatarPreview)
+      setSavedAvatar(avatarUrl)
+      setAvatarPreview(avatarUrl)
+      setPendingAvatar(null)
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 3000)
     } catch (err) {
@@ -193,6 +202,7 @@ export default function ProfilePage() {
   const handleCancel = () => {
     setForm({ ...profile })
     setAvatarPreview(savedAvatar)
+    setPendingAvatar(null)
     setSaveError('')
   }
 

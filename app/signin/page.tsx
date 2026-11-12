@@ -27,6 +27,7 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   // Login form state
+  const [rememberMe, setRememberMe] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
 
   // Set when the recovery link already opened a session: the email field is then
@@ -106,7 +107,9 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
         router.push('/home')
         router.refresh()
       } else if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        // Klien khusus login: opsi cookie mengikuti "Remember me".
+        const auth = createClient({ remember: rememberMe })
+        const { error } = await auth.auth.signInWithPassword({ email, password })
         if (error) throw error
         router.push('/home')
         router.refresh()
@@ -321,9 +324,18 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               </div>
             )}
 
-            {/* Login-specific Forgot Password */}
+            {/* Login-specific Remember Me & Forgot Password */}
             {mode === 'login' && (
-              <div className="flex items-center justify-end pt-1 pb-1">
+              <div className="flex items-center justify-between pt-1 pb-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-neutral-600">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 accent-neutral-900 cursor-pointer"
+                  />
+                  <span>Remember me</span>
+                </label>
                 <button
                   type="button"
                   onClick={() => setMode('forgot')}

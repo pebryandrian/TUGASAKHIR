@@ -887,3 +887,83 @@ export async function deleteAttachmentWithFile(id: string, storagePath: string |
   const { error } = await db.from('attachments').delete().eq('id', id)
   if (error) throw error
 }
+
+// ======================== FOTO PROFIL (F-14) ========================
+
+export const AVATAR_BUCKET = 'avatars'
+export const MISSING_AVATAR_BUCKET_MESSAGE =
+  'Penyimpanan foto profil belum siap. Jalankan migrasi supabase/migrations/20261114000002_storage_avatars_docs.sql di Supabase → SQL Editor.'
+
+// Foto profil disimpan di Supabase Storage (bukan base64 di kolom tabel), sesuai
+// Subbab 4.2.1. Bucket bersifat publik sehingga URL-nya bisa dipakai langsung.
+export async function uploadAvatar(file: File): Promise<string> {
+  const db = supabase()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) throw new Error('Harus login untuk mengunggah foto profil.')
+
+  if (!file.type.startsWith('image/')) throw new Error('Berkas harus berupa gambar.')
+  if (file.size > 2 * 1024 * 1024) throw new Error('Ukuran gambar maksimal 2 MB.')
+
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const path = `${user.id}/${Date.now()}.${ext}`
+
+  const { error } = await db.storage
+    .from(AVATAR_BUCKET)
+    .upload(path, file, { cacheControl: '3600', upsert: true })
+
+  if (error) {
+    if (/bucket|not found|policy|row-level/i.test(error.message)) {
+      throw new Error(MISSING_AVATAR_BUCKET_MESSAGE)
+    }
+    throw error
+  }
+
+  return db.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl
+}
+
+// ======================== BERKAS DOKUMEN PROYEK (F-11) ========================
+
+export const DOC_BUCKET = 'project-docs'
+export const MISSING_DOC_BUCKET_MESSAGE =
+  'Penyimpanan berkas dokumen belum siap. Jalankan migrasi supabase/migrations/20261114000002_storage_avatars_docs.sql di Supabase → SQL Editor.'
+
+export interface UploadedDocFile {
+  url: string
+  name: string
+  size: string
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Unggah berkas (gambar atau dokumen) untuk blok pada tab Doc.
+export async function uploadDocFile(projectId: string, file: File): Promise<UploadedDocFile> {
+  const db = supabase()
+  const safeName = file.name.replace(/[^\w.\- ]+/g, '_')
+  const path = `${projectId}/${Date.now()}-${safeName}`
+
+  const { error } = await db.storage
+    .from(DOC_BUCKET)
+    .upload(path, file, { cacheControl: '3600', upsert: false })
+
+  if (error) {
+    if (/bucket|not found|policy|row-level/i.test(error.message)) {
+      throw new Error(MISSING_DOC_BUCKET_MESSAGE)
+    }
+    throw error
+  }
+
+  return { url: path, name: file.name, size: formatFileSize(file.size) }
+}
+
+// Blok Doc menyimpan path; URL bertanda tangan dibuat saat ditampilkan.
+export async function getDocFileUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase()
+    .storage.from(DOC_BUCKET)
+    .createSignedUrl(path, 60 * 60)
+  if (error) return null
+  return data?.signedUrl ?? null
+}

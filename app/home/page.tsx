@@ -56,6 +56,7 @@ import {
   type DeadlineItem,
   type Profile,
   type Project,
+  type Workspace,
 } from '@/lib/db'
 import { seedDemoProjects } from '@/lib/template'
 
@@ -165,6 +166,8 @@ export default function DashboardPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
+  const [editStartDate, setEditStartDate] = useState('')
+  const [editDueDate, setEditDueDate] = useState('')
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
   const [projectActionBusy, setProjectActionBusy] = useState(false)
   const [projectActionError, setProjectActionError] = useState('')
@@ -181,11 +184,14 @@ export default function DashboardPage() {
   const [seedingDemo, setSeedingDemo] = useState(false)
   const [demoNotice, setDemoNotice] = useState('')
 
+  // Workspace aktif (F-15): pilihan di sidebar menyaring daftar proyek.
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null)
+
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
       const [rows, people, taskStats, dashboard, upcoming, recent, favs] = await Promise.all([
-        listProjects(),
+        listProjects(activeWorkspace?.id),
         listProfiles().catch(() => [] as Profile[]),
         listProjectTaskStats().catch(() => ({})),
         getDashboardStats().catch(() => ({
@@ -212,7 +218,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeWorkspace?.id])
 
   useEffect(() => {
     refreshProjects()
@@ -300,7 +306,7 @@ export default function DashboardPage() {
     setCreating(true)
     setCreateError('')
     try {
-      await createProject({ name: title, scope: title })
+      await createProject({ name: title, scope: title, workspace_id: activeWorkspace?.id ?? null })
       await refreshProjects()
       setNewScopeName('')
       setShowNewScopeModal(false)
@@ -336,6 +342,7 @@ export default function DashboardPage() {
           name,
           scope: selectedScope.title,
           description: newCardDesc.trim() || undefined,
+          workspace_id: activeWorkspace?.id ?? null,
         },
         { template: newCardWithTemplate },
       )
@@ -384,6 +391,8 @@ export default function DashboardPage() {
     setEditingProject(project)
     setEditName(project.name)
     setEditDesc(project.description ?? '')
+    setEditStartDate(project.start_date ?? '')
+    setEditDueDate(project.due_date ?? '')
     setProjectActionError('')
   }
 
@@ -398,6 +407,8 @@ export default function DashboardPage() {
       await updateProject(editingProject.id, {
         name,
         description: editDesc.trim() || null,
+        start_date: editStartDate || null,
+        due_date: editDueDate || null,
       })
       await refreshProjects()
       setEditingProject(null)
@@ -614,7 +625,13 @@ export default function DashboardPage() {
                 <span className="text-sm font-medium text-neutral-300">Workspaces</span>
               </div>
 
-              <WorkspaceSelector />
+              <WorkspaceSelector
+                value={activeWorkspace?.name ?? ''}
+                onChange={(ws) => {
+                  setActiveWorkspace(ws)
+                  setSelectedScope(null)
+                }}
+              />
             </div>
 
             {/* History: project yang terakhir dibuka (localStorage). */}
@@ -1331,6 +1348,40 @@ export default function DashboardPage() {
                   placeholder="deskripsi (opsional)"
                   className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
                 />
+              </div>
+
+              {/* Jadwal proyek (F-03) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="project-start"
+                    className="block text-xs font-medium text-neutral-400 mb-1.5"
+                  >
+                    Tanggal Mulai
+                  </label>
+                  <input
+                    id="project-start"
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full h-11 px-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition [color-scheme:dark]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="project-due"
+                    className="block text-xs font-medium text-neutral-400 mb-1.5"
+                  >
+                    Tenggat Waktu
+                  </label>
+                  <input
+                    id="project-due"
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full h-11 px-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition [color-scheme:dark]"
+                  />
+                </div>
               </div>
             </div>
 
