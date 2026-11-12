@@ -21,6 +21,7 @@ import {
   AlertCircle,
   ArrowUpDown,
   Check,
+  Sparkles,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -42,6 +43,7 @@ import {
   type Profile,
   type Project,
 } from '@/lib/db'
+import { seedDemoProjects } from '@/lib/template'
 
 interface ScopeItem {
   id: string
@@ -140,8 +142,12 @@ export default function DashboardPage() {
   const [showNewCardModal, setShowNewCardModal] = useState(false)
   const [newCardName, setNewCardName] = useState('')
   const [newCardDesc, setNewCardDesc] = useState('')
+  // Project baru langsung diisi contoh tugas supaya board tidak kosong.
+  const [newCardWithTemplate, setNewCardWithTemplate] = useState(true)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
+  const [seedingDemo, setSeedingDemo] = useState(false)
+  const [demoNotice, setDemoNotice] = useState('')
 
   const refreshProjects = useCallback(async () => {
     setError('')
@@ -217,6 +223,28 @@ export default function DashboardPage() {
     setModalSearch('')
   }
 
+  // Muat beberapa project contoh lengkap dengan grup, tugas, subtask, komentar,
+  // dan isi tab Doc. Project yang sudah ada dilewati.
+  const handleSeedDemo = async () => {
+    if (seedingDemo) return
+    setSeedingDemo(true)
+    setDemoNotice('')
+    setError('')
+    try {
+      const { created, skipped } = await seedDemoProjects()
+      await refreshProjects()
+      setDemoNotice(
+        created > 0
+          ? `${created} project contoh ditambahkan${skipped ? `, ${skipped} dilewati karena sudah ada` : ''}.`
+          : 'Semua project contoh sudah ada, tidak ada yang ditambahkan.',
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat contoh project.')
+    } finally {
+      setSeedingDemo(false)
+    }
+  }
+
   const handleCreateScope = async (e: React.FormEvent) => {
     e.preventDefault()
     const title = newScopeName.trim()
@@ -242,6 +270,7 @@ export default function DashboardPage() {
   const openNewCardModal = () => {
     setNewCardName('')
     setNewCardDesc('')
+    setNewCardWithTemplate(true)
     setCreateError('')
     setShowNewCardModal(true)
   }
@@ -258,11 +287,14 @@ export default function DashboardPage() {
     setCreating(true)
     setCreateError('')
     try {
-      await createProject({
-        name,
-        scope: selectedScope.title,
-        description: newCardDesc.trim() || undefined,
-      })
+      await createProject(
+        {
+          name,
+          scope: selectedScope.title,
+          description: newCardDesc.trim() || undefined,
+        },
+        { template: newCardWithTemplate },
+      )
       await refreshProjects()
       setShowNewCardModal(false)
     } catch (err) {
@@ -521,21 +553,43 @@ export default function DashboardPage() {
 
           {/* Scope Of Work Section */}
           <section className="mb-12">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 gap-3">
               <h2 className="text-xl font-bold text-white tracking-tight">Scope Of Work</h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setNewScopeName('')
-                  setCreateError('')
-                  setShowNewScopeModal(true)
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
-              >
-                <Plus size={16} strokeWidth={2.5} />
-                <span>New Scope</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSeedDemo}
+                  disabled={seedingDemo}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {seedingDemo ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={15} />
+                  )}
+                  <span>{seedingDemo ? 'Memuat…' : 'Muat contoh'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewScopeName('')
+                    setCreateError('')
+                    setShowNewScopeModal(true)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
+                >
+                  <Plus size={16} strokeWidth={2.5} />
+                  <span>New Scope</span>
+                </button>
+              </div>
             </div>
+
+            {demoNotice && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+                <Check size={16} className="mt-0.5 shrink-0" />
+                <span>{demoNotice}</span>
+              </div>
+            )}
 
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-neutral-400 py-10">
@@ -544,20 +598,36 @@ export default function DashboardPage() {
             ) : scopes.length === 0 ? (
               <div className="rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
                 <p className="text-sm text-neutral-400">
-                  Belum ada scope. Buat scope pertama untuk mulai mengelola project.
+                  Belum ada scope. Buat scope pertama, atau muat contoh project lengkap untuk
+                  melihat tampilan board yang sudah terisi.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewScopeName('')
-                    setCreateError('')
-                    setShowNewScopeModal(true)
-                  }}
-                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
-                >
-                  <Plus size={16} strokeWidth={2.5} />
-                  <span>New Scope</span>
-                </button>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewScopeName('')
+                      setCreateError('')
+                      setShowNewScopeModal(true)
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
+                  >
+                    <Plus size={16} strokeWidth={2.5} />
+                    <span>New Scope</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSeedDemo}
+                    disabled={seedingDemo}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {seedingDemo ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={15} />
+                    )}
+                    <span>{seedingDemo ? 'Memuat…' : 'Muat contoh project'}</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -789,6 +859,21 @@ export default function DashboardPage() {
                 placeholder="description (optional)"
                 className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
               />
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none rounded-lg border border-neutral-700/60 bg-[#191a1e] px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={newCardWithTemplate}
+                  onChange={(e) => setNewCardWithTemplate(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-neutral-600 bg-transparent accent-blue-600 cursor-pointer"
+                />
+                <span className="text-xs text-neutral-300 leading-relaxed">
+                  Sertakan contoh tugas
+                  <span className="block text-[11px] text-neutral-500 mt-0.5">
+                    Grup, tugas, subtask, dan isi tab Doc langsung terisi sebagai template kerja.
+                  </span>
+                </span>
+              </label>
             </div>
 
             {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}

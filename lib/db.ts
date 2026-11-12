@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 import { slugify } from '@/lib/utils'
+import { applyProjectTemplate, pickTemplate } from '@/lib/template'
 
 // Lazy: no client is constructed at module load, so importing this from a Server
 // Component never creates a browser client during SSR.
@@ -200,12 +201,15 @@ export async function listProjects(workspaceId?: string): Promise<Project[]> {
   return (data as Project[]) ?? []
 }
 
-export async function createProject(input: {
-  name: string
-  scope?: string
-  description?: string
-  workspace_id?: string | null
-}): Promise<Project> {
+export async function createProject(
+  input: {
+    name: string
+    scope?: string
+    description?: string
+    workspace_id?: string | null
+  },
+  options: { template?: boolean } = {},
+): Promise<Project> {
   const db = supabase()
   const { data: { user } } = await db.auth.getUser()
   const { data, error } = await db
@@ -214,7 +218,20 @@ export async function createProject(input: {
     .select()
     .single()
   if (error) throw error
-  return data as Project
+
+  const project = data as Project
+
+  // Isi project dengan template contoh (grup, tugas, subtask, doc) supaya board
+  // tidak kosong. Kegagalan template tidak membatalkan project yang sudah dibuat.
+  if (options.template !== false) {
+    try {
+      await applyProjectTemplate(project.id, pickTemplate(project.name, project.scope))
+    } catch (err) {
+      console.warn('Template project gagal diterapkan:', err)
+    }
+  }
+
+  return project
 }
 
 // Ringkasan progres per project: jumlah tugas & yang sudah dicentang.

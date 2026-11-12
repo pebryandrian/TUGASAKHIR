@@ -31,6 +31,7 @@ import {
   type Priority,
 } from '@/lib/db'
 import { recordRecentProject } from '@/lib/utils'
+import { applyProjectTemplate, pickTemplate } from '@/lib/template'
 import { NotificationPanel } from '@/components/notification-panel'
 import { signOut } from '@/lib/auth'
 import {
@@ -1172,6 +1173,13 @@ export default function ProjectDetailPage() {
   const [boardError, setBoardError] = useState('')
   // Doc baru boleh diautopsave setelah isi aslinya selesai dimuat.
   const [docLoaded, setDocLoaded] = useState(false)
+  // Nama & scope asli project (URL memakai slug, jadi perlu disimpan terpisah).
+  const [projectMeta, setProjectMeta] = useState<{ name: string; scope: string | null } | null>(
+    null,
+  )
+  // Naikkan untuk memuat ulang board setelah template diterapkan.
+  const [reloadTick, setReloadTick] = useState(0)
+  const [fillingTemplate, setFillingTemplate] = useState(false)
 
   // Muat board dari Supabase. Kalau project tidak ditemukan, tampilkan pesan —
   // bukan data contoh, supaya tidak ada informasi palsu di layar.
@@ -1179,6 +1187,7 @@ export default function ProjectDetailPage() {
     let alive = true
     setLoadingBoard(true)
     setBoardError('')
+    setDocLoaded(false)
     ;(async () => {
       const project = await findProject(rawScope, rawCard)
       if (!alive) return
@@ -1187,6 +1196,7 @@ export default function ProjectDetailPage() {
         setLoadingBoard(false)
         return
       }
+      setProjectMeta({ name: project.name, scope: project.scope })
       recordRecentProject({
         scope: rawScope,
         card: rawCard,
@@ -1313,7 +1323,7 @@ export default function ProjectDetailPage() {
     return () => {
       alive = false
     }
-  }, [rawScope, rawCard])
+  }, [rawScope, rawCard, reloadTick])
 
   // Terjemahkan label status UI -> id kolom `statuses` di DB.
   // Id fallback ('todo', 'in-progress', ...) bukan UUID, jadi tidak boleh dikirim
@@ -1342,6 +1352,24 @@ export default function ProjectDetailPage() {
         avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
       })),
     )
+  }
+
+  // Isi board yang masih kosong dengan template contoh (grup, tugas, subtask,
+  // komentar, dan isi tab Doc) supaya terlihat seperti project yang sedang jalan.
+  const handleFillTemplate = async () => {
+    if (!projectId || fillingTemplate) return
+    setFillingTemplate(true)
+    setBoardError('')
+    try {
+      await applyProjectTemplate(projectId, pickTemplate(projectMeta?.name, projectMeta?.scope))
+      setReloadTick((t) => t + 1)
+    } catch (err) {
+      setNotice(
+        `Gagal mengisi template: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setFillingTemplate(false)
+    }
   }
 
   // Manage Labels Modal
@@ -3686,22 +3714,39 @@ export default function ProjectDetailPage() {
 
                 {/* Task Groups Table Container */}
                 <div className="space-y-8 flex-1">
-                  {!loadingBoard && processedGroups.length === 0 && (
+                  {!loadingBoard && !groups.some((g) => g.items.length > 0) && (
                     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-14 text-center">
                       <p className="text-sm text-neutral-400">
-                        Belum ada grup tugas di board ini.
+                        {groups.length === 0
+                          ? 'Belum ada grup tugas di board ini.'
+                          : 'Board ini masih kosong. Isi dengan contoh tugas atau buat grup sendiri.'}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewGroupName('')
-                          setShowAddGroupModal(true)
-                        }}
-                        className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-md transition cursor-pointer"
-                      >
-                        <Plus size={14} strokeWidth={2.5} />
-                        <span>Add New Group</span>
-                      </button>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleFillTemplate}
+                          disabled={fillingTemplate || !projectId}
+                          className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition cursor-pointer"
+                        >
+                          {fillingTemplate ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={14} />
+                          )}
+                          <span>{fillingTemplate ? 'Mengisi…' : 'Isi contoh tugas'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewGroupName('')
+                            setShowAddGroupModal(true)
+                          }}
+                          className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-md transition cursor-pointer"
+                        >
+                          <Plus size={14} strokeWidth={2.5} />
+                          <span>Add New Group</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                   {processedGroups.map((group) => {

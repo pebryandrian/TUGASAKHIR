@@ -81,7 +81,7 @@ Berdasarkan audit kode `app/`.
 | Fitur | Skripsi minta | Kode sekarang | Status |
 |-------|---------------|---------------|--------|
 | F1 Autentikasi | Supabase Auth, proteksi rute | `signup`/`login`/`reset` via Supabase Auth, logout, `proxy.ts` menjaga `/home`, `/project`, `/profile` | ✅ Nyata |
-| F2 Dashboard | Statistik proyek/tugas/deadline | Halaman `/home`: daftar scope + card dari tabel `projects` (fallback data contoh bila DB kosong) | ⚠️ Sebagian (belum ada ringkasan tugas/deadline) |
+| F2 Dashboard | Statistik proyek/tugas/deadline | Halaman `/home`: daftar scope + card dari tabel `projects`, progress dihitung dari `tasks`, tombol **Muat contoh** mengisi project contoh (Client/Aqua, Marketplace/Glowup, dst). Belum ada ringkasan deadline terdekat | ⚠️ Sebagian (belum ada ringkasan tugas/deadline) |
 | F3 Kanban + drag&drop | Papan 4 kolom, drag-drop | View **Kanban** 4 kolom To Do/In Progress/Review/Done + drag & drop; perpindahan tersimpan ke `tasks.status_id` | ✅ Nyata |
 | F4 Task management | CRUD tugas lengkap | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata (lampiran masih lokal) |
 | F5 Project management | Kelola proyek + timeline | Project & workspace tersimpan di Supabase; Main Table/Calendar/Doc/Gantt/Chart; isi tab Doc autosave ke `docs` | ✅ Nyata |
@@ -136,6 +136,17 @@ Berdasarkan audit kode `app/`.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-13** – Template contoh project. Sumber data tunggal `lib/project-template.json`:
+  (a) `template` generik (3 grup + 8 tugas + subtask + komentar + 6 blok Doc) dipakai saat
+  project baru dibuat lewat `createProject(..., { template: true })`; (b) `demoProjects` berisi
+  5 project siap pakai (Client/Aqua, Marketplace/Glowup, Mockup/Nusantara, Studio Client/Arunika,
+  Font/Grotesk) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
+  user yang login sehingga tetap tunduk pada RLS. Tanggal tugas memakai offset hari dari hari ini,
+  jadi isi contoh selalu terlihat sedang berjalan. Board kosong menampilkan tombol
+  **Isi contoh tugas**; modal Create New Card punya opsi "Sertakan contoh tugas".
+  Verifikasi: `tsc --noEmit` bersih; uji insert ke Supabase (akun sementara) menghasilkan
+  8 tugas / 7 subtask / 2 komentar / 6 blok Doc lalu data uji dihapus kembali.
 
 - **2026-11-12** – Perbaikan konsistensi frontend (data contoh dihapus, semua kontrol aktif):
   (a) `findProject` mencocokkan **slug** URL dengan `scope`/`name` di database, sehingga kartu
