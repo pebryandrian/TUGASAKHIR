@@ -104,6 +104,14 @@ Berdasarkan audit kode `app/`.
 `revisi2.docx` = revisi yang sudah memakai pendekatan WSF dan Gambar 1.1 baru. `revisi.docx`
 (di luar repo, `D:\KULIAH\Skipsi-TA\TugasAkhir\`) adalah draft lama dan sudah tidak dipakai.
 
+**Audit konsistensi laporan ↔ kode: `docs/audit-konsistensi-laporan.md`** (13 Nov 2026).
+Dokumen itu memetakan setiap klaim Bab 1, Bab 4, dan Lampiran ke kondisi nyata kode + database,
+beserta bukti teknis. Selisih yang masih terbuka: F-02 dashboard monitoring, ubah/hapus proyek
+(F-03), gating hak akses PM/Member di UI (F-13), penetapan peran anggota (UC-03), unggah
+lampiran (F-12), favorit yang masih di `localStorage` padahal kamus data menyebut kolom
+`project_members.favorite`, Kanban yang belum tercatat sebagai fitur, dan Lampiran 1 SQL
+`subtasks` yang belum memuat 4 kolom meta.
+
 | Bagian | Kondisi | Perlu |
 |--------|---------|-------|
 | Bab 1 Pendahuluan | ✅ lengkap (6 tahap: Prototyping + WSF) | — |
