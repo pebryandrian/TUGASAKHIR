@@ -5,6 +5,7 @@ import { ChevronDown, LayoutGrid, MoreHorizontal, Pencil, Plus, Search, Trash2, 
 import {
   createWorkspace,
   deleteWorkspace,
+  ensureDefaultWorkspace,
   listWorkspaces,
   renameWorkspace,
   type Workspace,
@@ -26,8 +27,10 @@ export function WorkspaceSelector({ initial = '' }: { initial?: string }) {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    listWorkspaces()
-      .then((rows) => {
+    // Pastikan akun punya minimal satu workspace, lalu tampilkan daftarnya.
+    ensureDefaultWorkspace()
+      .then((created) => listWorkspaces().then((rows) => ({ rows, created })))
+      .then(({ rows }) => {
         setWorkspaces(rows)
         if (rows.length === 0) {
           setSelected('')

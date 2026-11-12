@@ -191,6 +191,40 @@ export async function deleteWorkspace(id: string): Promise<void> {
   if (error) throw error
 }
 
+// Pemilih workspace butuh minimal satu workspace untuk ditampilkan. Kalau akun
+// belum punya, buat satu default supaya sidebar tidak kosong dan project baru
+// punya tempat bergabung.
+export async function ensureDefaultWorkspace(name = '2026 INVISUAL'): Promise<Workspace | null> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return null
+
+  const { data: rows, error } = await db
+    .from('workspaces')
+    .select('id, name, owner_id')
+    .order('created_at')
+    .limit(1)
+  if (error) throw error
+  if (rows && rows.length > 0) return rows[0] as Workspace
+
+  const { data, error: insertError } = await db
+    .from('workspaces')
+    .insert({ name, owner_id: user.id })
+    .select('id, name, owner_id')
+    .single()
+  if (insertError) throw insertError
+
+  // Daftarkan pemilik sebagai anggota workspace (dipakai policy RLS workspace).
+  await db
+    .from('workspace_members')
+    .insert({ workspace_id: data.id, user_id: user.id })
+    .then(() => undefined, () => undefined)
+
+  return data as Workspace
+}
+
 // ======================== PROJECTS ========================
 
 export async function listProjects(workspaceId?: string): Promise<Project[]> {
@@ -212,9 +246,14 @@ export async function createProject(
 ): Promise<Project> {
   const db = supabase()
   const { data: { user } } = await db.auth.getUser()
+
+  // Project selalu punya workspace: pakai yang diberikan, atau workspace default.
+  const workspaceId =
+    input.workspace_id ?? (await ensureDefaultWorkspace().catch(() => null))?.id ?? null
+
   const { data, error } = await db
     .from('projects')
-    .insert({ ...input, owner_id: user?.id })
+    .insert({ ...input, workspace_id: workspaceId, owner_id: user?.id })
     .select()
     .single()
   if (error) throw error
@@ -402,6 +441,45 @@ export async function updateStatusColor(id: string, colorCode: string): Promise<
 
 // ======================== SUBTASKS & COMMENTS ========================
 
+// Kolom meta subtask (assignee/status/tenggat/prioritas) hanya ada kalau migrasi
+// `supabase/migrations/*_subtask_meta.sql` sudah dijalankan di project Supabase.
+// Kolomnya dideteksi sekali, lalu patch disaring agar tidak memicu error
+// "Could not find the 'status_id' column of 'subtasks' in the schema cache".
+const SUBTASK_META_COLUMNS = ['assignee_id', 'status_id', 'due_date', 'priority'] as const
+
+export const MISSING_SUBTASK_COLUMNS_MESSAGE =
+  'Kolom meta subtask belum ada di database. Jalankan migrasi supabase/migrations/20261113000000_subtask_meta.sql di Supabase → SQL Editor.'
+
+let subtaskColumnsPromise: Promise<Set<string>> | null = null
+
+export function getSubtaskColumns(): Promise<Set<string>> {
+  subtaskColumnsPromise ??= (async () => {
+    const available = new Set<string>(['id', 'task_id', 'parent_id', 'text', 'done', 'position'])
+    try {
+      const { error } = await supabase()
+        .from('subtasks')
+        .select(SUBTASK_META_COLUMNS.join(','))
+        .limit(1)
+      if (!error) {
+        SUBTASK_META_COLUMNS.forEach((c) => available.add(c))
+        return available
+      }
+      // Sebagian kolom mungkin sudah ada: cek satu per satu.
+      for (const column of SUBTASK_META_COLUMNS) {
+        const { error: columnError } = await supabase()
+          .from('subtasks')
+          .select(column)
+          .limit(1)
+        if (!columnError) available.add(column)
+      }
+      return available
+    } catch {
+      return available
+    }
+  })()
+  return subtaskColumnsPromise
+}
+
 export async function addSubtask(
   taskId: string,
   text: string,
@@ -427,7 +505,15 @@ export async function updateSubtask(
   id: string,
   patch: Partial<Pick<SubTask, 'assignee_id' | 'status_id' | 'due_date' | 'priority'>>,
 ): Promise<void> {
-  const { error } = await supabase().from('subtasks').update(patch).eq('id', id)
+  const columns = await getSubtaskColumns()
+  const usable = Object.fromEntries(
+    Object.entries(patch).filter(([key, value]) => value !== undefined && columns.has(key)),
+  )
+  // Semua kolom yang dikirim belum ada di database: tidak ada yang bisa disimpan.
+  if (Object.keys(usable).length === 0) {
+    throw new Error(MISSING_SUBTASK_COLUMNS_MESSAGE)
+  }
+  const { error } = await supabase().from('subtasks').update(usable).eq('id', id)
   if (error) throw error
 }
 

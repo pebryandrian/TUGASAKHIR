@@ -54,15 +54,19 @@ docs         (id, project_id, blocks JSONB, updated_at)         -- isi tab "Doc"
 > pelengkap, tapi baku default = 4 kolom skripsi.
 
 > **Migrasi yang perlu dijalankan manual** (di Supabase → SQL Editor) supaya assignee/status/due
-> date/priority pada baris subtask bisa disimpan. Sebelum ini dijalankan, kolomnya kosong & edit
-> subtask tidak tersimpan (UI tetap jalan, tidak error).
->
+> date/priority pada baris subtask bisa disimpan: `supabase/migrations/20261113000000_subtask_meta.sql`.
+> Sebelum migrasi dijalankan, kolomnya kosong & edit subtask tidak tersimpan; UI menampilkan
+> peringatan di Main Table dan menolak perubahan (bukan error mentah). Deteksi kolom ada di
+> `getSubtaskColumns()` (`lib/db.ts`).
+> Isi file migrasinya:
 > ```sql
 > alter table public.subtasks
->   add column if not exists assignee_id uuid,
->   add column if not exists status_id   uuid,
+>   add column if not exists assignee_id uuid references public.profiles (id) on delete set null,
+>   add column if not exists status_id   uuid references public.statuses (id) on delete set null,
 >   add column if not exists due_date    date,
 >   add column if not exists priority    text;
+>
+> notify pgrst, 'reload schema';
 > ```
 
 **Implementasi nyata (Supabase, sudah jalan):** `profiles` (ekstensi `auth.users`), `workspaces`,
@@ -136,6 +140,21 @@ Berdasarkan audit kode `app/`.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-13** – Perbaikan "Gagal menyimpan perubahan subtask" (`Could not find the 'status_id'
+  column of 'subtasks' in the schema cache`). Penyebab: kolom meta subtask memang belum ada di DB.
+  (a) Migrasi SQL disimpan di repo: `supabase/migrations/20261113000000_subtask_meta.sql`
+  (assignee_id/status_id/due_date/priority + index + `notify pgrst`).
+  (b) `getSubtaskColumns()` mendeteksi kolom yang benar-benar ada sekali per sesi; `updateSubtask`
+  menyaring patch sehingga kolom yang belum ada tidak dikirim.
+  (c) UI menampilkan banner kuning di Main Table + menolak perubahan sel yang belum didukung
+  (tidak ada lagi perubahan yang tampak tersimpan lalu hilang setelah refresh).
+  (d) Sidebar "Belum ada workspace" diperbaiki: `ensureDefaultWorkspace()` membuat workspace default
+  (beserta baris `workspace_members`) bila akun belum punya, dipakai WorkspaceSelector, halaman
+  project, dan `createProject` sehingga project baru selalu punya workspace.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  keempat kolom belum ada, penyaringan patch menghasilkan pesan migrasi (bukan error mentah),
+  dan insert `workspace_members` oleh pemilik diizinkan RLS.
 
 - **2026-11-13** – Template contoh project. Sumber data tunggal `lib/project-template.json`:
   (a) `template` generik (3 grup + 8 tugas + subtask + komentar + 6 blok Doc) dipakai saat

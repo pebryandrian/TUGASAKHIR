@@ -8,6 +8,7 @@ import {
   findProject,
   loadBoard,
   listWorkspaces,
+  ensureDefaultWorkspace,
   createWorkspace,
   createTask,
   updateTask as updateTaskRow,
@@ -31,6 +32,7 @@ import {
   type Priority,
 } from '@/lib/db'
 import { recordRecentProject } from '@/lib/utils'
+import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE } from '@/lib/db'
 import { applyProjectTemplate, pickTemplate } from '@/lib/template'
 import { NotificationPanel } from '@/components/notification-panel'
 import { signOut } from '@/lib/auth'
@@ -1180,6 +1182,8 @@ export default function ProjectDetailPage() {
   // Naikkan untuk memuat ulang board setelah template diterapkan.
   const [reloadTick, setReloadTick] = useState(0)
   const [fillingTemplate, setFillingTemplate] = useState(false)
+  // Kolom meta subtask (assignee/status/tenggat/prioritas) ada atau belum di DB.
+  const [subtaskColumns, setSubtaskColumns] = useState<Set<string> | null>(null)
 
   // Muat board dari Supabase. Kalau project tidak ditemukan, tampilkan pesan —
   // bukan data contoh, supaya tidak ada informasi palsu di layar.
@@ -1206,7 +1210,8 @@ export default function ProjectDetailPage() {
       const board = await loadBoard(project.id)
       if (!alive) return
 
-      listWorkspaces()
+      ensureDefaultWorkspace()
+        .then(() => listWorkspaces())
         .then((rows) => {
           if (!alive) return
           setWorkspaces(rows)
@@ -1215,7 +1220,6 @@ export default function ProjectDetailPage() {
           )
         })
         .catch(() => {})
-
       getSessionProfile()
         .then((p) => {
           if (alive && p) setMe({ name: p.name, avatar: p.avatar_url ?? '' })
@@ -1324,6 +1328,17 @@ export default function ProjectDetailPage() {
       alive = false
     }
   }, [rawScope, rawCard, reloadTick])
+
+  // Deteksi sekali apakah kolom meta subtask sudah dimigrasi di Supabase.
+  useEffect(() => {
+    let alive = true
+    getSubtaskColumns().then((cols) => {
+      if (alive) setSubtaskColumns(cols)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // Terjemahkan label status UI -> id kolom `statuses` di DB.
   // Id fallback ('todo', 'in-progress', ...) bukan UUID, jadi tidak boleh dikirim
@@ -1884,6 +1899,23 @@ export default function ProjectDetailPage() {
     }>,
     dbPatch: Parameters<typeof updateSubtaskRow>[1],
   ) => {
+    // Kolom yang belum ada di database tidak boleh diubah di UI: kalau tetap
+    // diterapkan, perubahan akan hilang setelah refresh.
+    const columnFor: Record<string, string> = {
+      assigneeId: 'assignee_id',
+      statusId: 'status_id',
+      date: 'due_date',
+      priority: 'priority',
+    }
+    const missing = Object.keys(appPatch).filter(
+      (key) => subtaskColumns && !subtaskColumns.has(columnFor[key] ?? key),
+    )
+    if (missing.length > 0) {
+      setNotice(MISSING_SUBTASK_COLUMNS_MESSAGE)
+      setSubCellMenu(null)
+      return
+    }
+
     if (projectId)
       updateSubtaskRow(subId, dbPatch).catch((e: unknown) => {
         const msg =
@@ -3709,6 +3741,21 @@ export default function ProjectDetailPage() {
                         <span>Delete</span>
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {/* Peringatan migrasi: kolom meta subtask belum ada di database. */}
+                {subtaskColumns && !subtaskColumns.has('status_id') && (
+                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                    <span>
+                      Kolom status / penanggung jawab / tenggat / prioritas pada subtask belum ada
+                      di database, jadi perubahannya belum bisa disimpan. Jalankan{' '}
+                      <code className="rounded bg-amber-500/15 px-1 py-0.5">
+                        supabase/migrations/20261113000000_subtask_meta.sql
+                      </code>{' '}
+                      di Supabase → SQL Editor.
+                    </span>
                   </div>
                 )}
 
