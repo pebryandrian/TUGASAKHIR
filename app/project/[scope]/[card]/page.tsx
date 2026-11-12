@@ -23,8 +23,11 @@ import {
   updateSubtask as updateSubtaskRow,
   addComment as addCommentRow,
   likeComment,
-  addAttachment as addAttachmentRow,
-  deleteAttachment as deleteAttachmentRow,
+  uploadAttachment,
+  getAttachmentUrl,
+  deleteAttachmentWithFile,
+  updateMemberRole,
+  removeMember,
   saveDoc,
   addMemberByEmail,
   getSessionProfile,
@@ -33,6 +36,7 @@ import {
 } from '@/lib/db'
 import { recordRecentProject } from '@/lib/utils'
 import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE } from '@/lib/db'
+import { roleLabel, useProjectPermissions } from '@/lib/permissions'
 import { applyProjectTemplate, pickTemplate } from '@/lib/template'
 import { NotificationPanel } from '@/components/notification-panel'
 import { signOut } from '@/lib/auth'
@@ -98,6 +102,7 @@ import {
   LogOut,
   Loader2,
   AlertCircle,
+  ShieldCheck,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -258,7 +263,7 @@ export interface TaskItem {
     date?: string | null
     priority?: string | null
   }[]
-  attachments?: { id: string; name: string; owner?: string; avatar?: string }[]
+  attachments?: { id: string; name: string; owner?: string; avatar?: string; storagePath?: string | null }[]
   comments?: {
     id: string
     author: string
@@ -1185,6 +1190,10 @@ export default function ProjectDetailPage() {
   // Kolom meta subtask (assignee/status/tenggat/prioritas) ada atau belum di DB.
   const [subtaskColumns, setSubtaskColumns] = useState<Set<string> | null>(null)
 
+  // Peran pengguna pada project ini (F-13). Menentukan tombol mana yang tampil.
+  const permissions = useProjectPermissions(projectId)
+  const can = permissions
+
   // Muat board dari Supabase. Kalau project tidak ditemukan, tampilkan pesan —
   // bukan data contoh, supaya tidak ada informasi palsu di layar.
   useEffect(() => {
@@ -1280,7 +1289,7 @@ export default function ProjectDetailPage() {
                     })),
                   attachments: board.attachments
                     .filter((a) => a.task_id === t.id)
-                    .map((a) => ({ id: a.id, name: a.name })),
+                    .map((a) => ({ id: a.id, name: a.name, storagePath: a.storage_path ?? null })),
                   comments: board.comments
                     .filter((c) => c.task_id === t.id && !c.parent_id)
                     .map((c) => ({
@@ -1451,8 +1460,12 @@ export default function ProjectDetailPage() {
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'project_manager' | 'member'>('member')
   const [inviteError, setInviteError] = useState('')
   const [inviting, setInviting] = useState(false)
+  // Kelola anggota & peran (UC-03)
+  const [showMembersModal, setShowMembersModal] = useState(false)
+  const [memberActionError, setMemberActionError] = useState('')
 
   // Modal Popover dropdown states (matching slides)
   const [showGroupDropdown, setShowGroupDropdown] = useState(false)
@@ -1486,6 +1499,7 @@ export default function ProjectDetailPage() {
   const [detailShowAttach, setDetailShowAttach] = useState(true)
   const [detailReplyTo, setDetailReplyTo] = useState<string | null>(null)
   const [detailReplyText, setDetailReplyText] = useState('')
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [commentSearch, setCommentSearch] = useState('')
   const [showCommentSearch, setShowCommentSearch] = useState(false)
 
@@ -2365,14 +2379,41 @@ export default function ProjectDetailPage() {
     setInviting(true)
     setInviteError('')
     try {
-      await addMemberByEmail(projectId, email)
+      await addMemberByEmail(projectId, email, inviteRole)
       await refreshMembers()
       setShowInviteModal(false)
       setInviteEmail('')
+      setInviteRole('member')
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Gagal mengundang anggota.')
     } finally {
       setInviting(false)
+    }
+  }
+
+  // Ubah peran anggota pada project (UC-03).
+  const handleChangeMemberRole = async (
+    userId: string,
+    role: 'project_manager' | 'member',
+  ) => {
+    if (!projectId) return
+    setMemberActionError('')
+    try {
+      await updateMemberRole(projectId, userId, role)
+      await refreshMembers()
+    } catch (err) {
+      setMemberActionError(err instanceof Error ? err.message : 'Gagal mengubah peran anggota.')
+    }
+  }
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!projectId) return
+    setMemberActionError('')
+    try {
+      await removeMember(projectId, userId)
+      await refreshMembers()
+    } catch (err) {
+      setMemberActionError(err instanceof Error ? err.message : 'Gagal mengeluarkan anggota.')
     }
   }
 
@@ -2913,9 +2954,9 @@ export default function ProjectDetailPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('Doc')}
+            onClick={() => setShowMembersModal(true)}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
-            aria-label="Tim & kolaborasi"
+            aria-label="Anggota project"
           >
             <Users size={18} strokeWidth={1.8} />
           </button>
@@ -3197,6 +3238,19 @@ export default function ProjectDetailPage() {
                 <span className="text-neutral-400">{scopeTitle}</span>
                 <span className="text-neutral-600">/</span>
                 <span className="text-white font-bold tracking-tight">{cardTitle}</span>
+                {!permissions.loading && permissions.role && (
+                  <span
+                    className={`ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${
+                      permissions.isManager
+                        ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                        : 'bg-neutral-700/40 text-neutral-300 border-neutral-600/60'
+                    }`}
+                    title={`Peran Anda pada project ini: ${roleLabel(permissions.role)}`}
+                  >
+                    {permissions.isManager ? <ShieldCheck size={11} /> : <UserIcon size={11} />}
+                    {roleLabel(permissions.role)}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -3662,18 +3716,20 @@ export default function ProjectDetailPage() {
                             <ChevronRight size={14} />
                             <span>Collapse All Groups</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowMoreTableMenu(false)
-                              setNewGroupName('')
-                              setShowAddGroupModal(true)
-                            }}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <Plus size={14} />
-                            <span>Add New Group</span>
-                          </button>
+                          {can.manageGroups && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMoreTableMenu(false)
+                                setNewGroupName('')
+                                setShowAddGroupModal(true)
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                            >
+                              <Plus size={14} />
+                              <span>Add New Group</span>
+                            </button>
+                          )}
                           <div className="w-full h-px bg-neutral-800 my-1" />
                           <button
                             type="button"
@@ -3732,14 +3788,23 @@ export default function ProjectDetailPage() {
 
                       <div className="w-px h-4 bg-neutral-700 mx-2" />
 
-                      <button
-                        type="button"
-                        onClick={() => setShowBulkDeleteModal(true)}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
-                      >
-                        <Trash2 size={13} />
-                        <span>Delete</span>
-                      </button>
+                      {can.deleteTasks ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowBulkDeleteModal(true)}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete</span>
+                        </button>
+                      ) : (
+                        <span
+                          className="text-[11px] text-neutral-500"
+                          title="Hanya Project Manager yang boleh menghapus tugas"
+                        >
+                          Hapus tugas: khusus Project Manager
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3782,17 +3847,19 @@ export default function ProjectDetailPage() {
                           )}
                           <span>{fillingTemplate ? 'Mengisi…' : 'Isi contoh tugas'}</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewGroupName('')
-                            setShowAddGroupModal(true)
-                          }}
-                          className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-md transition cursor-pointer"
-                        >
-                          <Plus size={14} strokeWidth={2.5} />
-                          <span>Add New Group</span>
-                        </button>
+                        {can.manageGroups && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGroupName('')
+                              setShowAddGroupModal(true)
+                            }}
+                            className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-md transition cursor-pointer"
+                          >
+                            <Plus size={14} strokeWidth={2.5} />
+                            <span>Add New Group</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3914,9 +3981,11 @@ export default function ProjectDetailPage() {
                                       {col}
                                     </th>
                                   ))}
-                                  {/* Add Column Button */}
+                                  {/* Add Column Button — hanya Project Manager */}
                                   <th className="w-12 px-2 py-2 text-center relative">
-                                    <button
+                                    {can.manageColumns && (
+                                      <>
+                                        <button
                                       type="button"
                                       onClick={() => setShowAddColumnMenu(!showAddColumnMenu)}
                                       className="p-1 hover:text-white rounded transition cursor-pointer"
@@ -3946,6 +4015,8 @@ export default function ProjectDetailPage() {
                                             </button>
                                           ))}
                                         </div>
+                                      </>
+                                    )}
                                       </>
                                     )}
                                   </th>
@@ -5572,19 +5643,22 @@ export default function ProjectDetailPage() {
                             </button>
                           ))}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPersonDropdown(false)
-                            setInviteEmail('')
-                            setInviteError('')
-                            setShowInviteModal(true)
-                          }}
-                          className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
-                        >
-                          <Mail size={13} />
-                          <span>Email an invite to a new member</span>
-                        </button>
+                        {can.inviteMembers && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPersonDropdown(false)
+                              setInviteEmail('')
+                              setInviteRole('member')
+                              setInviteError('')
+                              setShowInviteModal(true)
+                            }}
+                            className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                          >
+                            <Mail size={13} />
+                            <span>Email an invite to a new member</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -6277,28 +6351,52 @@ export default function ProjectDetailPage() {
           })
         }
 
-        const addAttachment = async (name: string) => {
-          let id = `att-${Date.now()}`
-          if (projectId) {
-            const row = await addAttachmentRow(task.id, name).catch((err) => {
-              notifySaveError(err)
-              return null
+        // Unggah berkas sungguhan ke Supabase Storage lalu catat metadatanya (F-12).
+        const addAttachment = async (file: File) => {
+          setAttachmentBusy(true)
+          try {
+            const row = await uploadAttachment(task.id, file)
+            updateTask(group.id, task.id, {
+              attachments: [
+                ...(task.attachments || []),
+                {
+                  id: row.id,
+                  name: row.name,
+                  owner: me.name,
+                  avatar: me.avatar,
+                  storagePath: row.storage_path ?? null,
+                },
+              ],
             })
-            if (row) id = row.id
+          } catch (err) {
+            notifySaveError(err)
+          } finally {
+            setAttachmentBusy(false)
           }
-          updateTask(group.id, task.id, {
-            attachments: [
-              ...(task.attachments || []),
-              { id, name, owner: me.name, avatar: me.avatar },
-            ],
-          })
         }
 
-        const deleteAttachment = (attId: string) => {
-          if (projectId) deleteAttachmentRow(attId).catch(notifySaveError)
-          updateTask(group.id, task.id, {
-            attachments: (task.attachments || []).filter((a) => a.id !== attId),
-          })
+        const openAttachment = async (storagePath: string | null) => {
+          if (!storagePath) {
+            setNotice('Berkas ini hanya tercatat namanya (diunggah sebelum fitur unggah aktif).')
+            return
+          }
+          const url = await getAttachmentUrl(storagePath)
+          if (!url) {
+            setNotice('Gagal membuka lampiran.')
+            return
+          }
+          window.open(url, '_blank', 'noopener,noreferrer')
+        }
+
+        const deleteAttachment = async (attId: string, storagePath: string | null) => {
+          try {
+            await deleteAttachmentWithFile(attId, storagePath)
+            updateTask(group.id, task.id, {
+              attachments: (task.attachments || []).filter((a) => a.id !== attId),
+            })
+          } catch (err) {
+            notifySaveError(err)
+          }
         }
 
         const postComment = async () => {
@@ -6717,17 +6815,20 @@ export default function ProjectDetailPage() {
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
                             e.preventDefault()
-                            Array.from(e.dataTransfer.files).forEach((f) => addAttachment(f.name))
+                            Array.from(e.dataTransfer.files).forEach((f) => addAttachment(f))
                           }}
                           className="flex items-center justify-center h-14 rounded-lg border border-dashed border-neutral-700 bg-[#141518]/60 hover:border-neutral-500 hover:bg-[#16171b] transition cursor-pointer"
                         >
-                          <span className="text-sm text-neutral-400">Drop or browse file here</span>
+                          <span className="text-sm text-neutral-400">
+                            {attachmentBusy ? 'Mengunggah…' : 'Drop or browse file here'}
+                          </span>
                           <input
                             type="file"
                             multiple
+                            disabled={attachmentBusy}
                             className="hidden"
                             onChange={(e) => {
-                              Array.from(e.target.files || []).forEach((f) => addAttachment(f.name))
+                              Array.from(e.target.files || []).forEach((f) => addAttachment(f))
                               e.target.value = ''
                             }}
                           />
@@ -6741,7 +6842,11 @@ export default function ProjectDetailPage() {
                                 key={a.id}
                                 className="relative w-[210px] rounded-xl border border-[#24262c] bg-[#181a1d] group/att hover:border-neutral-600 transition"
                               >
-                                <div className="h-[118px] flex items-center justify-center">
+                                <div
+                                  className="h-[118px] flex items-center justify-center cursor-pointer"
+                                  onClick={() => openAttachment(a.storagePath ?? null)}
+                                  title="Buka lampiran"
+                                >
                                   <FileText size={40} strokeWidth={1.4} className="text-[#3b82f6]" />
                                 </div>
                                 <div className="flex items-center justify-between px-3 pb-3">
@@ -6760,7 +6865,7 @@ export default function ProjectDetailPage() {
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => deleteAttachment(a.id)}
+                                  onClick={() => deleteAttachment(a.id, a.storagePath ?? null)}
                                   className="absolute top-2 right-2 p-1 rounded-md bg-black/40 text-neutral-300 hover:text-rose-400 hover:bg-black/60 opacity-0 group-hover/att:opacity-100 transition cursor-pointer"
                                   title="Hapus lampiran"
                                 >
@@ -6983,7 +7088,7 @@ export default function ProjectDetailPage() {
                               className="hidden"
                               onChange={(e) => {
                                 const f = e.target.files?.[0]
-                                if (f) addAttachment(f.name)
+                                if (f) addAttachment(f)
                                 e.target.value = ''
                               }}
                             />
@@ -7168,6 +7273,26 @@ export default function ProjectDetailPage() {
             <p className="mt-2 text-[11px] text-neutral-500">
               Anggota harus sudah punya akun di aplikasi ini.
             </p>
+
+            <label
+              htmlFor="invite-role"
+              className="block text-xs font-medium text-neutral-400 mt-4 mb-1.5"
+            >
+              Peran pada project
+            </label>
+            <select
+              id="invite-role"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as 'project_manager' | 'member')}
+              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition cursor-pointer"
+            >
+              <option value="member">Member</option>
+              <option value="project_manager">Project Manager</option>
+            </select>
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Project Manager dapat mengubah struktur pekerjaan dan mengelola anggota.
+            </p>
+
             {inviteError && <p className="mt-3 text-xs text-red-400">{inviteError}</p>}
             <div className="flex items-center justify-end gap-3 pt-5">
               <button
@@ -7186,6 +7311,113 @@ export default function ProjectDetailPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ======================== KELOLA ANGGOTA & PERAN (UC-03) ======================== */}
+      {showMembersModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowMembersModal(false)}
+          />
+          <div className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-bold text-white">Anggota Project</h2>
+                <p className="text-[11px] text-neutral-500 mt-0.5">
+                  {members.length} anggota
+                  {can.manageRoles ? '' : ' · hanya Project Manager yang dapat mengubah peran'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMembersModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {memberActionError && (
+              <p className="mb-3 text-xs text-red-400">{memberActionError}</p>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-1.5">
+              {members.length === 0 && (
+                <p className="text-xs text-neutral-500 py-6 text-center">
+                  Belum ada anggota pada project ini.
+                </p>
+              )}
+              {members.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 rounded-lg border border-neutral-800/80 bg-[#191a1e] px-3 py-2"
+                >
+                  <div className="w-8 h-8 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={m.avatar} alt={m.name} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-white truncate">{m.name}</p>
+                    <p className="text-[10px] text-neutral-500 truncate">
+                      {m.role === 'project_manager' ? 'Project Manager' : 'Member'}
+                    </p>
+                  </div>
+
+                  {can.manageRoles && (
+                    <>
+                      <select
+                        value={m.role === 'project_manager' ? 'project_manager' : 'member'}
+                        onChange={(e) =>
+                          handleChangeMemberRole(
+                            m.id,
+                            e.target.value as 'project_manager' | 'member',
+                          )
+                        }
+                        className="h-8 px-2 bg-[#141517] border border-neutral-700 rounded-md text-[11px] text-neutral-200 outline-none focus:border-blue-500 cursor-pointer"
+                        aria-label={`Peran ${m.name}`}
+                      >
+                        <option value="member">Member</option>
+                        <option value="project_manager">Project Manager</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMember(m.id)}
+                        className="p-1.5 rounded text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                        title="Keluarkan dari project"
+                        aria-label={`Keluarkan ${m.name}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-5 border-t border-neutral-800/80 mt-4">
+              <span className="text-[11px] text-neutral-500">
+                Peran di sini hanya berlaku untuk project ini.
+              </span>
+              {can.inviteMembers && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMembersModal(false)
+                    setInviteEmail('')
+                    setInviteRole('member')
+                    setInviteError('')
+                    setShowInviteModal(true)
+                  }}
+                  className="inline-flex items-center gap-1.5 h-8 px-3.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-md transition cursor-pointer shrink-0"
+                >
+                  <Plus size={13} strokeWidth={2.5} />
+                  Undang
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

@@ -40,31 +40,3 @@ export function recordRecentProject(entry: RecentProject): void {
   localStorage.setItem(RECENT_KEY, JSON.stringify([entry, ...rest].slice(0, 8)))
 }
 
-// ======================== FAVORITES ========================
-// Favorit disimpan per project id supaya tetap stabil walau nama project diubah.
-
-export interface FavoriteProject {
-  id: string
-  name: string
-  scope: string
-}
-
-const FAVORITES_KEY = 'invisual.favorites'
-
-export function listFavorites(): FavoriteProject[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-export function toggleFavorite(entry: FavoriteProject): FavoriteProject[] {
-  const current = listFavorites()
-  const exists = current.some((f) => f.id === entry.id)
-  const next = exists ? current.filter((f) => f.id !== entry.id) : [...current, entry]
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(next))
-  return next
-}
-

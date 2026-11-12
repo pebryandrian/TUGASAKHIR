@@ -98,6 +98,7 @@ export interface Attachment {
   task_id: string
   name: string
   owner_id: string | null
+  storage_path?: string | null
 }
 
 export interface CommentRow {
@@ -290,6 +291,142 @@ export async function listProjectTaskStats(): Promise<
   return stats
 }
 
+// Ubah informasi project (F-03: mengubah proyek).
+export async function updateProject(
+  id: string,
+  patch: Partial<Pick<Project, 'name' | 'description' | 'scope' | 'progress' | 'start_date' | 'due_date'>>,
+): Promise<void> {
+  const { error } = await supabase().from('projects').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+// Hapus project (F-03). Anak-anak (grup, status, tugas, doc) ikut terhapus lewat CASCADE.
+export async function deleteProject(id: string): Promise<void> {
+  const { error } = await supabase().from('projects').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ======================== DASHBOARD MONITORING (F-02) ========================
+
+export interface DashboardStats {
+  projectCount: number
+  taskCount: number
+  doneCount: number
+  memberCount: number
+}
+
+// Ringkasan angka untuk dashboard: jumlah proyek, jumlah tugas, tugas selesai,
+// dan jumlah anggota tim yang terlibat.
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const db = supabase()
+  const [projects, tasks, members] = await Promise.all([
+    db.from('projects').select('id', { count: 'exact', head: true }),
+    db.from('tasks').select('id, checked'),
+    db.from('project_members').select('user_id'),
+  ])
+
+  if (projects.error) throw projects.error
+  if (tasks.error) throw tasks.error
+
+  const taskRows = (tasks.data ?? []) as { checked: boolean }[]
+  return {
+    projectCount: projects.count ?? 0,
+    taskCount: taskRows.length,
+    doneCount: taskRows.filter((t) => t.checked).length,
+    // Anggota unik lintas project yang bisa dibaca pengguna.
+    memberCount: new Set(((members.data ?? []) as { user_id: string }[]).map((m) => m.user_id)).size,
+  }
+}
+
+export interface DeadlineItem {
+  id: string
+  title: string
+  due_date: string
+  project_name: string
+  project_scope: string | null
+  status_label: string | null
+  assignee_name: string | null
+}
+
+// Tugas dengan tenggat terdekat yang belum selesai.
+export async function listUpcomingDeadlines(limit = 5): Promise<DeadlineItem[]> {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data, error } = await supabase()
+    .from('tasks')
+    .select(
+      'id, title, due_date, checked, projects(name, scope), statuses(label), assignee:profiles!tasks_assignee_id_fkey(name)',
+    )
+    .not('due_date', 'is', null)
+    .gte('due_date', today)
+    .eq('checked', false)
+    .order('due_date', { ascending: true })
+    .limit(limit)
+
+  if (error) throw error
+
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    title: row.title,
+    due_date: row.due_date,
+    project_name: row.projects?.name ?? '',
+    project_scope: row.projects?.scope ?? null,
+    status_label: row.statuses?.label ?? null,
+    assignee_name: row.assignee?.name ?? null,
+  }))
+}
+
+export interface ActivityItem {
+  id: string
+  kind: 'task' | 'comment'
+  title: string
+  detail: string
+  created_at: string
+  project_name: string
+}
+
+// Aktivitas terbaru: tugas baru dan komentar baru, digabung lalu diurutkan waktu.
+export async function listRecentActivity(limit = 6): Promise<ActivityItem[]> {
+  const db = supabase()
+  const [tasks, comments] = await Promise.all([
+    db
+      .from('tasks')
+      .select('id, title, created_at, projects(name)')
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    db
+      .from('comments')
+      .select('id, body, created_at, profiles(name), tasks(title, projects(name))')
+      .order('created_at', { ascending: false })
+      .limit(limit),
+  ])
+
+  if (tasks.error) throw tasks.error
+  if (comments.error) throw comments.error
+
+  const items: ActivityItem[] = [
+    ...((tasks.data ?? []) as any[]).map((row) => ({
+      id: `task-${row.id}`,
+      kind: 'task' as const,
+      title: row.title,
+      detail: 'Tugas dibuat',
+      created_at: row.created_at,
+      project_name: row.projects?.name ?? '',
+    })),
+    ...((comments.data ?? []) as any[]).map((row) => ({
+      id: `comment-${row.id}`,
+      kind: 'comment' as const,
+      title: row.tasks?.title ?? 'Tugas',
+      detail: `${row.profiles?.name ?? 'Seseorang'}: ${String(row.body ?? '').slice(0, 60)}`,
+      created_at: row.created_at,
+      project_name: row.tasks?.projects?.name ?? '',
+    })),
+  ]
+
+  return items
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit)
+}
+
 // URL memakai slug ("/project/studio-client/aqua"), sedangkan database menyimpan
 // nilai asli ("Studio Client", "Aqua"). Karena itu pencocokan dilakukan lewat slug,
 // bukan perbandingan string mentah — kalau tidak, project tidak pernah ketemu dan
@@ -338,7 +475,7 @@ export async function loadBoard(projectId: string): Promise<BoardData> {
     ? await Promise.all([
         // `*` agar tetap jalan walau kolom meta subtask (assignee/status/due/priority) belum dimigrasi.
         db.from('subtasks').select('*').in('task_id', taskIds).order('position'),
-        db.from('attachments').select('id, task_id, name, owner_id').in('task_id', taskIds),
+        db.from('attachments').select('id, task_id, name, owner_id, storage_path').in('task_id', taskIds),
         db
           .from('comments')
           .select('id, task_id, parent_id, body, likes, created_at, profiles(name, avatar_url)')
@@ -613,5 +750,140 @@ export async function addMemberByEmail(projectId: string, email: string, role = 
   const { error } = await db
     .from('project_members')
     .upsert({ project_id: projectId, user_id: profile.id, role }, { onConflict: 'project_id,user_id' })
+  if (error) throw error
+}
+
+// Tetapkan peran anggota pada project (UC-03: mengelola pengguna dan hak akses).
+export async function updateMemberRole(
+  projectId: string,
+  userId: string,
+  role: 'project_manager' | 'member',
+): Promise<void> {
+  const { error } = await supabase()
+    .from('project_members')
+    .update({ role })
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+  if (error) throw error
+}
+
+export async function removeMember(projectId: string, userId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('project_members')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+  if (error) throw error
+}
+
+// ======================== FAVORIT (kolom project_members.favorite) ========================
+
+// Favorit disimpan di basis data sesuai kamus data Tabel 4.7, bukan di localStorage,
+// supaya ikut terbawa saat pengguna membuka aplikasi dari perangkat lain.
+export async function listFavoriteProjects(): Promise<
+  { id: string; name: string; scope: string | null }[]
+> {
+  const db = supabase()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) return []
+
+  const { data, error } = await db
+    .from('project_members')
+    .select('project_id, favorite, projects(id, name, scope)')
+    .eq('user_id', user.id)
+    .eq('favorite', true)
+  if (error) throw error
+
+  return ((data ?? []) as any[])
+    .map((row) => row.projects)
+    .filter(Boolean)
+    .map((p: any) => ({ id: p.id, name: p.name, scope: p.scope ?? null }))
+}
+
+export async function setProjectFavorite(projectId: string, favorite: boolean): Promise<void> {
+  const db = supabase()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data: existing } = await db
+    .from('project_members')
+    .select('project_id')
+    .eq('project_id', projectId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (existing) {
+    const { error } = await db
+      .from('project_members')
+      .update({ favorite })
+      .eq('project_id', projectId)
+      .eq('user_id', user.id)
+    if (error) throw error
+    return
+  }
+
+  const { error } = await db
+    .from('project_members')
+    .insert({ project_id: projectId, user_id: user.id, role: 'member', favorite })
+  if (error) throw error
+}
+
+// ======================== LAMPIRAN (F-12: unggah berkas) ========================
+
+export const ATTACHMENT_BUCKET = 'task-attachments'
+export const MISSING_BUCKET_MESSAGE =
+  'Penyimpanan lampiran belum siap. Jalankan migrasi supabase/migrations/20261114000001_attachments_storage.sql di Supabase → SQL Editor.'
+
+// Unggah berkas ke Supabase Storage lalu catat metadatanya di tabel attachments.
+export async function uploadAttachment(taskId: string, file: File): Promise<Attachment> {
+  const db = supabase()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) throw new Error('Harus login untuk mengunggah lampiran.')
+
+  const safeName = file.name.replace(/[^\w.\- ]+/g, '_')
+  const path = `${taskId}/${Date.now()}-${safeName}`
+
+  const { error: uploadError } = await db.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(path, file, { cacheControl: '3600', upsert: false })
+
+  if (uploadError) {
+    // Bucket belum dibuat / policy belum ada.
+    if (/bucket|not found|policy|row-level/i.test(uploadError.message)) {
+      throw new Error(MISSING_BUCKET_MESSAGE)
+    }
+    throw uploadError
+  }
+
+  const { data, error } = await db
+    .from('attachments')
+    .insert({ task_id: taskId, name: file.name, storage_path: path, owner_id: user.id })
+    .select()
+    .single()
+
+  if (error) {
+    // Bersihkan berkas agar tidak menjadi sampah bila pencatatan gagal.
+    await db.storage.from(ATTACHMENT_BUCKET).remove([path])
+    throw error
+  }
+
+  return data as Attachment
+}
+
+// Tautan sementara untuk membuka berkas lampiran (bucket privat).
+export async function getAttachmentUrl(storagePath: string): Promise<string | null> {
+  const { data, error } = await supabase()
+    .storage.from(ATTACHMENT_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60)
+  if (error) return null
+  return data?.signedUrl ?? null
+}
+
+export async function deleteAttachmentWithFile(id: string, storagePath: string | null): Promise<void> {
+  const db = supabase()
+  if (storagePath) {
+    await db.storage.from(ATTACHMENT_BUCKET).remove([storagePath])
+  }
+  const { error } = await db.from('attachments').delete().eq('id', id)
   if (error) throw error
 }

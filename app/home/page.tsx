@@ -22,24 +22,38 @@ import {
   ArrowUpDown,
   Check,
   Sparkles,
+  Folder,
+  ListTodo,
+  CheckCircle2,
+  CalendarDays,
+  Pencil,
+  Trash2,
+  MoreHorizontal,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
 import {
   listRecentProjects,
-  listFavorites,
-  toggleFavorite,
   slugify,
   type RecentProject,
-  type FavoriteProject,
 } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
 import {
   createProject,
+  deleteProject,
+  getDashboardStats,
   getSessionProfile,
+  listFavoriteProjects,
   listProjectTaskStats,
   listProjects,
   listProfiles,
+  listRecentActivity,
+  listUpcomingDeadlines,
+  setProjectFavorite,
+  updateProject,
+  type ActivityItem,
+  type DashboardStats,
+  type DeadlineItem,
   type Profile,
   type Project,
 } from '@/lib/db'
@@ -134,8 +148,26 @@ export default function DashboardPage() {
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
   const [modalSearch, setModalSearch] = useState('')
-  const [favorites, setFavorites] = useState<FavoriteProject[]>([])
+  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
   const [showFavorites, setShowFavorites] = useState(true)
+
+  // Dashboard monitoring (F-02)
+  const [stats, setStats] = useState<DashboardStats>({
+    projectCount: 0,
+    taskCount: 0,
+    doneCount: 0,
+    memberCount: 0,
+  })
+  const [deadlines, setDeadlines] = useState<DeadlineItem[]>([])
+  const [activity, setActivity] = useState<ActivityItem[]>([])
+
+  // Ubah / hapus project (F-03)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [projectActionBusy, setProjectActionBusy] = useState(false)
+  const [projectActionError, setProjectActionError] = useState('')
 
   const [showNewScopeModal, setShowNewScopeModal] = useState(false)
   const [newScopeName, setNewScopeName] = useState('')
@@ -152,14 +184,27 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, stats] = await Promise.all([
+      const [rows, people, taskStats, dashboard, upcoming, recent, favs] = await Promise.all([
         listProjects(),
         listProfiles().catch(() => [] as Profile[]),
         listProjectTaskStats().catch(() => ({})),
+        getDashboardStats().catch(() => ({
+          projectCount: 0,
+          taskCount: 0,
+          doneCount: 0,
+          memberCount: 0,
+        })),
+        listUpcomingDeadlines(5).catch(() => [] as DeadlineItem[]),
+        listRecentActivity(6).catch(() => [] as ActivityItem[]),
+        listFavoriteProjects().catch(() => []),
       ])
       setProjects(rows)
       setProfiles(people)
-      setTaskStats(stats)
+      setTaskStats(taskStats)
+      setStats(dashboard)
+      setDeadlines(upcoming)
+      setActivity(recent)
+      setFavorites(favs)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -175,7 +220,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setRecentProjects(listRecentProjects())
-    setFavorites(listFavorites())
     setToday(
       new Date().toLocaleDateString('en-US', {
         weekday: 'long',
@@ -311,8 +355,77 @@ export default function DashboardPage() {
     setCreateError('')
   }
 
-  const handleToggleFavorite = (card: ProjectCard, scopeTitle: string) => {
-    setFavorites(toggleFavorite({ id: card.id, name: card.name, scope: scopeTitle }))
+  const handleToggleFavorite = async (card: ProjectCard, scopeTitle: string) => {
+    const isFavorite = favorites.some((f) => f.id === card.id)
+    // Optimistis: ubah tampilan dulu, lalu simpan ke kolom project_members.favorite.
+    setFavorites((prev) =>
+      isFavorite
+        ? prev.filter((f) => f.id !== card.id)
+        : [...prev, { id: card.id, name: card.name, scope: scopeTitle }],
+    )
+    try {
+      await setProjectFavorite(card.id, !isFavorite)
+    } catch (err) {
+      // Kembalikan bila gagal agar tampilan tidak berbohong.
+      setFavorites((prev) =>
+        isFavorite
+          ? [...prev, { id: card.id, name: card.name, scope: scopeTitle }]
+          : prev.filter((f) => f.id !== card.id),
+      )
+      setError(err instanceof Error ? err.message : 'Gagal menyimpan favorit.')
+    }
+  }
+
+  // ======================== UBAH & HAPUS PROJECT (F-03) ========================
+
+  const openEditProject = (card: ProjectCard) => {
+    const project = projects.find((p) => p.id === card.id)
+    if (!project) return
+    setEditingProject(project)
+    setEditName(project.name)
+    setEditDesc(project.description ?? '')
+    setProjectActionError('')
+  }
+
+  const handleSaveProject = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingProject || projectActionBusy) return
+    const name = editName.trim()
+    if (!name) return
+    setProjectActionBusy(true)
+    setProjectActionError('')
+    try {
+      await updateProject(editingProject.id, {
+        name,
+        description: editDesc.trim() || null,
+      })
+      await refreshProjects()
+      setEditingProject(null)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : 'Gagal menyimpan project.')
+    } finally {
+      setProjectActionBusy(false)
+    }
+  }
+
+  const handleDeleteProject = async () => {
+    if (!deletingProject || projectActionBusy) return
+    setProjectActionBusy(true)
+    setProjectActionError('')
+    try {
+      await deleteProject(deletingProject.id)
+      await refreshProjects()
+      setDeletingProject(null)
+      if (selectedScope) {
+        // Scope yang tersisa mungkin sudah kosong.
+        const remaining = (await listProjects()).filter((p) => p.scope === selectedScope.title)
+        if (remaining.length === 0) setSelectedScope(null)
+      }
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : 'Gagal menghapus project.')
+    } finally {
+      setProjectActionBusy(false)
+    }
   }
 
   const modalCards = selectedScope ? cardsFrom(selectedScope.title) : []
@@ -487,7 +600,7 @@ export default function DashboardPage() {
                         <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
                         <span className="truncate">{f.name}</span>
                         <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
-                          {f.scope}
+                          {f.scope ?? ''}
                         </span>
                       </Link>
                     ))
@@ -550,6 +663,107 @@ export default function DashboardPage() {
               <span>{error}</span>
             </div>
           )}
+
+          {/* ================= DASHBOARD MONITORING (F-02) ================= */}
+          <section className="mb-10" aria-label="Dashboard monitoring">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { label: 'Proyek', value: stats.projectCount, icon: Folder },
+                { label: 'Total Tugas', value: stats.taskCount, icon: ListTodo },
+                { label: 'Tugas Selesai', value: stats.doneCount, icon: CheckCircle2 },
+                { label: 'Anggota Tim', value: stats.memberCount, icon: Users },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-neutral-800/80 bg-[#191a1e] px-4 py-4 flex items-center gap-3"
+                >
+                  <span className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-400 flex items-center justify-center shrink-0">
+                    <item.icon size={17} strokeWidth={1.9} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold text-white leading-none tabular-nums">
+                      {item.value}
+                    </p>
+                    <p className="text-[11px] text-neutral-400 mt-1 truncate">{item.label}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Deadline terdekat */}
+              <div className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <CalendarDays size={15} className="text-amber-400" />
+                  <h3 className="text-sm font-semibold text-white">Deadline Terdekat</h3>
+                </div>
+                {deadlines.length === 0 ? (
+                  <p className="text-xs text-neutral-500 py-3">
+                    Tidak ada tugas dengan tenggat mendatang.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {deadlines.map((d) => (
+                      <li key={d.id} className="flex items-start gap-2 text-xs">
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-neutral-200 truncate">{d.title}</p>
+                          <p className="text-[11px] text-neutral-500 truncate">
+                            {d.project_scope ? `${d.project_scope} / ` : ''}
+                            {d.project_name}
+                            {d.assignee_name ? ` · ${d.assignee_name}` : ''}
+                          </p>
+                        </div>
+                        <span className="text-[11px] text-amber-300 shrink-0 whitespace-nowrap">
+                          {new Date(d.due_date).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Aktivitas terbaru */}
+              <div className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <History size={15} className="text-blue-400" />
+                  <h3 className="text-sm font-semibold text-white">Aktivitas Terbaru</h3>
+                </div>
+                {activity.length === 0 ? (
+                  <p className="text-xs text-neutral-500 py-3">Belum ada aktivitas.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {activity.map((a) => (
+                      <li key={a.id} className="flex items-start gap-2 text-xs">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                            a.kind === 'comment' ? 'bg-blue-400' : 'bg-emerald-400'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-neutral-200 truncate">{a.title}</p>
+                          <p className="text-[11px] text-neutral-500 truncate">{a.detail}</p>
+                        </div>
+                        <span className="text-[11px] text-neutral-500 shrink-0 whitespace-nowrap">
+                          {new Date(a.created_at).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Scope Of Work Section */}
           <section className="mb-12">
@@ -986,23 +1200,53 @@ export default function DashboardPage() {
                           <span className="text-sm font-semibold text-white leading-snug">
                             {card.name}
                           </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleToggleFavorite(card, selectedScope.title)
-                            }}
-                            className={`p-0.5 rounded transition cursor-pointer shrink-0 ${
-                              isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
-                            }`}
-                            aria-label={isStarred ? 'Unstar' : 'Star'}
-                          >
-                            <Star
-                              size={15}
-                              strokeWidth={1.8}
-                              fill={isStarred ? 'currentColor' : 'none'}
-                            />
-                          </button>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openEditProject(card)
+                              }}
+                              className="p-1 rounded text-neutral-500 hover:text-white hover:bg-neutral-700/60 transition cursor-pointer"
+                              aria-label={`Ubah project ${card.name}`}
+                              title="Ubah project"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const project = projects.find((p) => p.id === card.id)
+                                if (!project) return
+                                setProjectActionError('')
+                                setDeletingProject(project)
+                              }}
+                              className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                              aria-label={`Hapus project ${card.name}`}
+                              title="Hapus project"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleToggleFavorite(card, selectedScope.title)
+                              }}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
+                              }`}
+                              aria-label={isStarred ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                              title={isStarred ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                            >
+                              <Star
+                                size={14}
+                                strokeWidth={1.8}
+                                fill={isStarred ? 'currentColor' : 'none'}
+                              />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Description */}
@@ -1029,6 +1273,136 @@ export default function DashboardPage() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================== EDIT PROJECT MODAL (F-03) =================== */}
+      {editingProject && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setEditingProject(null)}
+          />
+          <form
+            onSubmit={handleSaveProject}
+            className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
+          >
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Ubah Project</h2>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Scope: <span className="text-neutral-200 font-medium">{editingProject.scope}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingProject(null)}
+                className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer -mt-1"
+                aria-label="Close"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Nama Project
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="nama project"
+                  className="w-full h-12 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Deskripsi
+                </label>
+                <textarea
+                  rows={3}
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="deskripsi (opsional)"
+                  className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
+                />
+              </div>
+            </div>
+
+            {projectActionError && (
+              <p className="mt-3 text-xs text-red-400">{projectActionError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-6">
+              <button
+                type="button"
+                onClick={() => setEditingProject(null)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!editName.trim() || projectActionBusy}
+                className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                {projectActionBusy ? 'Menyimpan…' : 'Simpan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* =================== DELETE PROJECT CONFIRM (F-03) =================== */}
+      {deletingProject && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setDeletingProject(null)}
+          />
+          <div className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 size={17} className="text-red-400" />
+              </span>
+              <div>
+                <h2 className="text-base font-bold text-white">Hapus Project</h2>
+                <p className="text-xs text-neutral-400">
+                  <span className="font-semibold text-neutral-200">{deletingProject.name}</span>{' '}
+                  akan dihapus.
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-neutral-300">
+              Seluruh grup, tugas, subtask, komentar, dan dokumen di dalamnya ikut terhapus.
+              Tindakan ini tidak bisa dibatalkan.
+            </p>
+
+            {projectActionError && (
+              <p className="mt-3 text-xs text-red-400">{projectActionError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setDeletingProject(null)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteProject}
+                disabled={projectActionBusy}
+                className="h-8 px-4 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                {projectActionBusy ? 'Menghapus…' : 'Hapus'}
+              </button>
             </div>
           </div>
         </div>

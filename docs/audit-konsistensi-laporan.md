@@ -5,9 +5,34 @@ nyata kode dan database. Tujuannya: **tidak ada klaim di laporan yang tidak bisa
 saat sidang.**
 
 Tanggal audit: 13 November 2026
+Diperbarui: 13 November 2026 (implementasi F-02, F-03, F-12, F-13, UC-03)
 Metode: ekstraksi teks laporan + pembacaan kode `app/`, `lib/` + query langsung ke Supabase.
 
 Legenda: ✅ sesuai · ⚠️ sebagian · ❌ belum ada
+
+---
+
+## 0. Status setelah implementasi 13 November 2026
+
+| # | Klaim laporan | Kondisi sebelumnya | Kondisi sekarang |
+|---|---|---|---|
+| 1 | F-02 Dashboard monitoring | ❌ tidak ada | ✅ 4 kartu statistik + deadline terdekat + aktivitas terbaru di `/home` |
+| 2 | F-03 Mengubah & menghapus proyek | ❌ hanya buat | ✅ tombol ubah (nama+deskripsi) & hapus (konfirmasi) pada kartu project |
+| 3 | F-13 Hak akses PM/Member di antarmuka | ❌ tidak dibedakan | ✅ badge peran + gating tombol; RLS diperketat lewat migrasi |
+| 4 | UC-03 Menetapkan peran anggota | ❌ selalu `member` | ✅ pilihan peran saat undang + modal Anggota Project untuk ubah peran |
+| 5 | F-12 Unggah lampiran | ⚠️ hanya nama berkas | ✅ unggah ke Supabase Storage + signed URL (perlu migrasi bucket) |
+| 6 | Favorit di `project_members.favorite` | ⚠️ `localStorage` | ✅ kolom database dipakai |
+| 7 | Lampiran 1 SQL `subtasks` | ❌ 6 kolom | ⚠️ perlu diperbarui manual di laporan (kode sudah 10 kolom) |
+| 8 | Kanban | ⚠️ ada di kode, tak tercatat | ⚠️ tetap dipertahankan sebagai fitur tambahan; perlu diputuskan |
+| 9 | Bab 5 & Bab 6 | ❌ belum ada isi | ⚠️ di luar lingkup kode |
+
+**Tindakan manual yang masih diperlukan di Supabase (SQL Editor):**
+
+1. `supabase/migrations/20261114000000_rls_roles.sql` — menutup lubang RLS (member bisa
+   membuat/menghapus grup dan menambah label) + policy PM untuk ubah/hapus project & peran anggota.
+2. `supabase/migrations/20261114000001_attachments_storage.sql` — membuat bucket
+   `task-attachments` beserta policy-nya. Tanpa ini, unggah lampiran menampilkan pesan
+   "Penyimpanan lampiran belum siap".
 
 ---
 

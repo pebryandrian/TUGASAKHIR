@@ -85,16 +85,23 @@ Berdasarkan audit kode `app/`.
 | Fitur | Skripsi minta | Kode sekarang | Status |
 |-------|---------------|---------------|--------|
 | F1 Autentikasi | Supabase Auth, proteksi rute | `signup`/`login`/`reset` via Supabase Auth, logout, `proxy.ts` menjaga `/home`, `/project`, `/profile` | ✅ Nyata |
-| F2 Dashboard | Statistik proyek/tugas/deadline | Halaman `/home`: daftar scope + card dari tabel `projects`, progress dihitung dari `tasks`, tombol **Muat contoh** mengisi project contoh (Client/Aqua, Marketplace/Glowup, dst). Belum ada ringkasan deadline terdekat | ⚠️ Sebagian (belum ada ringkasan tugas/deadline) |
-| F3 Kanban + drag&drop | Papan 4 kolom, drag-drop | View **Kanban** 4 kolom To Do/In Progress/Review/Done + drag & drop; perpindahan tersimpan ke `tasks.status_id` | ✅ Nyata |
-| F4 Task management | CRUD tugas lengkap | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata (lampiran masih lokal) |
-| F5 Project management | Kelola proyek + timeline | Project & workspace tersimpan di Supabase; Main Table/Calendar/Doc/Gantt/Chart; isi tab Doc autosave ke `docs` | ✅ Nyata |
-| F6 Member management | Daftar + penugasan + peran | Anggota dari `project_members`+`profiles`, assignee tersimpan ke `tasks.assignee_id`, invite by email | ✅ Nyata |
-| F7 Peran PM/Member | Beda hak akses | `profiles.role` + `project_members.role`; RLS: PM boleh ubah/menghapus, Member hanya tugasnya | ✅ Nyata (UI belum menyembunyikan tombol PM) |
+| F2 Dashboard monitoring | Jumlah proyek, jumlah tugas, tugas selesai, deadline terdekat, aktivitas terbaru | `/home` menampilkan 4 kartu statistik + panel **Deadline Terdekat** + **Aktivitas Terbaru** (tugas & komentar), semuanya dari query nyata (`getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity`) | ✅ Nyata |
+| F3 Pengelolaan proyek | Buat, ubah, hapus, favorit | Buat (modal), **ubah** (nama + deskripsi), **hapus** (konfirmasi), favorit disimpan di kolom `project_members.favorite` | ✅ Nyata |
+| F4 Pengelolaan anggota | Tambah anggota + peran | Undang via email dengan pilihan peran, modal **Anggota Project** untuk ubah peran/keluarkan anggota (`project_members.role`) | ✅ Nyata |
+| F5 Task management | CRUD tugas + atribut | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata |
+| F6 Pengelolaan subtask | Subtask bertingkat dengan meta | Subtask bertingkat + assignee/status/tenggat/prioritas (`subtasks` 4 kolom meta) | ✅ Nyata |
+| F7 Alur kerja | 4 status baku + ubah status | Main Table + **Kanban** drag & drop; status tersimpan ke `tasks.status_id` | ✅ Nyata |
+| F8 Pengelompokan tugas | Grup + warna | `task_groups` dengan color & position | ✅ Nyata |
+| F9 Kalender proyek | Bulanan + agenda | Tab Calendar dengan mode Month/Agenda, filter, sort | ✅ Nyata |
+| F10 Gantt & Chart | Timeline + distribusi status | Tab tambahan Gantt & Chart (tombol `+`) | ✅ Nyata |
+| F11 Dokumen proyek | Editor + autosave | Editor blok + autosave ke `docs.blocks` (JSONB) | ✅ Nyata |
+| F12 Komentar & lampiran | Komentar bertingkat + unggah lampiran | Komentar bertingkat + like; **lampiran diunggah ke Supabase Storage** (`task-attachments`) dan dibuka lewat signed URL | ✅ Nyata |
+| F13 Hak akses | PM vs Member | `lib/permissions.ts` membaca `project_members.role` (+ owner = PM); badge peran di board; tombol struktur pekerjaan hanya untuk PM; RLS diperketat lewat migrasi `20261114000000_rls_roles.sql` | ✅ Nyata |
+| F14 Profil | Nama, foto, kata sandi | `/profile` ubah nama + foto, ganti kata sandi | ✅ Nyata |
 | — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; klien `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
-| — Doc editor | (tidak diminta khusus) | Ada editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
+| — Doc editor | (tidak diminta khusus) | Editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
 
-**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan.
+**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan, tab Kanban.
 
 ---
 
@@ -148,6 +155,29 @@ lampiran (F-12), favorit yang masih di `localStorage` padahal kamus data menyebu
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-13** – Menyelaraskan aplikasi dengan klaim `LaporanTA-...-revisi3.docx`:
+  (a) **F-02 Dashboard monitoring** di `/home`: kartu jumlah proyek / total tugas / tugas selesai /
+  anggota tim, panel **Deadline Terdekat**, dan **Aktivitas Terbaru** (tugas + komentar);
+  fungsi `getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity` di `lib/db.ts`.
+  (b) **F-03 Pengelolaan proyek**: `updateProject`, `deleteProject`, tombol ubah/hapus pada kartu
+  project di modal Scope Of Work (hapus memakai dialog konfirmasi).
+  (c) **F-13 Hak akses**: `lib/permissions.ts` (`useProjectPermissions`) membaca
+  `project_members.role` dengan fallback owner = Project Manager; badge peran di breadcrumb board;
+  tombol Add New Group / Add Column / hapus tugas / undang anggota hanya untuk PM; migrasi
+  `supabase/migrations/20261114000000_rls_roles.sql` menutup lubang RLS dan menambah policy PM
+  untuk ubah/hapus project serta ubah peran anggota.
+  (d) **UC-03**: pilihan peran saat mengundang + modal **Anggota Project** untuk mengubah peran
+  dan mengeluarkan anggota (`updateMemberRole`, `removeMember`).
+  (e) **F-12 Lampiran**: `uploadAttachment` mengunggah berkas ke bucket `task-attachments`
+  (Supabase Storage), metadata `storage_path` dicatat, dibuka lewat signed URL, dihapus beserta
+  berkasnya; migrasi `20261114000001_attachments_storage.sql` membuat bucket + policy.
+  (f) **Favorit** pindah dari `localStorage` ke kolom `project_members.favorite` sesuai kamus data
+  Tabel 4.7 (`listFavoriteProjects`, `setProjectFavorite`).
+  Verifikasi: `npx tsc --noEmit` bersih, `next build` sukses, `/` dan `/signin` balas 200;
+  uji langsung ke Supabase membuktikan join `assignee`, query aktivitas, statistik, favorit
+  (update baris owner), ubah project, ubah peran, dan hapus project berjalan; unggah berkas
+  masih menunggu migrasi bucket (pesan error jelas bila belum dijalankan).
 
 - **2026-11-13** – Perbaikan "Gagal menyimpan perubahan subtask" (`Could not find the 'status_id'
   column of 'subtasks' in the schema cache`). Penyebab: kolom meta subtask memang belum ada di DB.
