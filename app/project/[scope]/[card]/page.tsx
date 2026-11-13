@@ -28,15 +28,12 @@ import {
   deleteAttachmentWithFile,
   uploadDocFile,
   getDocFileUrl,
-  updateMemberRole,
-  removeMember,
   saveDoc,
-  addMemberByEmail,
   getSessionProfile,
   type Workspace,
   type Priority,
 } from '@/lib/db'
-import { recordRecentProject } from '@/lib/utils'
+import { recordRecentProject, slugify } from '@/lib/utils'
 import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE } from '@/lib/db'
 import { roleLabel, useProjectPermissions } from '@/lib/permissions'
 import { applyProjectTemplate, pickTemplate } from '@/lib/template'
@@ -92,6 +89,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Mail,
+  Settings,
   Folder,
   Tag,
   Circle,
@@ -1462,14 +1460,6 @@ export default function ProjectDetailPage() {
   const [showAddGroupModal, setShowAddGroupModal] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
-  const [showInviteModal, setShowInviteModal] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<'project_manager' | 'member'>('member')
-  const [inviteError, setInviteError] = useState('')
-  const [inviting, setInviting] = useState(false)
-  // Kelola anggota & peran (UC-03)
-  const [showMembersModal, setShowMembersModal] = useState(false)
-  const [memberActionError, setMemberActionError] = useState('')
 
   // Modal Popover dropdown states (matching slides)
   const [showGroupDropdown, setShowGroupDropdown] = useState(false)
@@ -2381,51 +2371,6 @@ export default function ProjectDetailPage() {
     setShowMoreTableMenu(false)
   }
 
-  // Invite anggota lewat email (modal, bukan prompt browser).
-  const handleInvite = async () => {
-    const email = inviteEmail.trim()
-    if (!email || !projectId) return
-    setInviting(true)
-    setInviteError('')
-    try {
-      await addMemberByEmail(projectId, email, inviteRole)
-      await refreshMembers()
-      setShowInviteModal(false)
-      setInviteEmail('')
-      setInviteRole('member')
-    } catch (err) {
-      setInviteError(err instanceof Error ? err.message : 'Gagal mengundang anggota.')
-    } finally {
-      setInviting(false)
-    }
-  }
-
-  // Ubah peran anggota pada project (UC-03).
-  const handleChangeMemberRole = async (
-    userId: string,
-    role: 'project_manager' | 'member',
-  ) => {
-    if (!projectId) return
-    setMemberActionError('')
-    try {
-      await updateMemberRole(projectId, userId, role)
-      await refreshMembers()
-    } catch (err) {
-      setMemberActionError(err instanceof Error ? err.message : 'Gagal mengubah peran anggota.')
-    }
-  }
-
-  const handleRemoveMember = async (userId: string) => {
-    if (!projectId) return
-    setMemberActionError('')
-    try {
-      await removeMember(projectId, userId)
-      await refreshMembers()
-    } catch (err) {
-      setMemberActionError(err instanceof Error ? err.message : 'Gagal mengeluarkan anggota.')
-    }
-  }
-
   // Export to CSV
   const exportToCSV = () => {
     const cell = (value: string) => `"${(value ?? '').replace(/"/g, '""')}"`
@@ -3037,7 +2982,11 @@ export default function ProjectDetailPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowMembersModal(true)}
+            onClick={() =>
+              router.push(
+                `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
+              )
+            }
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
             aria-label="Anggota project"
           >
@@ -4051,7 +4000,20 @@ export default function ProjectDetailPage() {
                                     Person
                                   </th>
                                   <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
-                                    Status
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <span>Status</span>
+                                      {can.manageLabels && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setShowManageLabels(true)}
+                                          className="p-0.5 rounded text-neutral-500 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                                          title="Atur kolom status (UC-05)"
+                                          aria-label="Atur kolom status"
+                                        >
+                                          <Settings size={12} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </th>
                                   <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
                                     Date
@@ -5754,15 +5716,14 @@ export default function ProjectDetailPage() {
                             type="button"
                             onClick={() => {
                               setShowPersonDropdown(false)
-                              setInviteEmail('')
-                              setInviteRole('member')
-                              setInviteError('')
-                              setShowInviteModal(true)
+                              router.push(
+                                `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
+                              )
                             }}
                             className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
                           >
                             <Mail size={13} />
-                            <span>Email an invite to a new member</span>
+                            <span>Kelola anggota &amp; undang lewat email</span>
                           </button>
                         )}
                       </div>
@@ -7341,191 +7302,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* ======================== INVITE MEMBER MODAL ======================== */}
-      {showInviteModal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowInviteModal(false)}
-          />
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              handleInvite()
-            }}
-            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
-          >
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold text-white">Undang Anggota</h2>
-              <button
-                type="button"
-                onClick={() => setShowInviteModal(false)}
-                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
-              Email anggota
-            </label>
-            <input
-              type="email"
-              autoFocus
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="nama@email.com"
-              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
-            />
-            <p className="mt-2 text-[11px] text-neutral-500">
-              Anggota harus sudah punya akun di aplikasi ini.
-            </p>
 
-            <label
-              htmlFor="invite-role"
-              className="block text-xs font-medium text-neutral-400 mt-4 mb-1.5"
-            >
-              Peran pada project
-            </label>
-            <select
-              id="invite-role"
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as 'project_manager' | 'member')}
-              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition cursor-pointer"
-            >
-              <option value="member">Member</option>
-              <option value="project_manager">Project Manager</option>
-            </select>
-            <p className="mt-2 text-[11px] text-neutral-500">
-              Project Manager dapat mengubah struktur pekerjaan dan mengelola anggota.
-            </p>
-
-            {inviteError && <p className="mt-3 text-xs text-red-400">{inviteError}</p>}
-            <div className="flex items-center justify-end gap-3 pt-5">
-              <button
-                type="button"
-                onClick={() => setShowInviteModal(false)}
-                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="submit"
-                disabled={!inviteEmail.trim() || inviting}
-                className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
-              >
-                {inviting ? 'Mengundang…' : 'Undang'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* ======================== KELOLA ANGGOTA & PERAN (UC-03) ======================== */}
-      {showMembersModal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowMembersModal(false)}
-          />
-          <div className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-bold text-white">Anggota Project</h2>
-                <p className="text-[11px] text-neutral-500 mt-0.5">
-                  {members.length} anggota
-                  {can.manageRoles ? '' : ' · hanya Project Manager yang dapat mengubah peran'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMembersModal(false)}
-                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {memberActionError && (
-              <p className="mb-3 text-xs text-red-400">{memberActionError}</p>
-            )}
-
-            <div className="flex-1 overflow-y-auto space-y-1.5">
-              {members.length === 0 && (
-                <p className="text-xs text-neutral-500 py-6 text-center">
-                  Belum ada anggota pada project ini.
-                </p>
-              )}
-              {members.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center gap-3 rounded-lg border border-neutral-800/80 bg-[#191a1e] px-3 py-2"
-                >
-                  <div className="w-8 h-8 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={m.avatar} alt={m.name} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-white truncate">{m.name}</p>
-                    <p className="text-[10px] text-neutral-500 truncate">
-                      {m.role === 'project_manager' ? 'Project Manager' : 'Member'}
-                    </p>
-                  </div>
-
-                  {can.manageRoles && (
-                    <>
-                      <select
-                        value={m.role === 'project_manager' ? 'project_manager' : 'member'}
-                        onChange={(e) =>
-                          handleChangeMemberRole(
-                            m.id,
-                            e.target.value as 'project_manager' | 'member',
-                          )
-                        }
-                        className="h-8 px-2 bg-[#141517] border border-neutral-700 rounded-md text-[11px] text-neutral-200 outline-none focus:border-blue-500 cursor-pointer"
-                        aria-label={`Peran ${m.name}`}
-                      >
-                        <option value="member">Member</option>
-                        <option value="project_manager">Project Manager</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMember(m.id)}
-                        className="p-1.5 rounded text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                        title="Keluarkan dari project"
-                        aria-label={`Keluarkan ${m.name}`}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between gap-3 pt-5 border-t border-neutral-800/80 mt-4">
-              <span className="text-[11px] text-neutral-500">
-                Peran di sini hanya berlaku untuk project ini.
-              </span>
-              {can.inviteMembers && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMembersModal(false)
-                    setInviteEmail('')
-                    setInviteRole('member')
-                    setInviteError('')
-                    setShowInviteModal(true)
-                  }}
-                  className="inline-flex items-center gap-1.5 h-8 px-3.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-md transition cursor-pointer shrink-0"
-                >
-                  <Plus size={13} strokeWidth={2.5} />
-                  Undang
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
     </div>

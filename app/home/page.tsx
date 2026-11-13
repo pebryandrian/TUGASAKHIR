@@ -22,13 +22,8 @@ import {
   ArrowUpDown,
   Check,
   Sparkles,
-  Folder,
-  ListTodo,
-  CheckCircle2,
-  CalendarDays,
   Pencil,
   Trash2,
-  MoreHorizontal,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -41,19 +36,13 @@ import { signOut } from '@/lib/auth'
 import {
   createProject,
   deleteProject,
-  getDashboardStats,
   getSessionProfile,
   listFavoriteProjects,
   listProjectTaskStats,
   listProjects,
   listProfiles,
-  listRecentActivity,
-  listUpcomingDeadlines,
   setProjectFavorite,
   updateProject,
-  type ActivityItem,
-  type DashboardStats,
-  type DeadlineItem,
   type Profile,
   type Project,
   type Workspace,
@@ -152,16 +141,6 @@ export default function DashboardPage() {
   const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
   const [showFavorites, setShowFavorites] = useState(true)
 
-  // Dashboard monitoring (F-02)
-  const [stats, setStats] = useState<DashboardStats>({
-    projectCount: 0,
-    taskCount: 0,
-    doneCount: 0,
-    memberCount: 0,
-  })
-  const [deadlines, setDeadlines] = useState<DeadlineItem[]>([])
-  const [activity, setActivity] = useState<ActivityItem[]>([])
-
   // Ubah / hapus project (F-03)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [editName, setEditName] = useState('')
@@ -190,26 +169,15 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, dashboard, upcoming, recent, favs] = await Promise.all([
+      const [rows, people, taskStats, favs] = await Promise.all([
         listProjects(activeWorkspace?.id),
         listProfiles().catch(() => [] as Profile[]),
         listProjectTaskStats().catch(() => ({})),
-        getDashboardStats().catch(() => ({
-          projectCount: 0,
-          taskCount: 0,
-          doneCount: 0,
-          memberCount: 0,
-        })),
-        listUpcomingDeadlines(5).catch(() => [] as DeadlineItem[]),
-        listRecentActivity(6).catch(() => [] as ActivityItem[]),
         listFavoriteProjects().catch(() => []),
       ])
       setProjects(rows)
       setProfiles(people)
       setTaskStats(taskStats)
-      setStats(dashboard)
-      setDeadlines(upcoming)
-      setActivity(recent)
       setFavorites(favs)
       return rows
     } catch (err) {
@@ -680,107 +648,6 @@ export default function DashboardPage() {
               <span>{error}</span>
             </div>
           )}
-
-          {/* ================= DASHBOARD MONITORING (F-02) ================= */}
-          <section className="mb-10" aria-label="Dashboard monitoring">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { label: 'Proyek', value: stats.projectCount, icon: Folder },
-                { label: 'Total Tugas', value: stats.taskCount, icon: ListTodo },
-                { label: 'Tugas Selesai', value: stats.doneCount, icon: CheckCircle2 },
-                { label: 'Anggota Tim', value: stats.memberCount, icon: Users },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-xl border border-neutral-800/80 bg-[#191a1e] px-4 py-4 flex items-center gap-3"
-                >
-                  <span className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-400 flex items-center justify-center shrink-0">
-                    <item.icon size={17} strokeWidth={1.9} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-2xl font-bold text-white leading-none tabular-nums">
-                      {item.value}
-                    </p>
-                    <p className="text-[11px] text-neutral-400 mt-1 truncate">{item.label}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Deadline terdekat */}
-              <div className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <CalendarDays size={15} className="text-amber-400" />
-                  <h3 className="text-sm font-semibold text-white">Deadline Terdekat</h3>
-                </div>
-                {deadlines.length === 0 ? (
-                  <p className="text-xs text-neutral-500 py-3">
-                    Tidak ada tugas dengan tenggat mendatang.
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {deadlines.map((d) => (
-                      <li key={d.id} className="flex items-start gap-2 text-xs">
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"
-                          aria-hidden="true"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-neutral-200 truncate">{d.title}</p>
-                          <p className="text-[11px] text-neutral-500 truncate">
-                            {d.project_scope ? `${d.project_scope} / ` : ''}
-                            {d.project_name}
-                            {d.assignee_name ? ` · ${d.assignee_name}` : ''}
-                          </p>
-                        </div>
-                        <span className="text-[11px] text-amber-300 shrink-0 whitespace-nowrap">
-                          {new Date(d.due_date).toLocaleDateString('en-GB', {
-                            day: '2-digit',
-                            month: 'short',
-                          })}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Aktivitas terbaru */}
-              <div className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <History size={15} className="text-blue-400" />
-                  <h3 className="text-sm font-semibold text-white">Aktivitas Terbaru</h3>
-                </div>
-                {activity.length === 0 ? (
-                  <p className="text-xs text-neutral-500 py-3">Belum ada aktivitas.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {activity.map((a) => (
-                      <li key={a.id} className="flex items-start gap-2 text-xs">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-                            a.kind === 'comment' ? 'bg-blue-400' : 'bg-emerald-400'
-                          }`}
-                          aria-hidden="true"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-neutral-200 truncate">{a.title}</p>
-                          <p className="text-[11px] text-neutral-500 truncate">{a.detail}</p>
-                        </div>
-                        <span className="text-[11px] text-neutral-500 shrink-0 whitespace-nowrap">
-                          {new Date(a.created_at).toLocaleDateString('en-GB', {
-                            day: '2-digit',
-                            month: 'short',
-                          })}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </section>
 
           {/* Scope Of Work Section */}
           <section className="mb-12">

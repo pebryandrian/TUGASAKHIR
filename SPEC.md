@@ -84,13 +84,13 @@ Berdasarkan audit kode `app/`.
 
 | Fitur | Skripsi minta | Kode sekarang | Status |
 |-------|---------------|---------------|--------|
-| F1 Autentikasi | Landing, registrasi, login, logout, reset, proteksi rute | `app/page.tsx` (landing), `app/signin` (signup/login/reset + Google), `proxy.ts`; **Remember me** mengatur masa berlaku cookie sesi | ✅ Nyata |
-| F2 Dashboard monitoring | Home = Scope of Work + progres tugas + My Member | Kartu proyek dengan progres `selesai/total` dari `tasks`, daftar My Member dari `profiles`. Tambahan (di luar laporan): 4 kartu statistik + panel Deadline/Aktivitas | ✅ Nyata |
+| F1 Autentikasi | Landing, registrasi, login, logout, reset, proteksi rute | `app/page.tsx` (landing), `app/signin` (signup/login/reset + Google); **login lewat server action** (`app/signin/actions.ts`) sesuai Gambar 4.13; `proxy.ts`; **Remember me** mengatur masa berlaku cookie | ✅ Nyata |
+| F2 Dashboard monitoring | Home = Scope of Work + progres tugas + My Member | Sapaan, grid Scope of Work dengan progres `selesai/total` dari `tasks`, tabel My Member dari `profiles` | ✅ Nyata |
 | F3 Pengelolaan proyek | Buat, ubah, hapus, favorit, jadwal | `createProject`, `updateProject` (nama, deskripsi, `start_date`, `due_date`), `deleteProject`, favorit di `project_members.favorite` | ✅ Nyata |
-| F4 Pengelolaan anggota | Tambah anggota + peran | Undang via email dengan pilihan peran; modal Anggota Project untuk ubah peran/keluarkan (`project_members.role`) | ✅ Nyata |
+| F4 Pengelolaan anggota | Tambah anggota + peran | **Halaman Anggota Proyek** `/project/<scope>/<card>/members`: undang via email + pilih peran, ubah peran, keluarkan anggota | ✅ Nyata |
 | F5 Pengelolaan tugas | CRUD tugas + atribut | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata |
 | F6 Pengelolaan subtask | Subtask bertingkat dengan meta | Subtask bertingkat + assignee/status/tenggat/prioritas (`subtasks` 10 kolom) | ✅ Nyata |
-| F7 Alur kerja | 4 status baku + ubah status | Main Table + **Kanban** drag & drop; status tersimpan ke `tasks.status_id` | ✅ Nyata |
+| F7 Alur kerja | 4 status baku + ubah status + atur kolom status | Main Table + **Kanban** drag & drop → `tasks.status_id`; ikon gear di header kolom Status (khusus PM) membuka **Manage Status Labels** | ✅ Nyata |
 | F8 Pengelompokan tugas | Grup + warna | `task_groups` dengan color & position | ✅ Nyata |
 | F9 Kalender proyek | Bulanan + agenda | Tab Calendar dengan mode Month/Agenda, filter, sort, legenda status | ✅ Nyata |
 | F10 Gantt & Chart | Timeline + distribusi status | Tab tambahan Gantt & Chart (tombol `+`) | ✅ Nyata |
@@ -102,20 +102,19 @@ Berdasarkan audit kode `app/`.
 | — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
 | — Doc editor | (tidak diminta khusus) | Editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
 
-**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan, kartu statistik + panel Deadline/Aktivitas di Home.
+**Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan.
 
 ---
 
 ## 4. Status dokumen skripsi
-**Acuan aktif: `LaporanTA-PebryAndrian-revisi13.docx`** (13 Nov 2026, 4,31 MB) — berada di
+**Acuan aktif: `LaporanTA-PebryAndrian-revisi15.docx`** (14 Nov 2026, 4,91 MB) — berada di
 folder induk `TUGASAKHIR/`, bukan di `invisual/docs/`. Salinan `revisi2.docx` & `revisi3.docx`
-di `invisual/docs/` adalah versi lama (0,6–0,8 MB) dan **tidak dipakai lagi**.
+di `invisual/docs/` adalah versi lama (0,6–0,8 MB) dan **tidak dipakai lagi**. `revisi13` juga
+sudah digantikan `revisi15`.
 
-**Audit konsistensi laporan ↔ kode: `docs/audit-konsistensi-laporan.md`** (13 Nov 2026).
-Dokumen itu memetakan F-01…F-15, NF-01…NF-06, dan 12 tabel basis data ke kondisi nyata kode
-beserta bukti teknis. Sisa hal yang perlu diputuskan: login masih di browser (laporan menyebut
-server action), UC-03 masih berupa modal (laporan menyebut halaman), `workspace_members` tanpa
-kolom peran, dan kartu statistik Home yang merupakan tambahan di luar F-02.
+**Audit konsistensi laporan ↔ kode: `docs/audit-konsistensi-laporan.md`** (14 Nov 2026).
+Dokumen itu memetakan F-01…F-15, NF-01…NF-06, UC-01…UC-07, 12 tabel basis data, dan 16
+skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 | Bagian | Kondisi | Perlu |
 |--------|---------|-------|
@@ -153,6 +152,25 @@ kolom peran, dan kartu statistik Home yang merupakan tambahan di luar F-02.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-14** – Menyesuaikan aplikasi dengan **`LaporanTA-PebryAndrian-revisi15.docx`**
+  (laporan terbaru; revisi13 sudah digantikan).
+  (a) **UC-01 / Gambar 4.13**: login dipindah ke **server action** (`app/signin/actions.ts`) —
+  kredensial divalidasi di server lalu diverifikasi Supabase Auth, bukan lagi dipanggil langsung
+  dari browser.
+  (b) **UC-03**: dibuat **halaman Anggota Proyek** `/project/<scope>/<card>/members`
+  (`components/project-members.tsx`) — undang via email + pilih peran, ubah peran, keluarkan
+  anggota. Modal anggota & modal undang di board dihapus agar tidak ada dua implementasi.
+  (c) **UC-05**: ikon gear pada header kolom **Status** (khusus PM) membuka **Manage Status
+  Labels**, sehingga "mengatur kolom status pekerjaan" benar-benar dapat diakses.
+  (d) **F-02**: kartu statistik + panel Deadline/Aktivitas di Home **dihapus** karena revisi15
+  mendefinisikan Home hanya sebagai Scope of Work + My Member. Kode mati
+  (`getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity`) ikut dibuang.
+  (e) Migrasi baru `20261114000003_workspace_members_role.sql` (kolom `role` pada
+  `workspace_members`, sesuai Tabel 4.6).
+  Verifikasi: `tsc --noEmit` bersih; `next build` sukses dengan rute baru
+  `/project/[scope]/[card]/members`; `/` dan `/signin` balas 200; `/home` dan halaman anggota
+  balas 307 (proteksi rute) saat belum login.
 
 - **2026-11-13** – Menyelaraskan aplikasi dengan **`LaporanTA-PebryAndrian-revisi13.docx`**
   (laporan terbaru, ada di folder induk `TUGASAKHIR/`). Audit sebelumnya memakai `revisi3.docx`

@@ -306,127 +306,6 @@ export async function deleteProject(id: string): Promise<void> {
   if (error) throw error
 }
 
-// ======================== DASHBOARD MONITORING (F-02) ========================
-
-export interface DashboardStats {
-  projectCount: number
-  taskCount: number
-  doneCount: number
-  memberCount: number
-}
-
-// Ringkasan angka untuk dashboard: jumlah proyek, jumlah tugas, tugas selesai,
-// dan jumlah anggota tim yang terlibat.
-export async function getDashboardStats(): Promise<DashboardStats> {
-  const db = supabase()
-  const [projects, tasks, members] = await Promise.all([
-    db.from('projects').select('id', { count: 'exact', head: true }),
-    db.from('tasks').select('id, checked'),
-    db.from('project_members').select('user_id'),
-  ])
-
-  if (projects.error) throw projects.error
-  if (tasks.error) throw tasks.error
-
-  const taskRows = (tasks.data ?? []) as { checked: boolean }[]
-  return {
-    projectCount: projects.count ?? 0,
-    taskCount: taskRows.length,
-    doneCount: taskRows.filter((t) => t.checked).length,
-    // Anggota unik lintas project yang bisa dibaca pengguna.
-    memberCount: new Set(((members.data ?? []) as { user_id: string }[]).map((m) => m.user_id)).size,
-  }
-}
-
-export interface DeadlineItem {
-  id: string
-  title: string
-  due_date: string
-  project_name: string
-  project_scope: string | null
-  status_label: string | null
-  assignee_name: string | null
-}
-
-// Tugas dengan tenggat terdekat yang belum selesai.
-export async function listUpcomingDeadlines(limit = 5): Promise<DeadlineItem[]> {
-  const today = new Date().toISOString().slice(0, 10)
-  const { data, error } = await supabase()
-    .from('tasks')
-    .select(
-      'id, title, due_date, checked, projects(name, scope), statuses(label), assignee:profiles!tasks_assignee_id_fkey(name)',
-    )
-    .not('due_date', 'is', null)
-    .gte('due_date', today)
-    .eq('checked', false)
-    .order('due_date', { ascending: true })
-    .limit(limit)
-
-  if (error) throw error
-
-  return ((data ?? []) as any[]).map((row) => ({
-    id: row.id,
-    title: row.title,
-    due_date: row.due_date,
-    project_name: row.projects?.name ?? '',
-    project_scope: row.projects?.scope ?? null,
-    status_label: row.statuses?.label ?? null,
-    assignee_name: row.assignee?.name ?? null,
-  }))
-}
-
-export interface ActivityItem {
-  id: string
-  kind: 'task' | 'comment'
-  title: string
-  detail: string
-  created_at: string
-  project_name: string
-}
-
-// Aktivitas terbaru: tugas baru dan komentar baru, digabung lalu diurutkan waktu.
-export async function listRecentActivity(limit = 6): Promise<ActivityItem[]> {
-  const db = supabase()
-  const [tasks, comments] = await Promise.all([
-    db
-      .from('tasks')
-      .select('id, title, created_at, projects(name)')
-      .order('created_at', { ascending: false })
-      .limit(limit),
-    db
-      .from('comments')
-      .select('id, body, created_at, profiles(name), tasks(title, projects(name))')
-      .order('created_at', { ascending: false })
-      .limit(limit),
-  ])
-
-  if (tasks.error) throw tasks.error
-  if (comments.error) throw comments.error
-
-  const items: ActivityItem[] = [
-    ...((tasks.data ?? []) as any[]).map((row) => ({
-      id: `task-${row.id}`,
-      kind: 'task' as const,
-      title: row.title,
-      detail: 'Tugas dibuat',
-      created_at: row.created_at,
-      project_name: row.projects?.name ?? '',
-    })),
-    ...((comments.data ?? []) as any[]).map((row) => ({
-      id: `comment-${row.id}`,
-      kind: 'comment' as const,
-      title: row.tasks?.title ?? 'Tugas',
-      detail: `${row.profiles?.name ?? 'Seseorang'}: ${String(row.body ?? '').slice(0, 60)}`,
-      created_at: row.created_at,
-      project_name: row.tasks?.projects?.name ?? '',
-    })),
-  ]
-
-  return items
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, limit)
-}
-
 // URL memakai slug ("/project/studio-client/aqua"), sedangkan database menyimpan
 // nilai asli ("Studio Client", "Aqua"). Karena itu pencocokan dilakukan lewat slug,
 // bukan perbandingan string mentah — kalau tidak, project tidak pernah ketemu dan
@@ -765,6 +644,36 @@ export async function updateMemberRole(
     .eq('project_id', projectId)
     .eq('user_id', userId)
   if (error) throw error
+}
+
+// Daftar anggota satu project beserta email (dipakai halaman Anggota Proyek).
+export interface ProjectMemberRow {
+  id: string
+  name: string
+  email: string
+  role: 'project_manager' | 'member'
+  avatar_url: string | null
+}
+
+export async function listProjectMembers(projectId: string): Promise<ProjectMemberRow[]> {
+  const { data, error } = await supabase()
+    .from('project_members')
+    .select('role, profiles(id, name, email, avatar_url)')
+    .eq('project_id', projectId)
+  if (error) throw error
+
+  return ((data ?? []) as any[])
+    .filter((row) => row.profiles)
+    .map(
+      (row): ProjectMemberRow => ({
+        id: row.profiles.id,
+        name: row.profiles.name ?? 'Unknown',
+        email: row.profiles.email ?? '',
+        role: row.role === 'project_manager' ? 'project_manager' : 'member',
+        avatar_url: row.profiles.avatar_url ?? null,
+      }),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function removeMember(projectId: string, userId: string): Promise<void> {

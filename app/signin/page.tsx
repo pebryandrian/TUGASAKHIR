@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, Check, Circle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { signInAction } from './actions'
 
 interface AuthPageProps {
   initialMode?: 'signup' | 'login' | 'forgot'
@@ -107,10 +108,10 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
         router.push('/home')
         router.refresh()
       } else if (mode === 'login') {
-        // Klien khusus login: opsi cookie mengikuti "Remember me".
-        const auth = createClient({ remember: rememberMe })
-        const { error } = await auth.auth.signInWithPassword({ email, password })
-        if (error) throw error
+        // Sesuai Gambar 4.13: kredensial dikirim ke server action Next.js,
+        // divalidasi di server, lalu diverifikasi oleh Supabase Auth.
+        const result = await signInAction({ email, password, remember: rememberMe })
+        if (!result.ok) throw new Error(result.error || 'Gagal masuk.')
         router.push('/home')
         router.refresh()
       } else {
