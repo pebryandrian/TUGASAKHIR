@@ -362,6 +362,40 @@ export async function listProjectRoles(): Promise<ProjectRoleMap> {
   return roles
 }
 
+// Anggota aktif per project, dipakai ikon orang pada kartu project di Scope Of
+// Work. Undangan yang belum diterima (status 'invited') tidak ikut dihitung.
+export interface ProjectMemberChip {
+  id: string
+  name: string
+  avatar_url: string | null
+  role: string
+}
+
+export async function listProjectMemberChips(): Promise<Record<string, ProjectMemberChip[]>> {
+  const db = supabase()
+  const invites = await hasInvitationSupport()
+  const columns = `project_id, role${invites ? ', status' : ''}, profiles!project_members_user_id_fkey(id, name, avatar_url)`
+
+  const { data, error } = await db.from('project_members').select(columns)
+  if (error) throw error
+
+  const chips: Record<string, ProjectMemberChip[]> = {}
+  for (const row of (data ?? []) as any[]) {
+    if (invites && row.status && row.status !== 'active') continue
+    const person = row.profiles
+    if (!person?.id) continue
+    const list = (chips[row.project_id] ??= [])
+    if (list.some((m) => m.id === person.id)) continue
+    list.push({
+      id: person.id,
+      name: person.name ?? 'Tanpa nama',
+      avatar_url: person.avatar_url ?? null,
+      role: row.role ?? 'member',
+    })
+  }
+  return chips
+}
+
 // Ubah/hapus project hanya untuk Project Manager. Pemeriksaan ini lapisan
 // kedua: kebijakan RLS (20261114000000_rls_roles.sql) juga menolaknya, tetapi
 // tanpa pesan yang jelas untuk pengguna.

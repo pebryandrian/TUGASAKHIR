@@ -153,6 +153,19 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Ikon orang pada kartu project di Scope Of Work dikembalikan.
+  (a) **Penyebab hilang**: permintaan sebelumnya ("hilangkan ikon orang pada Scope Of Work di
+  Home") diterapkan pada **dua** tempat sekaligus — kartu *scope* dan kartu *project* di dalam modal
+  Scope Of Work — beserta penghapusan `MemberStack`, `listProjectMemberChips`, dan state
+  `projectMembers`.
+  (b) **Perbaikan**: ikon orang dikembalikan **hanya pada kartu project** (tumpukan avatar maksimal
+  5 + "+N", beserta jumlah orang, dan label "Belum ada anggota" bila kosong). Kartu *scope* di
+  halaman utama tetap ringkas tanpa ikon, sesuai permintaan sebelumnya.
+  `listProjectMemberChips()` kembali di `lib/db.ts` dan hanya menghitung anggota `status = 'active'`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; data per project terbaca (Aqua, Glowup,
+  Nusantara, Grotesk, Arunika = 2 orang; Unheir = 1 orang) untuk akun PM maupun Member;
+  `/home` dan board balas 200.
+
 - **2026-11-24** – My Member: Project Manager dapat mengubah peran anggota.
   (a) **Daftar**: semua pengguna yang mendaftar otomatis masuk **My Member** dengan peran default
   **Member** (kolom `profiles.role` default `'member'`, baris dibuat oleh trigger saat sign up).

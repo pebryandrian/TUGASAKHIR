@@ -47,6 +47,7 @@ import {
   listProjectTaskStats,
   listProjects,
   listProfiles,
+  listProjectMemberChips,
   listTeamRoles,
   setProjectFavorite,
   updateProject,
@@ -54,6 +55,7 @@ import {
   type MyTaskItem,
   type Profile,
   type Project,
+  type ProjectMemberChip,
   type ProjectRoleMap,
   type TeamRole,
   type TeamRoleInfo,
@@ -133,6 +135,49 @@ function Avatar({ name, src, size = 32 }: { name: string; src: string | null; si
       style={{ width: size, height: size }}
     >
       {initials}
+    </div>
+  )
+}
+
+// Tumpukan avatar anggota project. Dipakai pada kartu project di dalam Scope Of
+// Work untuk menunjukkan siapa saja yang mengerjakan project tersebut.
+// Bila anggota lebih banyak dari `max`, sisanya diringkas menjadi "+N".
+function MemberStack({
+  members,
+  max = 4,
+  size = 22,
+}: {
+  members: { id: string; name: string; avatar_url: string | null }[]
+  max?: number
+  size?: number
+}) {
+  if (members.length === 0) return null
+  const shown = members.slice(0, max)
+  const rest = members.length - shown.length
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex -space-x-2" title={members.map((m) => m.name).join(', ')}>
+        {shown.map((m) => (
+          <span
+            key={m.id}
+            className="rounded-full ring-2 ring-[#1b1c20] overflow-hidden shrink-0"
+          >
+            <Avatar name={m.name} src={m.avatar_url} size={size} />
+          </span>
+        ))}
+        {rest > 0 && (
+          <span
+            title={members
+              .slice(max)
+              .map((m) => m.name)
+              .join(', ')}
+            className="rounded-full ring-2 ring-[#1b1c20] bg-neutral-700 border border-neutral-600 text-neutral-200 flex items-center justify-center font-semibold shrink-0"
+            style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+          >
+            +{rest}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -255,6 +300,8 @@ export default function DashboardPage() {
   // Peran per project (Project Manager / Member), untuk menyembunyikan tombol
   // Ubah/Hapus dari Member.
   const [projectRoles, setProjectRoles] = useState<ProjectRoleMap>({})
+  // Anggota aktif per project, untuk ikon orang pada kartu project.
+  const [projectMembers, setProjectMembers] = useState<Record<string, ProjectMemberChip[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -299,7 +346,7 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles] =
+      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles, chips] =
         await Promise.all([
           listProjects(activeWorkspace?.id),
           listProfiles().catch(() => [] as Profile[]),
@@ -310,6 +357,7 @@ export default function DashboardPage() {
           listMyInvitations().catch(() => []),
           listProjectRoles().catch(() => ({}) as ProjectRoleMap),
           listTeamRoles(activeWorkspace?.id).catch(() => ({}) as Record<string, TeamRoleInfo>),
+          listProjectMemberChips().catch(() => ({}) as Record<string, ProjectMemberChip[]>),
         ])
       setProjects(rows)
       setProfiles(people)
@@ -320,6 +368,7 @@ export default function DashboardPage() {
       setInvitationCount(invites.length)
       setProjectRoles(roles)
       setTeamRoles(teamRoles)
+      setProjectMembers(chips)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -1556,6 +1605,18 @@ export default function DashboardPage() {
                         <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3 flex-1">
                           {card.description || 'Belum ada deskripsi.'}
                         </p>
+
+                        {/* Ikon orang: siapa saja yang mengerjakan project ini */}
+                        <div className="flex items-center justify-between gap-2">
+                          {(projectMembers[card.id]?.length ?? 0) > 0 ? (
+                            <MemberStack members={projectMembers[card.id]} max={5} size={22} />
+                          ) : (
+                            <span className="text-[10px] text-neutral-600">Belum ada anggota</span>
+                          )}
+                          <span className="text-[10px] text-neutral-500 shrink-0">
+                            {projectMembers[card.id]?.length ?? 0} orang
+                          </span>
+                        </div>
 
                         {/* Progress Bar */}
                         <div className="mt-auto space-y-1.5">
