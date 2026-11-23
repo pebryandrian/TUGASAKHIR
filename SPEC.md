@@ -153,6 +153,25 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Popover sel di Main Table (Status, Tanggal, Person, subtask) tertimpa & terpotong.
+  (a) **Masalah**: popover sel masih memakai `position: absolute` di dalam sel tabel. Akibatnya
+  (1) **tertimpa** kolom/sel lain karena setiap `<td>` punya `position: relative` sendiri,
+  (2) **terpotong** container tabel ber-`overflow-x-auto`, (3) bisa **keluar layar** pada baris
+  paling bawah.
+  (b) **Perbaikan**: komponen baru `TablePopover` — popover dirender lewat `createPortal` ke
+  `<body>` dengan posisi `fixed` (z-index 141), dihitung dari posisi elemen pemicu, otomatis
+  membuka **ke atas** bila ruang bawah kurang, dan selalu di dalam batas layar. Dipakai oleh
+  Status, Tanggal, dan sel meta subtask (assignee/status/tanggal). `AssigneeMenu` disamakan
+  (menerima anchor berupa kotak elemen, bukan titik) agar bisa membuka ke atas.
+  (c) **Satu popover saja**: `closeAllCellPickers()` dijalankan sebelum membuka popover baru,
+  sehingga Status/Tanggal/Person/Subtask tidak bisa terbuka bersamaan lalu saling menutupi.
+  (d) **Mengikuti scroll**: popover tidak ditutup saat tabel digulir (karena `scroll-behavior:
+  smooth` memicu event scroll tepat saat dibuka) tetapi posisinya dihitung ulang mengikuti elemen
+  pemicu lewat `requestAnimationFrame`.
+  Verifikasi langsung di Edge headless (CDP): jumlah popover terbuka selalu 1; titik sampel di
+  dalam popover benar-benar mengenai popover (`elementFromPoint`); posisi selalu di dalam layar;
+  setelah `main` digulir 200px popover tetap 6px di bawah sel; popover Person tidak keluar layar.
+
 - **2026-11-24** – Sidebar kiri dipastikan punya scroll sendiri (Home & board).
   (a) **Pengukuran langsung**: halaman diuji di Edge headless (CDP) pada lebar 1920, 1600, 1440,
   1366, 1280, dan 1100 px. Hasilnya: tinggi dokumen = tinggi layar (tidak ada scroll halaman),

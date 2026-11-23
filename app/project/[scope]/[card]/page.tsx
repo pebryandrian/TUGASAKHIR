@@ -421,7 +421,8 @@ function AssigneeMenu({
   assignedNames: string[]
   onPick: (member: Member) => void
   onClear: () => void
-  anchor: { top: number; left: number }
+  /** Posisi & ukuran elemen pemicu (bukan titik), agar menu bisa dibuka ke atas. */
+  anchor: { top: number; left: number; width: number; height: number }
   onClose: () => void
 }) {
   const width = 250
@@ -429,12 +430,16 @@ function AssigneeMenu({
 
   const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
   const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
-  const left = Math.max(8, Math.min(anchor.left - width / 2, viewportWidth - width - 8))
-  const openUp = anchor.top + estimatedHeight > viewportHeight - 8
+  const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - width / 2, viewportWidth - width - 8))
+
+  const spaceBelow = viewportHeight - (anchor.top + anchor.height) - 8
+  const spaceAbove = anchor.top - 8
+  const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow
+  const available = Math.max(140, openUp ? spaceAbove : spaceBelow)
+  const maxHeight = Math.min(available, estimatedHeight + 8, viewportHeight - 16)
   const top = openUp
-    ? Math.max(8, anchor.top - Math.min(estimatedHeight, viewportHeight - 16))
-    : Math.min(anchor.top + 6, viewportHeight - 16)
-  const maxHeight = Math.max(160, Math.min(360, viewportHeight - 16))
+    ? Math.max(8, anchor.top - 6 - Math.min(estimatedHeight, maxHeight))
+    : anchor.top + anchor.height + 6
 
   if (typeof document === 'undefined') return null
 
@@ -498,6 +503,65 @@ function AssigneeMenu({
             </p>
           )}
         </div>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+// ======================== POPOVER SEL TABEL ========================
+// Popover untuk sel Main Table (status, tanggal, dsb). Dirender lewat portal ke
+// <body> supaya:
+//   1. tidak terpotong oleh container tabel ber-`overflow-x-auto`,
+//   2. tidak tertimpa teks sel lain (sel bertetangga punya `position: relative`
+//      sendiri, jadi popover biasa bisa tertimbun),
+//   3. selalu berada di dalam batas layar dan membuka ke atas bila ruang bawah
+//      tidak cukup.
+function TablePopover({
+  anchor,
+  width = 208,
+  estimatedHeight = 260,
+  onClose,
+  children,
+  ariaLabel,
+}: {
+  anchor: { top: number; left: number; width: number; height: number }
+  width?: number
+  /** Perkiraan tinggi isi, dipakai untuk memutuskan membuka ke atas/bawah. */
+  estimatedHeight?: number
+  onClose: () => void
+  children: React.ReactNode
+  ariaLabel?: string
+}) {
+  const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+  const w = Math.min(width, viewportWidth - 16)
+  const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - w / 2, viewportWidth - w - 8))
+
+  const spaceBelow = viewportHeight - (anchor.top + anchor.height) - 8
+  const spaceAbove = anchor.top - 8
+
+  // Buka ke bawah bila cukup; kalau tidak, ke atas; kalau dua-duanya sempit,
+  // pakai sisi yang lebih luas dan batasi tingginya.
+  const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow
+  const available = Math.max(140, openUp ? spaceAbove : spaceBelow)
+  const maxHeight = Math.min(available, estimatedHeight + 8, viewportHeight - 16)
+  const top = openUp
+    ? Math.max(8, anchor.top - 6 - Math.min(estimatedHeight, maxHeight))
+    : anchor.top + anchor.height + 6
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[140]" onClick={onClose} />
+      <div
+        className="fixed z-[141] bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100 text-left overflow-y-auto"
+        style={{ top, left, width: w, maxHeight }}
+        role="menu"
+        aria-label={ariaLabel}
+      >
+        {children}
       </div>
     </>,
     document.body,
@@ -1610,35 +1674,92 @@ export default function ProjectDetailPage() {
   const [showSortMenu, setShowSortMenu] = useState(false)
   const [showMoreTableMenu, setShowMoreTableMenu] = useState(false)
 
-  // Floating Status Picker state (Which row opened it)
-  const [activeStatusPicker, setActiveStatusPicker] = useState<{
-    groupId: string
-    taskId: string
-  } | null>(null)
-
-  // Row Assignee Picker state (anchor = posisi tombol, untuk menu portal)
-  const [activeAssigneePicker, setActiveAssigneePicker] = useState<{
-    groupId: string
-    taskId: string
+  // Anchor popover sel: posisi + ukuran elemen pemicu, plus elemennya sendiri
+  // supaya posisi bisa dihitung ulang saat tabel digulir.
+  type CellAnchor = {
     top: number
     left: number
-  } | null>(null)
+    width: number
+    height: number
+    el: HTMLElement | null
+  }
+  const rectToAnchor = (el: HTMLElement): CellAnchor => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, left: r.left, width: r.width, height: r.height, el }
+  }
 
-  // Row Date Picker state
-  const [activeDatePicker, setActiveDatePicker] = useState<{
-    groupId: string
-    taskId: string
-  } | null>(null)
+  // Floating Status Picker state (anchor = posisi sel, untuk popover portal)
+  const [activeStatusPicker, setActiveStatusPicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
+
+  // Row Assignee Picker state (anchor = posisi tombol, untuk menu portal)
+  const [activeAssigneePicker, setActiveAssigneePicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
+
+  // Row Date Picker state (anchor = posisi tombol tanggal)
+  const [activeDatePicker, setActiveDatePicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
 
   // Inline "add subtask" di Main Table (key: `${groupId}:${taskId}`)
   const [openSubtaskFor, setOpenSubtaskFor] = useState<string | null>(null)
   const [subtaskDrafts, setSubtaskDrafts] = useState<Record<string, string>>({})
   // Subtask yang sedang dibuka (menampilkan sub-subtask-nya).
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
-  // Popover sel subtask (assignee/status/date/priority), key: `${subId}:${field}`.
-  const [subCellMenu, setSubCellMenu] = useState<string | null>(null)
+  // Popover sel subtask (assignee/status/date), dengan posisi sel sebagai anchor.
+  const [subCellMenu, setSubCellMenu] = useState<
+    ({ key: string } & CellAnchor) | null
+  >(null)
   // Notifikasi ringkas kalau penyimpanan ke Supabase gagal.
   const [notice, setNotice] = useState<string | null>(null)
+
+  // Hanya satu popover sel yang boleh terbuka. Tanpa ini, popover status,
+  // tanggal, dan subtask bisa terbuka bersamaan lalu saling menutupi.
+  const closeAllCellPickers = () => {
+    setActiveStatusPicker(null)
+    setActiveDatePicker(null)
+    setSubCellMenu(null)
+    setActiveAssigneePicker(null)
+  }
+
+  // Popover sel berposisi `fixed`. Saat tabel digulir, posisinya dihitung ulang
+  // mengikuti elemen pemicu — bukan langsung ditutup, karena `scroll-behavior:
+  // smooth` bisa memicu event scroll tepat setelah popover dibuka.
+  useEffect(() => {
+    const anyOpen = activeStatusPicker || activeDatePicker || subCellMenu || activeAssigneePicker
+    if (!anyOpen) return
+
+    let raf = 0
+    const sync = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const resync = <T extends CellAnchor>(cur: T | null, set: (v: T | null) => void) => {
+          if (!cur) return
+          if (!cur.el || !document.body.contains(cur.el)) {
+            set(null)
+            return
+          }
+          const r = cur.el.getBoundingClientRect()
+          if (r.top === cur.top && r.left === cur.left && r.width === cur.width) return
+          set({ ...cur, top: r.top, left: r.left, width: r.width, height: r.height })
+        }
+        resync(activeStatusPicker, setActiveStatusPicker)
+        resync(activeDatePicker, setActiveDatePicker)
+        resync(subCellMenu, setSubCellMenu)
+        resync(activeAssigneePicker, setActiveAssigneePicker)
+      })
+    }
+
+    window.addEventListener('scroll', sync, true)
+    window.addEventListener('resize', sync)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', sync, true)
+      window.removeEventListener('resize', sync)
+    }
+  }, [activeStatusPicker, activeDatePicker, subCellMenu, activeAssigneePicker])
 
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
@@ -1684,6 +1805,8 @@ export default function ProjectDetailPage() {
   const [detailPersonAnchor, setDetailPersonAnchor] = useState<{
     top: number
     left: number
+    width: number
+    height: number
   } | null>(null)
   const [detailDateOpen, setDetailDateOpen] = useState(false)
   const [detailMaximized, setDetailMaximized] = useState(false)
@@ -2219,12 +2342,15 @@ export default function ProjectDetailPage() {
       // Sel meta subtask yang bisa diubah: Assignee, Status, Date, Priority.
       const assigneeMember = members.find((m) => m.id === s.assigneeId)
       const statusDef = statusList.find((st) => st.id === s.statusId)
-      const isMenuOpen = (field: string) => subCellMenu === `sub:${s.id}:${field}`
-      const toggleMenu = (field: string) =>
-        setSubCellMenu(isMenuOpen(field) ? null : `sub:${s.id}:${field}`)
-      const closeOverlay = (
-        <div className="fixed inset-0 z-20" onClick={() => setSubCellMenu(null)} />
-      )
+      const isMenuOpen = (field: string) => subCellMenu?.key === `sub:${s.id}:${field}`
+      const toggleMenu = (field: string, el: HTMLElement) => {
+        if (isMenuOpen(field)) {
+          setSubCellMenu(null)
+          return
+        }
+        closeAllCellPickers()
+        setSubCellMenu({ key: `sub:${s.id}:${field}`, ...rectToAnchor(el) })
+      }
       const metaCells = (
         <>
           {/* Assignee subtask. Hanya PM yang boleh menetapkan; Member melihat. */}
@@ -2232,7 +2358,7 @@ export default function ProjectDetailPage() {
             {can.assignTasks ? (
               <button
                 type="button"
-                onClick={() => toggleMenu('assignee')}
+                onClick={(e) => toggleMenu('assignee', e.currentTarget)}
                 className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
                 title="Ubah assignee subtask"
               >
@@ -2264,56 +2390,61 @@ export default function ProjectDetailPage() {
                 )}
               </span>
             )}
-            {can.assignTasks && isMenuOpen('assignee') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                    Assign Member
-                  </div>
-                  <div className="space-y-1 max-h-56 overflow-y-auto no-scrollbar">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSubtaskField(groupId, task.id, s.id, { assigneeId: null }, { assignee_id: null })
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
-                    >
-                      — Tidak ada
-                    </button>
-                    {members.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() =>
-                          updateSubtaskField(
-                            groupId,
-                            task.id,
-                            s.id,
-                            { assigneeId: m.id },
-                            { assignee_id: m.id },
-                          )
-                        }
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                      >
-                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                          <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
-                        </div>
-                        <span className="text-neutral-200 text-xs">{m.name}</span>
-                        {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
-                      </button>
-                    ))}
-                  </div>
+            {can.assignTasks && isMenuOpen('assignee') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={208}
+                estimatedHeight={Math.min(members.length, 6) * 34 + 56}
+                ariaLabel="Assign member subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                  Assign Member
                 </div>
-              </>
+                <div className="space-y-1 max-h-56 overflow-y-auto no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSubtaskField(groupId, task.id, s.id, { assigneeId: null }, { assignee_id: null })
+                      setSubCellMenu(null)
+                    }}
+                    className="w-full px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                  >
+                    — Tidak ada
+                  </button>
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        updateSubtaskField(
+                          groupId,
+                          task.id,
+                          s.id,
+                          { assigneeId: m.id },
+                          { assignee_id: m.id },
+                        )
+                        setSubCellMenu(null)
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                    >
+                      <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                        <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                      </div>
+                      <span className="text-neutral-200 text-xs">{m.name}</span>
+                      {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
+                    </button>
+                  ))}
+                </div>
+              </TablePopover>
             )}
           </td>
 
           {/* Status */}
-          <td className="p-0 border-r border-neutral-800/80 relative">
+          <td className="p-0 border-r border-neutral-800/80">
             <button
               type="button"
-              onClick={() => toggleMenu('status')}
+              onClick={(e) => toggleMenu('status', e.currentTarget)}
               className="w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 hover:brightness-90"
               style={{
                 backgroundColor: statusDef?.colorCode || '#94a3b8',
@@ -2324,75 +2455,84 @@ export default function ProjectDetailPage() {
               <span>{statusDef?.label || '—'}</span>
               <ChevronDown size={12} className="opacity-70" />
             </button>
-            {isMenuOpen('status') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  {statusList.map((st) => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() =>
-                        updateSubtaskField(
-                          groupId,
-                          task.id,
-                          s.id,
-                          { statusId: statusIdByLabel(st.label) },
-                          { status_id: statusIdByLabel(st.label) },
-                        )
-                      }
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                    >
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.colorCode }} />
-                      <span className="text-neutral-200">{st.label}</span>
-                      {s.statusId === statusIdByLabel(st.label) && (
-                        <Check size={12} className="ml-auto text-blue-400" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </>
+            {isMenuOpen('status') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={176}
+                estimatedHeight={statusList.length * 32 + 20}
+                ariaLabel="Pilih status subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                {statusList.map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => {
+                      updateSubtaskField(
+                        groupId,
+                        task.id,
+                        s.id,
+                        { statusId: statusIdByLabel(st.label) },
+                        { status_id: statusIdByLabel(st.label) },
+                      )
+                      setSubCellMenu(null)
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.colorCode }} />
+                    <span className="text-neutral-200">{st.label}</span>
+                    {s.statusId === statusIdByLabel(st.label) && (
+                      <Check size={12} className="ml-auto text-blue-400" />
+                    )}
+                  </button>
+                ))}
+              </TablePopover>
             )}
           </td>
 
           {/* Date */}
-          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center">
             <button
               type="button"
-              onClick={() => toggleMenu('date')}
+              onClick={(e) => toggleMenu('date', e.currentTarget)}
               className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-200 transition cursor-pointer"
               title="Ubah tanggal subtask"
             >
               {s.date ? <span className="text-[11px]">{s.date}</span> : <CalendarDays size={14} className="text-neutral-500" />}
             </button>
-            {isMenuOpen('date') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  <input
-                    type="date"
-                    className="w-full bg-[#282a32] border border-neutral-700/60 rounded-md px-2 py-1 text-xs text-neutral-200 outline-none"
-                    onChange={(e) =>
-                      updateSubtaskField(
-                        groupId,
-                        task.id,
-                        s.id,
-                        { date: e.target.value ? fromISODate(e.target.value) : null },
-                        { due_date: e.target.value || null },
-                      )
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateSubtaskField(groupId, task.id, s.id, { date: null }, { due_date: null })
-                    }
-                    className="w-full mt-1 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
-                  >
-                    Hapus tanggal
-                  </button>
-                </div>
-              </>
+            {isMenuOpen('date') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={192}
+                estimatedHeight={120}
+                ariaLabel="Pilih tanggal subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                <input
+                  type="date"
+                  className="w-full bg-[#282a32] border border-neutral-700/60 rounded-md px-2 py-1 text-xs text-neutral-200 outline-none"
+                  onChange={(e) => {
+                    updateSubtaskField(
+                      groupId,
+                      task.id,
+                      s.id,
+                      { date: e.target.value ? fromISODate(e.target.value) : null },
+                      { due_date: e.target.value || null },
+                    )
+                    setSubCellMenu(null)
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSubtaskField(groupId, task.id, s.id, { date: null }, { due_date: null })
+                    setSubCellMenu(null)
+                  }}
+                  className="w-full mt-1 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                >
+                  Hapus tanggal
+                </button>
+              </TablePopover>
             )}
           </td>
 
@@ -4452,17 +4592,16 @@ export default function ProjectDetailPage() {
                                           <button
                                             type="button"
                                             onClick={(e) => {
-                                              const rect = e.currentTarget.getBoundingClientRect()
-                                              setActiveAssigneePicker(
-                                                isAssigneePickerOpen
-                                                  ? null
-                                                  : {
-                                                      groupId: group.id,
-                                                      taskId: item.id,
-                                                      top: rect.bottom,
-                                                      left: rect.left + rect.width / 2,
-                                                    },
-                                              )
+                                              if (isAssigneePickerOpen) {
+                                                setActiveAssigneePicker(null)
+                                                return
+                                              }
+                                              closeAllCellPickers()
+                                              setActiveAssigneePicker({
+                                                groupId: group.id,
+                                                taskId: item.id,
+                                                ...rectToAnchor(e.currentTarget),
+                                              })
                                             }}
                                             className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
                                               item.personNames?.[0]
@@ -4525,10 +4664,7 @@ export default function ProjectDetailPage() {
                                           <AssigneeMenu
                                             members={members}
                                             assignedNames={item.personNames || []}
-                                            anchor={{
-                                              top: activeAssigneePicker.top,
-                                              left: activeAssigneePicker.left,
-                                            }}
+                                            anchor={activeAssigneePicker}
                                             onPick={(m) => toggleTaskAssignee(group.id, item.id, m)}
                                             onClear={() => clearTaskAssignee(group.id, item.id)}
                                             onClose={() => setActiveAssigneePicker(null)}
@@ -4536,18 +4672,24 @@ export default function ProjectDetailPage() {
                                         )}
                                       </td>
 
-                                      {/* Status Badge with ORDERED STATUS DROPDOWN PICKER */}
-                                      <td className="p-0 border-r border-neutral-800/80 relative">
+                                      {/* Status Badge — popover lewat portal agar
+                                          tidak tertimpa sel lain dan tidak terpotong tabel */}
+                                      <td className="p-0 border-r border-neutral-800/80">
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setActiveStatusPicker(
-                                              isStatusPickerOpen
-                                                ? null
-                                                : { groupId: group.id, taskId: item.id }
-                                            )
-                                          }
-                                          title="Click to select status"
+                                          onClick={(e) => {
+                                            if (isStatusPickerOpen) {
+                                              setActiveStatusPicker(null)
+                                              return
+                                            }
+                                            closeAllCellPickers()
+                                            setActiveStatusPicker({
+                                              groupId: group.id,
+                                              taskId: item.id,
+                                              ...rectToAnchor(e.currentTarget),
+                                            })
+                                          }}
+                                          title={`Status: ${item.status} — klik untuk ubah`}
                                           style={{
                                             backgroundColor: currentStatusDef.colorCode,
                                             color: getContrastText(currentStatusDef.colorCode),
@@ -4558,112 +4700,118 @@ export default function ProjectDetailPage() {
                                           <ChevronDown size={12} className="opacity-70" />
                                         </button>
 
-                                        {/* Status Picker Popover */}
-                                        {isStatusPickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveStatusPicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
-                                                Select Status
-                                              </div>
-
-                                              <div className="space-y-1">
-                                                {statusList.map((st) => {
-                                                  const isSelected = item.status === st.label
-                                                  return (
-                                                    <button
-                                                      key={st.id}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        setTaskStatus(group.id, item.id, st.label)
-                                                      }
-                                                      style={{
-                                                        backgroundColor: st.colorCode,
-                                                        color: getContrastText(st.colorCode),
-                                                      }}
-                                                      className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm hover:brightness-90"
-                                                    >
-                                                      <span>{st.label}</span>
-                                                      {isSelected && (
-                                                        <Check size={14} strokeWidth={2.5} />
-                                                      )}
-                                                    </button>
-                                                  )
-                                                })}
-                                              </div>
-
-                                              {/* Add New Label */}
-                                              <div className="mt-2 pt-2 border-t border-neutral-800/80">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setActiveStatusPicker(null)
-                                                    setShowManageLabels(true)
-                                                  }}
-                                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 transition cursor-pointer"
-                                                >
-                                                  <Plus size={13} strokeWidth={2.5} />
-                                                  <span>Add New Label</span>
-                                                </button>
-                                              </div>
+                                        {isStatusPickerOpen && activeStatusPicker && (
+                                          <TablePopover
+                                            anchor={activeStatusPicker}
+                                            width={208}
+                                            estimatedHeight={4 * 38 + 92}
+                                            ariaLabel="Pilih status"
+                                            onClose={() => setActiveStatusPicker(null)}
+                                          >
+                                            <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                              Select Status
                                             </div>
-                                          </>
+
+                                            <div className="space-y-1">
+                                              {statusList.map((st) => {
+                                                const isSelected = item.status === st.label
+                                                return (
+                                                  <button
+                                                    key={st.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setTaskStatus(group.id, item.id, st.label)
+                                                      setActiveStatusPicker(null)
+                                                    }}
+                                                    style={{
+                                                      backgroundColor: st.colorCode,
+                                                      color: getContrastText(st.colorCode),
+                                                    }}
+                                                    className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm hover:brightness-90"
+                                                  >
+                                                    <span>{st.label}</span>
+                                                    {isSelected && (
+                                                      <Check size={14} strokeWidth={2.5} />
+                                                    )}
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
+
+                                            {/* Add New Label */}
+                                            <div className="mt-2 pt-2 border-t border-neutral-800/80">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setActiveStatusPicker(null)
+                                                  setShowManageLabels(true)
+                                                }}
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 transition cursor-pointer"
+                                              >
+                                                <Plus size={13} strokeWidth={2.5} />
+                                                <span>Add New Label</span>
+                                              </button>
+                                            </div>
+                                          </TablePopover>
                                         )}
                                       </td>
 
-                                      {/* Date (Interactive Date Picker) */}
-                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300 relative">
+                                      {/* Date — popover lewat portal (lihat Status) */}
+                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300">
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setActiveDatePicker(
-                                              isDatePickerOpen
-                                                ? null
-                                                : { groupId: group.id, taskId: item.id }
-                                            )
-                                          }
+                                          onClick={(e) => {
+                                            if (isDatePickerOpen) {
+                                              setActiveDatePicker(null)
+                                              return
+                                            }
+                                            closeAllCellPickers()
+                                            setActiveDatePicker({
+                                              groupId: group.id,
+                                              taskId: item.id,
+                                              ...rectToAnchor(e.currentTarget),
+                                            })
+                                          }}
                                           className="hover:text-white hover:underline transition cursor-pointer"
-                                          title="Click to change date"
+                                          title={`Tanggal: ${item.date} — klik untuk ubah`}
                                         >
                                           {item.date}
                                         </button>
 
-                                        {isDatePickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveDatePicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                                                Select Date
-                                              </div>
-                                              <div className="space-y-1">
-                                                {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map(
-                                                  (d) => (
-                                                    <button
-                                                      key={d}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        setTaskDate(group.id, item.id, d)
-                                                      }
-                                                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer ${
-                                                        item.date === d
-                                                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
-                                                          : 'text-neutral-200'
-                                                      }`}
-                                                    >
-                                                      <span>{d}</span>
-                                                      {item.date === d && <Check size={13} />}
-                                                    </button>
-                                                  )
-                                                )}
-                                              </div>
+                                        {isDatePickerOpen && activeDatePicker && (
+                                          <TablePopover
+                                            anchor={activeDatePicker}
+                                            width={192}
+                                            estimatedHeight={4 * 30 + 56}
+                                            ariaLabel="Pilih tanggal"
+                                            onClose={() => setActiveDatePicker(null)}
+                                          >
+                                            <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                              Select Date
                                             </div>
-                                          </>
+                                            <div className="space-y-1">
+                                              {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map(
+                                                (d) => (
+                                                  <button
+                                                    key={d}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setTaskDate(group.id, item.id, d)
+                                                      setActiveDatePicker(null)
+                                                    }}
+                                                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer ${
+                                                      item.date === d
+                                                        ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                                        : 'text-neutral-200'
+                                                    }`}
+                                                  >
+                                                    <span>{d}</span>
+                                                    {item.date === d && <Check size={13} />}
+                                                  </button>
+                                                )
+                                              )}
+                                            </div>
+                                          </TablePopover>
                                         )}
                                       </td>
 
@@ -6989,8 +7137,10 @@ export default function ProjectDetailPage() {
                             }
                             const rect = e.currentTarget.getBoundingClientRect()
                             setDetailPersonAnchor({
-                              top: rect.bottom,
-                              left: rect.left + rect.width / 2,
+                              top: rect.top,
+                              left: rect.left,
+                              width: rect.width,
+                              height: rect.height,
                             })
                           }}
                           className="flex items-center gap-2 rounded-lg px-1.5 py-1 -ml-1.5 hover:bg-neutral-800/70 transition cursor-pointer"
