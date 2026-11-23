@@ -1,5 +1,5 @@
 import SignInPage from '../signin/page'
 
 export default function SignUpPage() {
-  return <SignInPage />
+  return <SignInPage initialMode="signup" />
 }

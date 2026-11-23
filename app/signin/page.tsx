@@ -11,7 +11,7 @@ interface AuthPageProps {
   initialMode?: 'signup' | 'login' | 'forgot'
 }
 
-export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
+export default function AuthPage({ initialMode = 'login' }: AuthPageProps) {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [mode, setMode] = useState<'signup' | 'login' | 'forgot'>(initialMode)
