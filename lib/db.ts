@@ -99,6 +99,8 @@ export interface Attachment {
   name: string
   owner_id: string | null
   storage_path?: string | null
+  /** Tautan (mis. Google Drive). Kosong bila lampiran berupa berkas yang diunggah. */
+  url?: string | null
 }
 
 export interface CommentRow {
@@ -510,11 +512,13 @@ export async function loadBoard(projectId: string): Promise<BoardData> {
   if (firstError) throw firstError
 
   const taskIds = ((tasks.data as Task[]) ?? []).map((t) => t.id)
+  const withUrl = await hasAttachmentUrlSupport()
+  const attachmentColumns = `id, task_id, name, owner_id, storage_path${withUrl ? ', url' : ''}`
   const [subtasks, attachments, comments] = taskIds.length
     ? await Promise.all([
         // `*` agar tetap jalan walau kolom meta subtask (assignee/status/due/priority) belum dimigrasi.
         db.from('subtasks').select('*').in('task_id', taskIds).order('position'),
-        db.from('attachments').select('id, task_id, name, owner_id, storage_path').in('task_id', taskIds),
+        db.from('attachments').select(attachmentColumns).in('task_id', taskIds),
         db
           .from('comments')
           .select('id, task_id, parent_id, body, likes, created_at, profiles(name, avatar_url)')
@@ -568,9 +572,19 @@ export async function createTask(input: {
   return data as Task
 }
 
+export const NOT_ALLOWED_TASK_UPDATE_MESSAGE =
+  'Perubahan tidak tersimpan: Anda hanya dapat mengubah tugas yang ditugaskan kepada Anda. Minta Project Manager menugaskan tugas ini kepada Anda.'
+
 export async function updateTask(id: string, patch: Partial<Task>): Promise<void> {
-  const { error } = await supabase().from('tasks').update(patch).eq('id', id)
+  const { data, error } = await supabase()
+    .from('tasks')
+    .update(patch)
+    .eq('id', id)
+    .select('id')
   if (error) throw error
+  // RLS membatasi Member pada tugas yang ditugaskan kepadanya. Tanpa
+  // pemeriksaan ini, perubahan "berhasil" tanpa menyimpan apa pun (0 baris).
+  if (!data || data.length === 0) throw new Error(NOT_ALLOWED_TASK_UPDATE_MESSAGE)
 }
 
 export async function deleteTasks(ids: string[]): Promise<void> {
@@ -1285,11 +1299,92 @@ export async function setProjectFavorite(projectId: string, favorite: boolean): 
   if (error) throw error
 }
 
-// ======================== LAMPIRAN (F-12: unggah berkas) ========================
+// ======================== LAMPIRAN (F-12: berkas & tautan) ========================
 
 export const ATTACHMENT_BUCKET = 'task-attachments'
 export const MISSING_BUCKET_MESSAGE =
   'Penyimpanan lampiran belum siap. Jalankan migrasi supabase/migrations/20261114000001_attachments_storage.sql di Supabase → SQL Editor.'
+
+// Kolom `attachments.url` (untuk lampiran berupa tautan, mis. Google Drive) hanya
+// ada setelah migrasi 20261127000000_attachment_links.sql dijalankan. Sebelum
+// migrasi, tautan disimpan di `storage_path` dengan awalan `link:` agar fitur
+// tetap bisa dipakai. Kedua bentuk dibaca kembali dengan cara yang sama.
+const LINK_PREFIX = 'link:'
+let attachmentUrlColumn: Promise<boolean> | null = null
+
+export function hasAttachmentUrlSupport(): Promise<boolean> {
+  attachmentUrlColumn ??= (async () => {
+    try {
+      const { error } = await supabase().from('attachments').select('url').limit(1)
+      return !error
+    } catch {
+      return false
+    }
+  })()
+  return attachmentUrlColumn
+}
+
+/** True bila nilai `storage_path` sebenarnya berisi tautan (mode kompatibilitas). */
+export function isLinkPath(storagePath: string | null | undefined): boolean {
+  return Boolean(storagePath && storagePath.startsWith(LINK_PREFIX))
+}
+
+export function linkUrlFromPath(storagePath: string | null | undefined): string | null {
+  if (!isLinkPath(storagePath)) return null
+  return (storagePath as string).slice(LINK_PREFIX.length)
+}
+
+/** Ambil tautan dari baris lampiran (kolom `url` atau mode kompatibilitas). */
+export function attachmentLinkOf(row: { url?: string | null; storage_path?: string | null }): string | null {
+  if (row.url && row.url.trim()) return row.url.trim()
+  return linkUrlFromPath(row.storage_path)
+}
+
+/** Samakan tautan yang ditempel pengguna: tambahkan https:// bila belum ada skema. */
+export function normalizeLink(raw: string): string | null {
+  const value = raw.trim()
+  if (!value) return null
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`
+  try {
+    const url = new URL(withScheme)
+    if (!url.hostname.includes('.')) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+// Tambahkan lampiran berupa TAUTAN (mis. Google Drive/Docs). Tidak butuh Storage,
+// jadi tetap bisa dipakai walau bucket lampiran belum dibuat.
+export async function addAttachmentLink(
+  taskId: string,
+  name: string,
+  rawUrl: string,
+): Promise<Attachment> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) throw new Error('Harus login untuk menambahkan lampiran.')
+
+  const link = normalizeLink(rawUrl)
+  if (!link) throw new Error('Tautan tidak valid. Contoh: https://drive.google.com/file/d/...')
+
+  const label = name.trim() || 'Tautan Drive'
+  const supportsUrl = await hasAttachmentUrlSupport()
+
+  const payload: Record<string, unknown> = {
+    task_id: taskId,
+    name: label,
+    owner_id: user.id,
+  }
+  if (supportsUrl) payload.url = link
+  else payload.storage_path = `${LINK_PREFIX}${link}`
+
+  const { data, error } = await db.from('attachments').insert(payload).select().single()
+  if (error) throw error
+  return data as Attachment
+}
 
 // Unggah berkas ke Supabase Storage lalu catat metadatanya di tabel attachments.
 export async function uploadAttachment(taskId: string, file: File): Promise<Attachment> {
@@ -1338,7 +1433,9 @@ export async function getAttachmentUrl(storagePath: string): Promise<string | nu
 
 export async function deleteAttachmentWithFile(id: string, storagePath: string | null): Promise<void> {
   const db = supabase()
-  if (storagePath) {
+  // Mode kompatibilitas: `storage_path` bisa berisi tautan (`link:`), bukan
+  // berkas di Storage, jadi tidak ada objek yang perlu dihapus.
+  if (storagePath && !isLinkPath(storagePath)) {
     await db.storage.from(ATTACHMENT_BUCKET).remove([storagePath])
   }
   const { error } = await db.from('attachments').delete().eq('id', id)

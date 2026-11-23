@@ -26,6 +26,9 @@ import {
   addComment as addCommentRow,
   likeComment,
   uploadAttachment,
+  addAttachmentLink,
+  linkUrlFromPath,
+  normalizeLink,
   getAttachmentUrl,
   deleteAttachmentWithFile,
   uploadDocFile,
@@ -36,7 +39,7 @@ import {
   type Priority,
 } from '@/lib/db'
 import { recordRecentProject, slugify } from '@/lib/utils'
-import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE } from '@/lib/db'
+import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE, MISSING_BUCKET_MESSAGE } from '@/lib/db'
 import { roleLabel, useProjectPermissions } from '@/lib/permissions'
 import { applyProjectTemplate, pickTemplate } from '@/lib/template'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -105,6 +108,8 @@ import {
   Loader2,
   AlertCircle,
   ShieldCheck,
+  Link2,
+  Upload,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -265,7 +270,15 @@ export interface TaskItem {
     date?: string | null
     priority?: string | null
   }[]
-  attachments?: { id: string; name: string; owner?: string; avatar?: string; storagePath?: string | null }[]
+  attachments?: {
+    id: string
+    name: string
+    owner?: string
+    avatar?: string
+    storagePath?: string | null
+    /** Tautan (mis. Google Drive) bila lampiran bukan berkas unggahan. */
+    url?: string | null
+  }[]
   comments?: {
     id: string
     author: string
@@ -1550,7 +1563,16 @@ export default function ProjectDetailPage() {
                     })),
                   attachments: board.attachments
                     .filter((a) => a.task_id === t.id)
-                    .map((a) => ({ id: a.id, name: a.name, storagePath: a.storage_path ?? null })),
+                    .map((a) => {
+                      const link = a.url ?? linkUrlFromPath(a.storage_path)
+                      return {
+                        id: a.id,
+                        name: a.name,
+                        // Tautan tidak punya berkas di Storage, jadi storagePath dikosongkan.
+                        storagePath: link ? null : (a.storage_path ?? null),
+                        url: link,
+                      }
+                    }),
                   comments: board.comments
                     .filter((c) => c.task_id === t.id && !c.parent_id)
                     .map((c) => ({
@@ -1712,23 +1734,42 @@ export default function ProjectDetailPage() {
   const [subCellMenu, setSubCellMenu] = useState<
     ({ key: string } & CellAnchor) | null
   >(null)
+
+  // Popover kolom Files & Notes di Main Table (klik sel = kelola isinya).
+  const [cellPanel, setCellPanel] = useState<
+    ({ groupId: string; taskId: string; kind: 'files' | 'notes' } & CellAnchor) | null
+  >(null)
+  // Form tambah tautan (Drive) pada popover Files.
+  const [linkName, setLinkName] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  // Unggah berkas dari popover Files.
+  const quickFileRef = useRef<HTMLInputElement>(null)
+  const [filePickTask, setFilePickTask] = useState<{ groupId: string; taskId: string } | null>(null)
+  const [fileBusy, setFileBusy] = useState(false)
+  // Draf catatan pada popover Notes.
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteBusy, setNoteBusy] = useState(false)
+  const [noteError, setNoteError] = useState('')
   // Notifikasi ringkas kalau penyimpanan ke Supabase gagal.
   const [notice, setNotice] = useState<string | null>(null)
 
-  // Hanya satu popover sel yang boleh terbuka. Tanpa ini, popover status,
-  // tanggal, dan subtask bisa terbuka bersamaan lalu saling menutupi.
+  // Hanya satu popover sel yang boleh terbuka.
   const closeAllCellPickers = () => {
     setActiveStatusPicker(null)
     setActiveDatePicker(null)
     setSubCellMenu(null)
     setActiveAssigneePicker(null)
+    setCellPanel(null)
   }
 
   // Popover sel berposisi `fixed`. Saat tabel digulir, posisinya dihitung ulang
   // mengikuti elemen pemicu — bukan langsung ditutup, karena `scroll-behavior:
   // smooth` bisa memicu event scroll tepat setelah popover dibuka.
   useEffect(() => {
-    const anyOpen = activeStatusPicker || activeDatePicker || subCellMenu || activeAssigneePicker
+    const anyOpen =
+      activeStatusPicker || activeDatePicker || subCellMenu || activeAssigneePicker || cellPanel
     if (!anyOpen) return
 
     let raf = 0
@@ -1749,6 +1790,7 @@ export default function ProjectDetailPage() {
         resync(activeDatePicker, setActiveDatePicker)
         resync(subCellMenu, setSubCellMenu)
         resync(activeAssigneePicker, setActiveAssigneePicker)
+        resync(cellPanel, setCellPanel)
       })
     }
 
@@ -1759,7 +1801,161 @@ export default function ProjectDetailPage() {
       window.removeEventListener('scroll', sync, true)
       window.removeEventListener('resize', sync)
     }
-  }, [activeStatusPicker, activeDatePicker, subCellMenu, activeAssigneePicker])
+  }, [activeStatusPicker, activeDatePicker, subCellMenu, activeAssigneePicker, cellPanel])
+
+  // ======================== KOLOM FILES & NOTES (Main Table) ========================
+
+  // Membuka popover sel Files / Notes (posisi mengikuti sel).
+  const openCellPanel = (
+    groupId: string,
+    taskId: string,
+    kind: 'files' | 'notes',
+    el: HTMLElement,
+  ) => {
+    // Klik pada sel yang sama = tutup.
+    if (cellPanel && cellPanel.taskId === taskId && cellPanel.kind === kind) {
+      setCellPanel(null)
+      return
+    }
+    closeAllCellPickers()
+    setLinkError('')
+    setLinkName('')
+    setLinkUrl('')
+    if (kind === 'notes') {
+      const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+      setNoteDraft(task?.description ?? '')
+    }
+    setNoteError('')
+    setCellPanel({ groupId, taskId, kind, ...rectToAnchor(el) })
+  }
+
+  const currentAttachments = (groupId: string, taskId: string) =>
+    groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)?.attachments ?? []
+
+  // Tambah lampiran berupa tautan (Google Drive dan sejenisnya).
+  const handleAddLink = async () => {
+    if (!cellPanel || cellPanel.kind !== 'files' || linkBusy) return
+    const raw = linkUrl.trim()
+    if (!raw) {
+      setLinkError('Tempel tautan terlebih dahulu.')
+      return
+    }
+    if (!normalizeLink(raw)) {
+      setLinkError('Tautan tidak valid. Contoh: https://drive.google.com/file/d/...')
+      return
+    }
+    const { groupId, taskId } = cellPanel
+    const before = currentAttachments(groupId, taskId)
+    setLinkBusy(true)
+    setLinkError('')
+    try {
+      const row = await addAttachmentLink(taskId, linkName, raw)
+      updateTask(groupId, taskId, {
+        attachments: [
+          ...before,
+          {
+            id: row.id,
+            name: row.name,
+            storagePath: row.storage_path ?? null,
+            url: row.url ?? normalizeLink(raw),
+            owner: me.name,
+            avatar: me.avatar,
+          },
+        ],
+      })
+      setLinkName('')
+      setLinkUrl('')
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal menambahkan tautan.')
+    } finally {
+      setLinkBusy(false)
+    }
+  }
+
+  // Unggah berkas dari popover Files (input file tersembunyi).
+  const handleQuickFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const target = filePickTask
+    setFilePickTask(null)
+    if (!file || !target) return
+    const before = currentAttachments(target.groupId, target.taskId)
+    setFileBusy(true)
+    setLinkError('')
+    try {
+      const row = await uploadAttachment(target.taskId, file)
+      updateTask(target.groupId, target.taskId, {
+        attachments: [
+          ...before,
+          {
+            id: row.id,
+            name: row.name,
+            storagePath: row.storage_path ?? null,
+            url: null,
+            owner: me.name,
+            avatar: me.avatar,
+          },
+        ],
+      })
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal mengunggah berkas.')
+    } finally {
+      setFileBusy(false)
+    }
+  }
+
+  // Buka lampiran: tautan langsung dibuka, berkas memakai signed URL.
+  const handleOpenAttachment = async (att: NonNullable<TaskItem['attachments']>[number]) => {
+    if (att.url) {
+      window.open(att.url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (!att.storagePath) {
+      setLinkError('Lampiran ini tidak punya berkas maupun tautan.')
+      return
+    }
+    const url = await getAttachmentUrl(att.storagePath)
+    if (!url) {
+      setLinkError(MISSING_BUCKET_MESSAGE)
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleRemoveAttachment = async (
+    groupId: string,
+    taskId: string,
+    att: NonNullable<TaskItem['attachments']>[number],
+  ) => {
+    const before = currentAttachments(groupId, taskId)
+    try {
+      await deleteAttachmentWithFile(att.id, att.storagePath ?? null)
+      updateTask(groupId, taskId, {
+        attachments: before.filter((a) => a.id !== att.id),
+      })
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal menghapus lampiran.')
+    }
+  }
+
+  // Simpan catatan tugas (disimpan di kolom `tasks.description`, sama dengan
+  // isi kolom Description pada panel detail tugas).
+  const handleSaveNote = async () => {
+    if (!cellPanel || cellPanel.kind !== 'notes' || noteBusy) return
+    const { groupId, taskId } = cellPanel
+    const text = noteDraft.trim()
+    setNoteBusy(true)
+    setNoteError('')
+    try {
+      await updateTaskRow(taskId, { description: text || null })
+      updateTask(groupId, taskId, { description: text || undefined })
+      setCellPanel(null)
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : 'Gagal menyimpan catatan.')
+    } finally {
+      setNoteBusy(false)
+    }
+  }
 
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
@@ -1796,9 +1992,25 @@ export default function ProjectDetailPage() {
 
   // Add column modal
   const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
-  // Kolom tambahan. "Priority" tampil default (sesuai desain) dan bisa diubah per baris.
-  const [extraColumns, setExtraColumns] = useState<string[]>(['Priority'])
+  // Kolom tambahan di Main Table. Files & Notes tampil default supaya berkas/
+  // tautan dan catatan bisa langsung diisi dari tabel.
+  const [extraColumns, setExtraColumns] = useState<string[]>(['Priority', 'Files', 'Notes'])
 
+  // Kolom yang pernah ditambahkan (Files, Notes, dst) dipulihkan per project.
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      const raw = localStorage.getItem(`invisual.table-columns.${projectId}`)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((c): c is string => typeof c === 'string')
+        if (valid.length) setExtraColumns(valid)
+      }
+    } catch {
+      // Data lokal rusak / tidak tersedia: pakai kolom bawaan.
+    }
+  }, [projectId])
   // ======================== TASK DETAIL MODAL (klik task) ========================
   const [detailTask, setDetailTask] = useState<{ groupId: string; taskId: string } | null>(null)
   const [detailStatusOpen, setDetailStatusOpen] = useState(false)
@@ -2777,7 +2989,16 @@ export default function ProjectDetailPage() {
   // Add custom column
   const handleAddColumn = (colName: string) => {
     if (!extraColumns.includes(colName)) {
-      setExtraColumns([...extraColumns, colName])
+      const next = [...extraColumns, colName]
+      setExtraColumns(next)
+      // Simpan agar kolom (mis. Files, Notes) tetap ada setelah halaman dimuat ulang.
+      if (projectId) {
+        try {
+          localStorage.setItem(`invisual.table-columns.${projectId}`, JSON.stringify(next))
+        } catch {
+          // Penyimpanan lokal tidak tersedia: kolom tetap berlaku untuk sesi ini.
+        }
+      }
     }
     setShowAddColumnMenu(false)
   }
@@ -3875,6 +4096,13 @@ export default function ProjectDetailPage() {
             {/* TAB 1: MAIN TABLE */}
             {activeTab === 'Main Table' && (
               <>
+                {/* Input tersembunyi untuk "Unggah berkas" pada kolom Files */}
+                <input
+                  ref={quickFileRef}
+                  type="file"
+                  onChange={handleQuickFilePick}
+                  className="hidden"
+                />
                 {/* Action Toolbar for Main Table */}
                 <div className="flex flex-wrap items-center gap-3 mb-6">
                   {/* + New item button with split options */}
@@ -4816,29 +5044,236 @@ export default function ProjectDetailPage() {
                                       </td>
 
                                       {/* Extra Columns Values */}
-                                      {extraColumns.map((col) => (
-                                        <td
-                                          key={col}
-                                          className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
-                                        >
-                                          {col === 'Priority' ? (
-                                            <PriorityMenu
-                                              value={item.priority ?? 'medium'}
-                                              onSelect={(p) => setTaskPriority(group.id, item.id, p)}
-                                            />
-                                          ) : col === 'Timeline' ? (
-                                            item.date || '—'
-                                          ) : col === 'Files' ? (
-                                            `${(item.attachments || []).length} file`
-                                          ) : col === 'Notes' ? (
-                                            <span className="block max-w-[10rem] truncate mx-auto" title={item.description || ''}>
-                                              {item.description || '—'}
-                                            </span>
-                                          ) : (
-                                            '—'
-                                          )}
-                                        </td>
-                                      ))}
+                                      {extraColumns.map((col) => {
+                                        const isFilesOpen =
+                                          cellPanel?.groupId === group.id &&
+                                          cellPanel?.taskId === item.id &&
+                                          cellPanel?.kind === 'files'
+                                        const isNotesOpen =
+                                          cellPanel?.groupId === group.id &&
+                                          cellPanel?.taskId === item.id &&
+                                          cellPanel?.kind === 'notes'
+                                        const files = item.attachments ?? []
+                                        return (
+                                          <td
+                                            key={col}
+                                            className="px-2 py-2 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
+                                          >
+                                            {col === 'Priority' ? (
+                                              <div className="py-0.5">
+                                                <PriorityMenu
+                                                  value={item.priority ?? 'medium'}
+                                                  onSelect={(p) => setTaskPriority(group.id, item.id, p)}
+                                                />
+                                              </div>
+                                            ) : col === 'Timeline' ? (
+                                              item.date || '—'
+                                            ) : col === 'Files' ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => openCellPanel(group.id, item.id, 'files', e.currentTarget)}
+                                                  className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                                    files.length > 0
+                                                      ? 'text-neutral-300 hover:bg-neutral-800/70'
+                                                      : 'text-neutral-500 hover:bg-neutral-800/70'
+                                                  }`}
+                                                  title={
+                                                    files.length > 0
+                                                      ? `${files.length} berkas/tautan — klik untuk kelola`
+                                                      : 'Klik untuk menambah berkas atau tautan'
+                                                  }
+                                                  aria-label="Kelola berkas dan tautan"
+                                                >
+                                                  <Paperclip size={13} className="shrink-0" />
+                                                  <span className="text-[11px]">
+                                                    {files.length > 0 ? `${files.length} berkas` : 'Tambah'}
+                                                  </span>
+                                                </button>
+
+                                                {isFilesOpen && cellPanel && (
+                                                  <TablePopover
+                                                    anchor={cellPanel}
+                                                    width={320}
+                                                    estimatedHeight={300}
+                                                    ariaLabel="Berkas dan tautan tugas"
+                                                    onClose={() => setCellPanel(null)}
+                                                  >
+                                                    <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                                      Berkas &amp; Tautan
+                                                    </div>
+
+                                                    {files.length === 0 ? (
+                                                      <p className="px-2 py-2 text-[11px] text-neutral-500">
+                                                        Belum ada berkas. Unggah berkas atau tempel tautan
+                                                        Google Drive di bawah.
+                                                      </p>
+                                                    ) : (
+                                                      <ul className="space-y-0.5 max-h-40 overflow-y-auto">
+                                                        {files.map((a) => (
+                                                          <li key={a.id} className="flex items-center gap-1.5">
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleOpenAttachment(a)}
+                                                              className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer text-left"
+                                                              title={a.url ?? a.name}
+                                                            >
+                                                              {a.url ? (
+                                                                <Link2 size={13} className="text-blue-400 shrink-0" />
+                                                              ) : (
+                                                                <FileText size={13} className="text-neutral-400 shrink-0" />
+                                                              )}
+                                                              <span className="truncate">{a.name}</span>
+                                                            </button>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleRemoveAttachment(group.id, item.id, a)}
+                                                              className="p-1 rounded text-neutral-600 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
+                                                              title="Hapus lampiran"
+                                                              aria-label={`Hapus ${a.name}`}
+                                                            >
+                                                              <Trash2 size={12} />
+                                                            </button>
+                                                          </li>
+                                                        ))}
+                                                      </ul>
+                                                    )}
+
+                                                    <div className="mt-2 pt-2 border-t border-neutral-800/80 space-y-2">
+                                                      <button
+                                                        type="button"
+                                                        disabled={fileBusy}
+                                                        onClick={() => {
+                                                          setFilePickTask({ groupId: group.id, taskId: item.id })
+                                                          quickFileRef.current?.click()
+                                                        }}
+                                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                                                      >
+                                                        {fileBusy ? (
+                                                          <Loader2 size={13} className="animate-spin shrink-0" />
+                                                        ) : (
+                                                          <Upload size={13} className="shrink-0" />
+                                                        )}
+                                                        <span>{fileBusy ? 'Mengunggah…' : 'Unggah berkas'}</span>
+                                                      </button>
+
+                                                      <div className="space-y-1.5">
+                                                        <div className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                                                          <Link2 size={11} />
+                                                          <span>Tautan (Google Drive)</span>
+                                                        </div>
+                                                        <input
+                                                          type="text"
+                                                          value={linkName}
+                                                          onChange={(e) => setLinkName(e.target.value)}
+                                                          placeholder="Nama tautan (opsional)"
+                                                          className="w-full h-8 px-2.5 bg-[#111214] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                                                        />
+                                                        <input
+                                                          type="text"
+                                                          value={linkUrl}
+                                                          onChange={(e) => setLinkUrl(e.target.value)}
+                                                          onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                              e.preventDefault()
+                                                              handleAddLink()
+                                                            }
+                                                          }}
+                                                          placeholder="https://drive.google.com/..."
+                                                          className="w-full h-8 px-2.5 bg-[#111214] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                                                        />
+                                                        <button
+                                                          type="button"
+                                                          disabled={linkBusy || !linkUrl.trim()}
+                                                          onClick={handleAddLink}
+                                                          className="w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                                                        >
+                                                          {linkBusy && <Loader2 size={12} className="animate-spin" />}
+                                                          <span>{linkBusy ? 'Menyimpan…' : 'Tambah tautan'}</span>
+                                                        </button>
+                                                        {linkError && (
+                                                          <p className="px-1 text-[11px] leading-snug text-rose-300">
+                                                            {linkError}
+                                                          </p>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  </TablePopover>
+                                                )}
+                                              </>
+                                            ) : col === 'Notes' ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => openCellPanel(group.id, item.id, 'notes', e.currentTarget)}
+                                                  className={`w-full rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                                    item.description
+                                                      ? 'text-neutral-300 hover:bg-neutral-800/70'
+                                                      : 'text-neutral-500 hover:bg-neutral-800/70'
+                                                  }`}
+                                                  title={item.description || 'Klik untuk menambah catatan'}
+                                                  aria-label="Kelola catatan tugas"
+                                                >
+                                                  <span className="block max-w-[10rem] truncate mx-auto text-[11px] text-left">
+                                                    {item.description || '+ Catatan'}
+                                                  </span>
+                                                </button>
+
+                                                {isNotesOpen && cellPanel && (
+                                                  <TablePopover
+                                                    anchor={cellPanel}
+                                                    width={300}
+                                                    estimatedHeight={250}
+                                                    ariaLabel="Catatan tugas"
+                                                    onClose={() => setCellPanel(null)}
+                                                  >
+                                                    <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                                      Catatan Tugas
+                                                    </div>
+                                                    <textarea
+                                                      value={noteDraft}
+                                                      onChange={(e) => setNoteDraft(e.target.value)}
+                                                      rows={5}
+                                                      autoFocus
+                                                      placeholder="Tulis catatan untuk tugas ini…"
+                                                      className="w-full bg-[#111214] border border-neutral-700 rounded-lg p-2 text-xs text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-y"
+                                                    />
+                                                    <p className="mt-1 px-1 text-[10px] text-neutral-500">
+                                                      Tersimpan sebagai deskripsi tugas (kolom Description
+                                                      pada panel detail).
+                                                    </p>
+                                                    {noteError && (
+                                                      <p className="mt-1 px-1 text-[11px] leading-snug text-rose-300">
+                                                        {noteError}
+                                                      </p>
+                                                    )}
+                                                    <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-neutral-800/80">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => setCellPanel(null)}
+                                                        className="px-2.5 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                                                      >
+                                                        Batal
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        disabled={noteBusy}
+                                                        onClick={handleSaveNote}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-wait transition cursor-pointer"
+                                                      >
+                                                        {noteBusy && <Loader2 size={12} className="animate-spin" />}
+                                                        <span>{noteBusy ? 'Menyimpan…' : 'Simpan'}</span>
+                                                      </button>
+                                                    </div>
+                                                  </TablePopover>
+                                                )}
+                                              </>
+                                            ) : (
+                                              '—'
+                                            )}
+                                          </td>
+                                        )
+                                      })}
 
                                       {/* Extra Column cell */}
                                       <td className="px-2 py-2.5 text-center text-neutral-600"></td>

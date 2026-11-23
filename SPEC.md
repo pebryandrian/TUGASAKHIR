@@ -153,6 +153,34 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Kolom **Files** dan **Notes** di Main Table kini bisa diisi.
+  (a) **Kolom tampil default**: `extraColumns` awal `['Priority', 'Files', 'Notes']`, sehingga kedua
+  kolom langsung tersedia tanpa harus menambah manual. Pilihan kolom tetap disimpan per project
+  (`localStorage` kunci `invisual.table-columns.<projectId>`), jadi kolom yang pernah ditambahkan
+  tidak hilang setelah halaman dimuat ulang.
+  (b) **Files**: sel menampilkan jumlah lampiran; klik membuka popover `TablePopover` berisi daftar
+  berkas/tautan (buka & hapus per item), tombol **Unggah berkas** (Supabase Storage bucket
+  `task-attachments`), dan form **Tautan (Google Drive)** — nama opsional + URL. Tautan
+  dinormalisasi (`normalizeLink`, `https://` ditambahkan bila belum ada) dan divalidasi.
+  (c) **Notes**: klik sel membuka popover berisi textarea; tersimpan pada kolom
+  `tasks.description` (sama dengan bagian Description pada panel detail tugas) lewat `updateTaskRow`.
+  (d) **Lampiran berupa tautan**: `addAttachmentLink()` menyimpan ke kolom baru `attachments.url`
+  bila migrasi dijalankan; sebelum itu memakai mode kompatibilitas `storage_path = 'link:<url>'`
+  (`isLinkPath`, `linkUrlFromPath`), sehingga fitur tetap bisa dipakai. `loadBoard` membaca kolom
+  `url` hanya bila tersedia, dan `deleteAttachmentWithFile` tidak menghapus objek Storage untuk
+  lampiran bertipe tautan.
+  (e) **Migrasi baru** `supabase/migrations/20261127000000_attachment_links.sql`: kolom
+  `attachments.url`, `storage_path` boleh kosong, constraint "berkas atau tautan", dan pemindahan
+  data `link:` lama ke kolom `url`.
+  (f) **Kegagalan simpan tidak lagi diam**: `updateTask` memakai `.select('id')` dan melempar
+  `NOT_ALLOWED_TASK_UPDATE_MESSAGE` bila 0 baris (RLS membatasi Member pada tugas yang ditugaskan
+  kepadanya). Pesan tampil di popover Notes, bukan gagal senyap.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji langsung ke Supabase: lampiran tautan
+  tersimpan & terbaca untuk akun PM maupun Member (kolom `url` belum ada → mode `link:`), lalu
+  dihapus kembali. Uji UI di Edge headless: kolom Files & Notes tampil, popover Files menampilkan
+  input tautan + tombol unggah, "Dokumen Drive Uji" berhasil tersimpan dan muncul di daftar, popover
+  Notes memuat isi deskripsi tugas dan bisa disimpan; hanya satu popover terbuka pada satu waktu.
+
 - **2026-11-24** – Popover sel di Main Table (Status, Tanggal, Person, subtask) tertimpa & terpotong.
   (a) **Masalah**: popover sel masih memakai `position: absolute` di dalam sel tabel. Akibatnya
   (1) **tertimpa** kolom/sel lain karena setiap `<td>` punya `position: relative` sendiri,
