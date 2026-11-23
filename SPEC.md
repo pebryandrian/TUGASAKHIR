@@ -153,6 +153,22 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Ikon anggota pada Scope Of Work + tombol Ubah/Hapus project khusus Project Manager.
+  (a) **Ikon orang**: `listProjectMemberChips()` mengumpulkan anggota **aktif** per project
+  (`project_members` + `profiles`, undangan `status = 'invited'` tidak dihitung). Home
+  menampilkannya sebagai tumpukan avatar (maks. 4 + "+N") pada setiap kartu project di modal
+  Scope Of Work, dan gabungan anggota per scope pada kartu scope di halaman utama beserta jumlah
+  orang.
+  (b) **Hak ubah/hapus**: Home kini memuat `listProjectRoles()` (pemilik project = Project Manager,
+  selain itu `project_members.role`). Tombol *Ubah* dan *Hapus* hanya tampil bila peran pada
+  **project itu** adalah Project Manager; Member hanya melihat tombol favorit. Pengaman tambahan:
+  `openEditProject`, `handleSaveProject`, `handleDeleteProject` menolak, dan `updateProject`/
+  `deleteProject` di `lib/db.ts` memeriksa peran lewat `assertProjectManager` sehingga menampilkan
+  pesan jelas "Hanya Project Manager yang dapat mengubah atau menghapus project ini."
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; data peran diuji langsung — akun PM
+  mendapat `project_manager` pada 6 project, akun Member mendapat `member` pada 5 project;
+  `/home` dan board membalas 200 untuk kedua akun.
+
 - **2026-11-24** – Perbaikan penanggung jawab tugas ("Person") tidak bisa diubah.
   (a) **Penyebab tampak**: semua akun demo belum punya `avatar_url`, dan pemetaan board memakai
   satu gambar placeholder yang sama (`/images/clients/SUNDDAE.jpg`) untuk semua anggota. Kolom

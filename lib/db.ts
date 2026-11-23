@@ -311,17 +311,88 @@ export async function listProjectTaskStats(): Promise<
   return stats
 }
 
+// Peran pengguna pada setiap project yang terlihat olehnya.
+// Pemilik project selalu dianggap Project Manager, sama seperti `fetchProjectRole`.
+export type ProjectRoleMap = Record<string, 'project_manager' | 'member'>
+
+export async function listProjectRoles(): Promise<ProjectRoleMap> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return {}
+
+  const [owned, mine] = await Promise.all([
+    db.from('projects').select('id').eq('owner_id', user.id),
+    db.from('project_members').select('project_id, role').eq('user_id', user.id),
+  ])
+
+  const roles: ProjectRoleMap = {}
+  for (const row of (owned.data ?? []) as { id: string }[]) roles[row.id] = 'project_manager'
+  for (const row of (mine.data ?? []) as { project_id: string; role: string }[]) {
+    if (roles[row.project_id]) continue
+    roles[row.project_id] = row.role === 'project_manager' ? 'project_manager' : 'member'
+  }
+  return roles
+}
+
+export interface ProjectMemberChip {
+  id: string
+  name: string
+  avatar_url: string | null
+  role: string
+}
+
+// Anggota aktif per project, dipakai ikon orang pada kartu Scope Of Work.
+// Undangan yang belum diterima (status 'invited') tidak ikut dihitung.
+export async function listProjectMemberChips(): Promise<Record<string, ProjectMemberChip[]>> {
+  const db = supabase()
+  const invites = await hasInvitationSupport()
+  const columns = `project_id, role${invites ? ', status' : ''}, profiles!project_members_user_id_fkey(id, name, avatar_url)`
+
+  const { data, error } = await db.from('project_members').select(columns)
+  if (error) throw error
+
+  const chips: Record<string, ProjectMemberChip[]> = {}
+  for (const row of (data ?? []) as any[]) {
+    if (invites && row.status && row.status !== 'active') continue
+    const person = row.profiles
+    if (!person?.id) continue
+    const list = (chips[row.project_id] ??= [])
+    if (list.some((m) => m.id === person.id)) continue
+    list.push({
+      id: person.id,
+      name: person.name ?? 'Tanpa nama',
+      avatar_url: person.avatar_url ?? null,
+      role: row.role ?? 'member',
+    })
+  }
+  return chips
+}
+
+// Ubah/hapus project hanya untuk Project Manager. Pemeriksaan ini lapisan
+// kedua: kebijakan RLS (20261114000000_rls_roles.sql) juga menolaknya, tetapi
+// tanpa pesan yang jelas untuk pengguna.
+async function assertProjectManager(projectId: string): Promise<void> {
+  const roles = await listProjectRoles().catch(() => ({}) as ProjectRoleMap)
+  if (roles[projectId] !== 'project_manager') {
+    throw new Error('Hanya Project Manager yang dapat mengubah atau menghapus project ini.')
+  }
+}
+
 // Ubah informasi project (F-03: mengubah proyek).
 export async function updateProject(
   id: string,
   patch: Partial<Pick<Project, 'name' | 'description' | 'scope' | 'progress' | 'start_date' | 'due_date'>>,
 ): Promise<void> {
+  await assertProjectManager(id)
   const { error } = await supabase().from('projects').update(patch).eq('id', id)
   if (error) throw error
 }
 
 // Hapus project (F-03). Anak-anak (grup, status, tugas, doc) ikut terhapus lewat CASCADE.
 export async function deleteProject(id: string): Promise<void> {
+  await assertProjectManager(id)
   const { error } = await supabase().from('projects').delete().eq('id', id)
   if (error) throw error
 }
