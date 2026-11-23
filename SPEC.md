@@ -153,6 +153,23 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Penanggung jawab tugas hanya bisa diubah Project Manager (F-13).
+  (a) **Masalah**: kolom *Person* (Main Table), panel detail tugas, dan pemilih penanggung jawab
+  subtask bisa diubah siapa pun, termasuk Member. Pembagian tugas adalah wewenang PM.
+  (b) **Perbaikan izin**: `ProjectPermissions` menambah `assignTasks` (PM `true`, Member `false`).
+  `toggleTaskAssignee` dan `clearTaskAssignee` menolak lebih dulu dan menampilkan pesan
+  "Hanya Project Manager yang dapat mengubah penanggung jawab tugas."
+  (c) **Perbaikan tampilan**: untuk Member, kolom *Person* di Main Table, baris *Person* pada panel
+  detail, dan avatar penanggung jawab subtask dirender **tanpa tombol/menu** (hanya teks + avatar);
+  modal New Item menampilkan "Ditetapkan oleh Project Manager" alih-alih pemilih anggota, sehingga
+  tugas yang dibuat Member tersimpan tanpa penanggung jawab.
+  (d) **Pengaman database**: migrasi baru
+  `supabase/migrations/20261124000000_assignee_manager_only.sql` menambah trigger
+  `trg_tasks_guard_assignee` dan `trg_subtasks_guard_assignee` yang menolak perubahan kolom
+  `assignee_id` bila pelakunya bukan PM/pemilik project. Perubahan lain (status, centang selesai,
+  deskripsi, komentar, lampiran) tetap boleh dilakukan Member.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, board PM dan Member balas 200.
+
 - **2026-11-24** – Scope Of Work hanya menampilkan 3 dari 5 scope, dan sidebar ikut ter-scroll.
   (a) **Penyebab 3 scope**: `listProjects(workspaceId)` memakai `.eq('workspace_id', …)`, sedangkan
   project contoh tersebar di **dua workspace** (project PM di workspace PM, project Member di

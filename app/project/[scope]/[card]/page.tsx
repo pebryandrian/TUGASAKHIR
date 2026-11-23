@@ -1784,7 +1784,14 @@ export default function ProjectDetailPage() {
   // tunggal: memilih anggota lain MENGGANTIKAN yang lama, dan memilih anggota
   // yang sama akan melepas penugasan. Sebelumnya klik anggota yang sudah
   // ditugaskan tidak mengubah apa pun (anggota selalu ditambahkan kembali).
+  //
+  // Hanya Project Manager yang boleh menetapkan penanggung jawab (F-13):
+  // pembagian tugas adalah wewenang PM, Member hanya melihat.
   const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof members)[0]) => {
+    if (!can.assignTasks) {
+      setNotice('Hanya Project Manager yang dapat mengubah penanggung jawab tugas.')
+      return
+    }
     const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
     const alreadyAssigned = (current?.personNames || [])[0] === member.name
     const next = alreadyAssigned ? null : member
@@ -1812,6 +1819,10 @@ export default function ProjectDetailPage() {
 
   // Melepas penanggung jawab tugas (assignee_id -> null).
   const clearTaskAssignee = (groupId: string, taskId: string) => {
+    if (!can.assignTasks) {
+      setNotice('Hanya Project Manager yang dapat mengubah penanggung jawab tugas.')
+      return
+    }
     if (projectId) updateTaskRow(taskId, { assignee_id: null }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) => {
@@ -2188,26 +2199,44 @@ export default function ProjectDetailPage() {
       )
       const metaCells = (
         <>
-          {/* Assignee */}
+          {/* Assignee subtask. Hanya PM yang boleh menetapkan; Member melihat. */}
           <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
-            <button
-              type="button"
-              onClick={() => toggleMenu('assignee')}
-              className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
-              title="Ubah assignee subtask"
-            >
-              {assigneeMember ? (
-                <PersonAvatar
-                  name={assigneeMember.name}
-                  avatar={assigneeMember.avatar}
-                  size={24}
-                  className="border border-neutral-800"
-                />
-              ) : (
-                <UserIcon size={14} className="text-neutral-500" />
-              )}
-            </button>
-            {isMenuOpen('assignee') && (
+            {can.assignTasks ? (
+              <button
+                type="button"
+                onClick={() => toggleMenu('assignee')}
+                className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
+                title="Ubah assignee subtask"
+              >
+                {assigneeMember ? (
+                  <PersonAvatar
+                    name={assigneeMember.name}
+                    avatar={assigneeMember.avatar}
+                    size={24}
+                    className="border border-neutral-800"
+                  />
+                ) : (
+                  <UserIcon size={14} className="text-neutral-500" />
+                )}
+              </button>
+            ) : (
+              <span
+                className="inline-flex items-center justify-center"
+                title={assigneeMember ? `Penanggung jawab: ${assigneeMember.name}` : 'Belum ditugaskan'}
+              >
+                {assigneeMember ? (
+                  <PersonAvatar
+                    name={assigneeMember.name}
+                    avatar={assigneeMember.avatar}
+                    size={24}
+                    className="border border-neutral-800"
+                  />
+                ) : (
+                  <UserIcon size={14} className="text-neutral-600" />
+                )}
+              </span>
+            )}
+            {can.assignTasks && isMenuOpen('assignee') && (
               <>
                 {closeOverlay}
                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
@@ -4333,56 +4362,84 @@ export default function ProjectDetailPage() {
 
                                       </td>
 
-                                      {/* Person: penanggung jawab tugas (klik = ubah) */}
+                                      {/* Person: penanggung jawab tugas.
+                                          Hanya Project Manager yang bisa mengubah;
+                                          Member hanya melihat. */}
                                       <td className="px-2 py-2.5 border-r border-neutral-800/80 text-center relative">
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            const rect = e.currentTarget.getBoundingClientRect()
-                                            setActiveAssigneePicker(
-                                              isAssigneePickerOpen
-                                                ? null
-                                                : {
-                                                    groupId: group.id,
-                                                    taskId: item.id,
-                                                    top: rect.bottom,
-                                                    left: rect.left + rect.width / 2,
-                                                  },
-                                            )
-                                          }}
-                                          className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
-                                            item.personNames?.[0]
-                                              ? 'hover:bg-neutral-800/70'
-                                              : 'hover:bg-neutral-800/70 text-neutral-500'
-                                          }`}
-                                          title={
-                                            item.personNames?.[0]
-                                              ? `Penanggung jawab: ${item.personNames[0]} — klik untuk ubah`
-                                              : 'Klik untuk menugaskan anggota'
-                                          }
-                                        >
-                                          {item.personNames?.[0] ? (
-                                            <>
-                                              <PersonAvatar
-                                                name={item.personNames[0]}
-                                                avatar={item.personAvatars?.[0]}
-                                                size={22}
-                                              />
-                                              <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
-                                                {item.personNames[0]}
-                                              </span>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <span className="w-[22px] h-[22px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
-                                                <Plus size={11} strokeWidth={2.5} />
-                                              </span>
-                                              <span className="text-[11px]">Tugaskan</span>
-                                            </>
-                                          )}
-                                        </button>
+                                        {can.assignTasks ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              const rect = e.currentTarget.getBoundingClientRect()
+                                              setActiveAssigneePicker(
+                                                isAssigneePickerOpen
+                                                  ? null
+                                                  : {
+                                                      groupId: group.id,
+                                                      taskId: item.id,
+                                                      top: rect.bottom,
+                                                      left: rect.left + rect.width / 2,
+                                                    },
+                                              )
+                                            }}
+                                            className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                              item.personNames?.[0]
+                                                ? 'hover:bg-neutral-800/70'
+                                                : 'hover:bg-neutral-800/70 text-neutral-500'
+                                            }`}
+                                            title={
+                                              item.personNames?.[0]
+                                                ? `Penanggung jawab: ${item.personNames[0]} — klik untuk ubah`
+                                                : 'Klik untuk menugaskan anggota'
+                                            }
+                                          >
+                                            {item.personNames?.[0] ? (
+                                              <>
+                                                <PersonAvatar
+                                                  name={item.personNames[0]}
+                                                  avatar={item.personAvatars?.[0]}
+                                                  size={22}
+                                                />
+                                                <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
+                                                  {item.personNames[0]}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <span className="w-[22px] h-[22px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
+                                                  <Plus size={11} strokeWidth={2.5} />
+                                                </span>
+                                                <span className="text-[11px]">Tugaskan</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        ) : (
+                                          <span
+                                            className="w-full inline-flex items-center justify-center gap-1.5 px-1.5 py-1"
+                                            title={
+                                              item.personNames?.[0]
+                                                ? `Penanggung jawab: ${item.personNames[0]}`
+                                                : 'Belum ditugaskan'
+                                            }
+                                          >
+                                            {item.personNames?.[0] ? (
+                                              <>
+                                                <PersonAvatar
+                                                  name={item.personNames[0]}
+                                                  avatar={item.personAvatars?.[0]}
+                                                  size={22}
+                                                />
+                                                <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
+                                                  {item.personNames[0]}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="text-[11px] text-neutral-600">—</span>
+                                            )}
+                                          </span>
+                                        )}
 
-                                        {isAssigneePickerOpen && (
+                                        {can.assignTasks && isAssigneePickerOpen && (
                                           <AssigneeMenu
                                             members={members}
                                             assignedNames={item.personNames || []}
@@ -5794,81 +5851,93 @@ export default function ProjectDetailPage() {
                     <span className="text-xs text-neutral-300 font-medium">Person</span>
                   </div>
                   <div className="relative flex-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowPersonDropdown(!showPersonDropdown)
-                        setShowGroupDropdown(false)
-                        setShowStatusDropdown(false)
-                      }}
-                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
-                    >
-                      {selectedAssigneeMember ? (
-                        <div className="flex items-center gap-2">
-                          <PersonAvatar
-                            name={selectedAssigneeMember.name}
-                            avatar={selectedAssigneeMember.avatar}
-                            size={20}
-                          />
-                          <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
-                        </div>
-                      ) : (
-                        <div className="w-full flex items-center justify-center text-neutral-500">
-                          <div className="w-5 h-5 rounded-full border border-neutral-600 flex items-center justify-center">
-                            <UserIcon size={11} className="text-neutral-400" />
-                          </div>
-                        </div>
-                      )}
-                    </button>
+                    {can.assignTasks ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPersonDropdown(!showPersonDropdown)
+                            setShowGroupDropdown(false)
+                            setShowStatusDropdown(false)
+                          }}
+                          className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
+                        >
+                          {selectedAssigneeMember ? (
+                            <div className="flex items-center gap-2">
+                              <PersonAvatar
+                                name={selectedAssigneeMember.name}
+                                avatar={selectedAssigneeMember.avatar}
+                                size={20}
+                              />
+                              <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
+                            </div>
+                          ) : (
+                            <div className="w-full flex items-center justify-center text-neutral-500">
+                              <div className="w-5 h-5 rounded-full border border-neutral-600 flex items-center justify-center">
+                                <UserIcon size={11} className="text-neutral-400" />
+                              </div>
+                            </div>
+                          )}
+                        </button>
 
-                    {/* Person Dropdown Popover (Slide 3) */}
-                    {showPersonDropdown && (
-                      <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
-                          <Search size={13} className="text-neutral-400 shrink-0" />
-                          <input
-                            type="text"
-                            placeholder="Search group"
-                            value={searchPersonQuery}
-                            onChange={(e) => setSearchPersonQuery(e.target.value)}
-                            autoFocus
-                            className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
-                          />
-                        </div>
-                        <p className="text-[11px] font-semibold text-neutral-400 px-2 py-1">Suggested Users</p>
-                        <div className="space-y-0.5 max-h-44 overflow-y-auto">
-                          {filteredMembers.map((m) => (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => {
-                                setNewTaskAssignee(m.name)
-                                setShowPersonDropdown(false)
-                              }}
-                              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-left transition cursor-pointer ${
-                                newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
-                              }`}
-                            >
-                              <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
-                              <span className="text-xs text-neutral-200">{m.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                        {can.inviteMembers && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPersonDropdown(false)
-                              router.push(
-                                `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
-                              )
-                            }}
-                            className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
-                          >
-                            <Mail size={13} />
-                            <span>Kelola anggota &amp; undang lewat email</span>
-                          </button>
+                        {/* Person Dropdown Popover (Slide 3) */}
+                        {showPersonDropdown && (
+                          <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
+                            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
+                              <Search size={13} className="text-neutral-400 shrink-0" />
+                              <input
+                                type="text"
+                                placeholder="Search group"
+                                value={searchPersonQuery}
+                                onChange={(e) => setSearchPersonQuery(e.target.value)}
+                                autoFocus
+                                className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
+                              />
+                            </div>
+                            <p className="text-[11px] font-semibold text-neutral-400 px-2 py-1">Suggested Users</p>
+                            <div className="space-y-0.5 max-h-44 overflow-y-auto">
+                              {filteredMembers.map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewTaskAssignee(m.name)
+                                    setShowPersonDropdown(false)
+                                  }}
+                                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-left transition cursor-pointer ${
+                                    newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
+                                  }`}
+                                >
+                                  <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                                  <span className="text-xs text-neutral-200">{m.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                            {can.inviteMembers && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowPersonDropdown(false)
+                                  router.push(
+                                    `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
+                                  )
+                                }}
+                                className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                              >
+                                <Mail size={13} />
+                                <span>Kelola anggota &amp; undang lewat email</span>
+                              </button>
+                            )}
+                          </div>
                         )}
+                      </>
+                    ) : (
+                      <div
+                        className="w-full h-9 px-3 rounded-md bg-[#22242b] border border-neutral-700/40 flex items-center gap-2 text-xs text-neutral-500"
+                        title="Penanggung jawab ditetapkan oleh Project Manager"
+                      >
+                        <UserIcon size={12} />
+                        <span>Ditetapkan oleh Project Manager</span>
                       </div>
                     )}
                   </div>
@@ -6828,42 +6897,66 @@ export default function ProjectDetailPage() {
                     <div className="flex items-center gap-4 relative">
                       <UserIcon size={17} className="text-neutral-400 shrink-0" />
                       <span className="w-24 shrink-0 text-sm text-neutral-400">Person</span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          if (detailPersonAnchor) {
-                            setDetailPersonAnchor(null)
-                            return
+                      {can.assignTasks ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            if (detailPersonAnchor) {
+                              setDetailPersonAnchor(null)
+                              return
+                            }
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setDetailPersonAnchor({
+                              top: rect.bottom,
+                              left: rect.left + rect.width / 2,
+                            })
+                          }}
+                          className="flex items-center gap-2 rounded-lg px-1.5 py-1 -ml-1.5 hover:bg-neutral-800/70 transition cursor-pointer"
+                          title="Klik untuk mengubah penanggung jawab"
+                        >
+                          {task.personNames?.[0] ? (
+                            <>
+                              <PersonAvatar
+                                name={task.personNames[0]}
+                                avatar={task.personAvatars?.[0]}
+                                size={26}
+                              />
+                              <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="w-[26px] h-[26px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center text-neutral-500 shrink-0">
+                                <Plus size={13} strokeWidth={2.5} />
+                              </span>
+                              <span className="text-sm text-neutral-500">Tugaskan anggota</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span
+                          className="flex items-center gap-2 px-1.5 py-1 -ml-1.5"
+                          title={
+                            task.personNames?.[0]
+                              ? `Penanggung jawab: ${task.personNames[0]}`
+                              : 'Belum ditugaskan'
                           }
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setDetailPersonAnchor({
-                            top: rect.bottom,
-                            left: rect.left + rect.width / 2,
-                          })
-                        }}
-                        className="flex items-center gap-2 rounded-lg px-1.5 py-1 -ml-1.5 hover:bg-neutral-800/70 transition cursor-pointer"
-                        title="Klik untuk mengubah penanggung jawab"
-                      >
-                        {task.personNames?.[0] ? (
-                          <>
-                            <PersonAvatar
-                              name={task.personNames[0]}
-                              avatar={task.personAvatars?.[0]}
-                              size={26}
-                            />
-                            <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="w-[26px] h-[26px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center text-neutral-500 shrink-0">
-                              <Plus size={13} strokeWidth={2.5} />
-                            </span>
-                            <span className="text-sm text-neutral-500">Tugaskan anggota</span>
-                          </>
-                        )}
-                      </button>
+                        >
+                          {task.personNames?.[0] ? (
+                            <>
+                              <PersonAvatar
+                                name={task.personNames[0]}
+                                avatar={task.personAvatars?.[0]}
+                                size={26}
+                              />
+                              <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-neutral-600">Belum ditugaskan</span>
+                          )}
+                        </span>
+                      )}
 
-                      {detailPersonAnchor && (
+                      {can.assignTasks && detailPersonAnchor && (
                         <AssigneeMenu
                           members={members}
                           assignedNames={task.personNames || []}
