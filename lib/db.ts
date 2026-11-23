@@ -361,7 +361,9 @@ export async function loadBoard(projectId: string): Promise<BoardData> {
     db.from('tasks').select('*').eq('project_id', projectId).order('position'),
     db
       .from('project_members')
-      .select('role, profiles(id, name, avatar_url)')
+      // Nama constraint harus eksplisit: tabel ini punya dua relasi ke profiles
+      // (user_id dan invited_by), sehingga embed tanpa nama jadi ambigu.
+      .select('role, profiles!project_members_user_id_fkey(id, name, avatar_url)')
       .eq('project_id', projectId),
     db.from('docs').select('blocks').eq('project_id', projectId).maybeSingle(),
   ])
@@ -915,9 +917,11 @@ export interface ProjectMemberRow {
 
 export async function listProjectMembers(projectId: string): Promise<ProjectMemberRow[]> {
   const invites = await hasInvitationSupport()
+  // `profiles!project_members_user_id_fkey` — tabel ini punya dua relasi ke
+  // profiles (user_id dan invited_by), jadi nama constraint wajib disebut.
   const columns = invites
-    ? 'role, status, profiles(id, name, email, avatar_url)'
-    : 'role, profiles(id, name, email, avatar_url)'
+    ? 'role, status, profiles!project_members_user_id_fkey(id, name, email, avatar_url)'
+    : 'role, profiles!project_members_user_id_fkey(id, name, email, avatar_url)'
 
   const { data, error } = await supabase()
     .from('project_members')
