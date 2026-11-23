@@ -153,6 +153,19 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Perbaikan "Gagal memuat board".
+  (a) **Penyebab**: kolom `invited_by` (FK ke `profiles`) yang ditambahkan untuk fitur undangan
+  membuat `project_members` punya **dua** relasi ke `profiles` (`user_id` dan `invited_by`).
+  PostgREST menolak embed tanpa nama constraint ("more than one relationship was found"), dan
+  query itu dipakai `loadBoard()` sehingga seluruh board gagal dimuat.
+  (b) **Perbaikan**: embed memakai nama constraint eksplisit
+  `profiles!project_members_user_id_fkey(...)` di `loadBoard()` dan `listProjectMembers()`.
+  Nama constraint `user_id` sudah ada sejak awal, jadi perbaikan berlaku sebelum maupun sesudah
+  migrasi undangan.
+  Verifikasi: seluruh query board (project, statuses, task_groups, tasks, members, docs,
+  subtasks, attachments, comments) berhasil untuk akun PM dan Member;
+  `/project/client/aqua`, `/project/client/aqua/members`, dan `/home` balas 200.
+
 - **2026-11-24** – Perbaikan login tidak bisa dipakai.
   (a) **Penyebab**: login dipindah ke server action (`app/signin/actions.ts`) tetapi cookie sesi
   Supabase (≈2.9 KB) tidak ikut terkirim ke browser, sehingga sesi tidak pernah terbentuk dan
