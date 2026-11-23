@@ -24,6 +24,8 @@ import {
   Sparkles,
   Pencil,
   Trash2,
+  Flag,
+  ListTodo,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -37,12 +39,16 @@ import {
   createProject,
   deleteProject,
   getSessionProfile,
+  hasManagerRole,
   listFavoriteProjects,
+  listMyInvitations,
+  listMyTasks,
   listProjectTaskStats,
   listProjects,
   listProfiles,
   setProjectFavorite,
   updateProject,
+  type MyTaskItem,
   type Profile,
   type Project,
   type Workspace,
@@ -114,6 +120,94 @@ function Avatar({ name, src, size = 32 }: { name: string; src: string | null; si
   )
 }
 
+function dueBadge(daysLeft: number | null): { text: string; className: string } {
+  if (daysLeft === null) return { text: 'Tanpa tenggat', className: 'text-neutral-500 border-neutral-700/70' }
+  if (daysLeft < 0)
+    return {
+      text: `Terlambat ${Math.abs(daysLeft)} hari`,
+      className: 'text-rose-300 border-rose-500/40 bg-rose-500/10',
+    }
+  if (daysLeft === 0)
+    return { text: 'Jatuh tempo hari ini', className: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+  if (daysLeft === 1)
+    return { text: 'Besok', className: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+  if (daysLeft <= 3)
+    return { text: `${daysLeft} hari lagi`, className: 'text-amber-300 border-amber-500/30 bg-amber-500/5' }
+  return { text: `${daysLeft} hari lagi`, className: 'text-neutral-400 border-neutral-700/70' }
+}
+
+const PRIORITY_STYLE: Record<string, { label: string; className: string }> = {
+  high: { label: 'High', className: 'text-rose-400' },
+  medium: { label: 'Medium', className: 'text-amber-400' },
+  low: { label: 'Low', className: 'text-blue-400' },
+}
+
+// Kartu satu tugas pada bagian "Tugas Saya" (POV Member).
+function MyTaskCard({ task, onOpen }: { task: MyTaskItem; onOpen: () => void }) {
+  const badge = dueBadge(task.days_left)
+  const priority = PRIORITY_STYLE[task.priority] ?? PRIORITY_STYLE.medium
+  const pct = task.subtask_total ? Math.round((task.subtask_done / task.subtask_total) * 100) : 0
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group text-left w-full rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4 hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-200 cursor-pointer flex flex-col gap-2.5"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-semibold text-white leading-snug line-clamp-2 group-hover:text-blue-300 transition">
+          {task.title}
+        </p>
+        <span
+          className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${badge.className}`}
+        >
+          {badge.text}
+        </span>
+      </div>
+
+      <p className="text-[11px] text-neutral-500 truncate">
+        {task.project_scope ? `${task.project_scope} / ` : ''}
+        {task.project_name}
+        {task.group_title ? ` · ${task.group_title}` : ''}
+      </p>
+
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className={`inline-flex items-center gap-1 ${priority.className}`}>
+          <Flag size={11} fill="currentColor" />
+          {priority.label}
+        </span>
+        {task.status_label && (
+          <span
+            className="rounded px-1.5 py-0.5 font-semibold text-white"
+            style={{ backgroundColor: task.status_color ?? '#64748b' }}
+          >
+            {task.status_label}
+          </span>
+        )}
+        {task.due_date && (
+          <span className="ml-auto text-neutral-500">
+            {new Date(task.due_date).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: 'short',
+            })}
+          </span>
+        )}
+      </div>
+
+      {task.subtask_total > 0 && (
+        <div className="space-y-1">
+          <div className="h-1.5 w-full rounded-full bg-neutral-700/60 overflow-hidden">
+            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-neutral-500">
+            Subtask {task.subtask_done}/{task.subtask_total}
+          </p>
+        </div>
+      )}
+    </button>
+  )
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const memberSearchRef = useRef<HTMLInputElement>(null)
@@ -166,19 +260,31 @@ export default function DashboardPage() {
   // Workspace aktif (F-15): pilihan di sidebar menyaring daftar proyek.
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null)
 
+  // POV member: Project Manager melihat My Member, Member melihat Tugas Saya.
+  const [isManager, setIsManager] = useState(true)
+  const [myTasks, setMyTasks] = useState<MyTaskItem[]>([])
+  // Jumlah undangan yang menunggu jawaban (badge pada ikon lonceng).
+  const [invitationCount, setInvitationCount] = useState(0)
+
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, favs] = await Promise.all([
+      const [rows, people, taskStats, favs, manager, tasks, invites] = await Promise.all([
         listProjects(activeWorkspace?.id),
         listProfiles().catch(() => [] as Profile[]),
         listProjectTaskStats().catch(() => ({})),
         listFavoriteProjects().catch(() => []),
+        hasManagerRole().catch(() => true),
+        listMyTasks(12).catch(() => [] as MyTaskItem[]),
+        listMyInvitations().catch(() => []),
       ])
       setProjects(rows)
       setProfiles(people)
       setTaskStats(taskStats)
       setFavorites(favs)
+      setIsManager(manager)
+      setMyTasks(tasks)
+      setInvitationCount(invites.length)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -455,10 +561,19 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setShowNotifications(true)}
-            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
-            aria-label="Notifications"
+            className="relative p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label={
+              invitationCount > 0
+                ? `Notifications (${invitationCount} undangan menunggu)`
+                : 'Notifications'
+            }
           >
             <Bell size={18} strokeWidth={1.8} />
+            {invitationCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-blue-600 text-[10px] font-bold text-white flex items-center justify-center">
+                {invitationCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -758,7 +873,8 @@ export default function DashboardPage() {
             )}
           </section>
 
-          {/* My Member Section */}
+          {/* POV Project Manager: My Member */}
+          {isManager ? (
           <section
             ref={membersSectionRef}
             className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
@@ -863,6 +979,92 @@ export default function DashboardPage() {
               </table>
             </div>
           </section>
+          ) : (
+          /* POV Member: tugas yang harus dikerjakan, diurutkan dari tenggat terdekat */
+          <section
+            ref={membersSectionRef}
+            className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white tracking-tight">Tugas Saya</h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Tugas yang ditugaskan kepada Anda, diurutkan dari tenggat terdekat.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-rose-300 font-semibold">
+                  {myTasks.filter((t) => (t.days_left ?? 99) < 0).length} terlambat
+                </span>
+                <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-300 font-semibold">
+                  {
+                    myTasks.filter((t) => t.days_left !== null && t.days_left >= 0 && t.days_left <= 3)
+                      .length
+                  }{' '}
+                  mepet deadline
+                </span>
+                <span className="rounded-md border border-neutral-700/70 px-2 py-1 text-neutral-400 font-semibold">
+                  {myTasks.length} total
+                </span>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-8">
+                <Loader2 size={16} className="animate-spin" /> Memuat tugas…
+              </div>
+            ) : myTasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
+                <ListTodo size={22} className="text-neutral-600" />
+                <p className="text-sm text-neutral-400">Belum ada tugas yang ditugaskan kepada Anda.</p>
+                <p className="text-[11px] text-neutral-600">
+                  Tugas akan muncul di sini setelah Project Manager membagikannya.
+                </p>
+              </div>
+            ) : (
+              <>
+                {(() => {
+                  const urgent = myTasks.filter(
+                    (t) => t.days_left !== null && t.days_left <= 3,
+                  )
+                  const later = myTasks.filter((t) => t.days_left === null || t.days_left > 3)
+                  const openTask = (t: MyTaskItem) =>
+                    router.push(
+                      `/project/${slugify(t.project_scope)}/${slugify(t.project_name)}`,
+                    )
+                  return (
+                    <div className="space-y-6">
+                      {urgent.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-300/90 mb-2.5">
+                            Perlu segera dikerjakan
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {urgent.map((t) => (
+                              <MyTaskCard key={t.id} task={t} onOpen={() => openTask(t)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {later.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400 mb-2.5">
+                            Berikutnya
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {later.map((t) => (
+                              <MyTaskCard key={t.id} task={t} onOpen={() => openTask(t)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </>
+            )}
+          </section>
+          )}
         </main>
       </div>
 

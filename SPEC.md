@@ -153,6 +153,27 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-23** – Alur undangan anggota + Home versi Member.
+  (a) **Undangan**: `project_members` mendapat `status` (`invited`/`active`), `invited_by`,
+  `invited_at` lewat migrasi `20261123000000_project_invitations.sql`. PM mengundang lewat
+  halaman Anggota Proyek; anggota baru berstatus `invited` sampai menerima.
+  (b) **Notifikasi**: panel Notification punya tab **Undangan** dengan tombol Terima/Tolak, dan
+  ikon lonceng di Home menampilkan badge jumlah undangan yang menunggu. Menerima → `active`
+  (project muncul di Home), menolak → baris keanggotaan dihapus.
+  (c) **Home versi Member**: bagian **My Member** diganti **Tugas Saya** — kartu tugas yang
+  ditugaskan kepadanya, diurutkan dari tenggat terdekat, dipisah menjadi "Perlu segera
+  dikerjakan" (≤3 hari / terlambat) dan "Berikutnya", lengkap dengan prioritas, status,
+  tenggat, dan progres subtask. `hasManagerRole()` memilih tampilan: PM → My Member,
+  Member → Tugas Saya.
+  (d) **RLS**: helper `is_project_member` hanya menghitung anggota berstatus `active`; anggota
+  boleh menerima/menolak undangannya sendiri tetapi tidak boleh mengubah peran.
+  (e) `listProjects()` menyembunyikan project yang undangannya belum diterima.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  PM `isManager=true` dan Member `isManager=false` dengan 9 tugas (4 mepet deadline/terlambat).
+  Data demo dirapikan: 3 project contoh yang sempat dimiliki akun Member dipindahkan ke akun PM.
+  **Catatan:** alur undangan baru aktif setelah migrasi `20261123000000_project_invitations.sql`
+  dijalankan; sebelum itu `addMemberByEmail` menambah anggota langsung seperti sebelumnya.
+
 - **2026-11-23** – Akun contoh untuk membandingkan POV Project Manager vs Member.
   `scripts/seed-demo-accounts.mjs` membuat:
   **PM** `pm.demo@invisual.test` / `Manager2026!` (Rani Project Manager) dan

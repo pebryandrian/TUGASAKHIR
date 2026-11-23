@@ -229,11 +229,31 @@ export async function ensureDefaultWorkspace(name = '2026 INVISUAL'): Promise<Wo
 // ======================== PROJECTS ========================
 
 export async function listProjects(workspaceId?: string): Promise<Project[]> {
-  let q = supabase().from('projects').select('*').order('created_at')
+  const db = supabase()
+  let q = db.from('projects').select('*').order('created_at')
   if (workspaceId) q = q.eq('workspace_id', workspaceId)
   const { data, error } = await q
   if (error) throw error
-  return (data as Project[]) ?? []
+
+  const rows = (data as Project[]) ?? []
+
+  // Undangan yang belum diterima tidak boleh menampilkan isi project.
+  // (RLS juga menanganinya lewat is_project_member, ini lapisan kedua.)
+  if (await hasInvitationSupport()) {
+    const { data: { user } } = await db.auth.getUser()
+    if (!user) return []
+    const { data: mine } = await db
+      .from('project_members')
+      .select('project_id, status')
+      .eq('user_id', user.id)
+      .eq('status', 'invited')
+    const pending = new Set(
+      ((mine ?? []) as { project_id: string }[]).map((m) => m.project_id),
+    )
+    return rows.filter((p) => p.owner_id === user.id || !pending.has(p.id))
+  }
+
+  return rows
 }
 
 export async function createProject(
@@ -620,16 +640,241 @@ export async function saveDoc(projectId: string, blocks: unknown[]): Promise<voi
   if (error) throw error
 }
 
-// ======================== MEMBERS ========================
+// ======================== MEMBERS & UNDANGAN ========================
 
-export async function addMemberByEmail(projectId: string, email: string, role = 'member'): Promise<void> {
+// Kolom `status` pada project_members hanya ada setelah migrasi
+// 20261123000000_project_invitations.sql dijalankan. Dideteksi sekali, lalu
+// dipakai untuk memutuskan apakah undangan perlu diterima lebih dulu.
+let memberStatusColumn: Promise<boolean> | null = null
+
+export function hasInvitationSupport(): Promise<boolean> {
+  memberStatusColumn ??= (async () => {
+    try {
+      const { error } = await supabase()
+        .from('project_members')
+        .select('status')
+        .limit(1)
+      return !error
+    } catch {
+      return false
+    }
+  })()
+  return memberStatusColumn
+}
+
+// Mengundang anggota lewat email. Bila kolom `status` sudah ada, undangan
+// disimpan sebagai 'invited' dan menunggu persetujuan; bila belum, anggota
+// langsung ditambahkan seperti sebelumnya.
+export async function addMemberByEmail(
+  projectId: string,
+  email: string,
+  role = 'member',
+): Promise<{ invited: boolean }> {
   const db = supabase()
-  const { data: profile } = await db.from('profiles').select('id').eq('email', email).maybeSingle()
-  if (!profile) throw new Error(`No user found with email ${email}`)
+  const normalized = email.trim().toLowerCase()
+  const { data: profile } = await db
+    .from('profiles')
+    .select('id')
+    .eq('email', normalized)
+    .maybeSingle()
+  if (!profile) throw new Error(`Belum ada akun dengan email ${normalized}`)
+
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+
+  const invites = await hasInvitationSupport()
+  const row: Record<string, unknown> = {
+    project_id: projectId,
+    user_id: profile.id,
+    role,
+  }
+  if (invites) {
+    row.status = 'invited'
+    row.invited_by = user?.id ?? null
+    row.invited_at = new Date().toISOString()
+  }
+
   const { error } = await db
     .from('project_members')
-    .upsert({ project_id: projectId, user_id: profile.id, role }, { onConflict: 'project_id,user_id' })
+    .upsert(row, { onConflict: 'project_id,user_id' })
   if (error) throw error
+
+  return { invited: invites }
+}
+
+export interface InvitationItem {
+  project_id: string
+  project_name: string
+  project_scope: string | null
+  role: 'project_manager' | 'member'
+  invited_by_name: string | null
+  invited_at: string
+}
+
+// Undangan yang belum dijawab oleh pengguna yang sedang login.
+export async function listMyInvitations(): Promise<InvitationItem[]> {
+  if (!(await hasInvitationSupport())) return []
+
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return []
+
+  const { data, error } = await db
+    .from('project_members')
+    .select('project_id, role, invited_at, projects(name, scope), inviter:profiles!project_members_invited_by_fkey(name)')
+    .eq('user_id', user.id)
+    .eq('status', 'invited')
+    .order('invited_at', { ascending: false })
+  if (error) throw error
+
+  return ((data ?? []) as any[]).map((row) => ({
+    project_id: row.project_id,
+    project_name: row.projects?.name ?? 'Project',
+    project_scope: row.projects?.scope ?? null,
+    role: row.role === 'project_manager' ? 'project_manager' : 'member',
+    invited_by_name: row.inviter?.name ?? null,
+    invited_at: row.invited_at ?? new Date().toISOString(),
+  }))
+}
+
+// Menerima atau menolak undangan. Menolak = menghapus baris keanggotaan.
+export async function respondToInvitation(projectId: string, accept: boolean): Promise<void> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) throw new Error('Harus login.')
+
+  if (accept) {
+    const { error } = await db
+      .from('project_members')
+      .update({ status: 'active' })
+      .eq('project_id', projectId)
+      .eq('user_id', user.id)
+    if (error) throw error
+    return
+  }
+
+  const { error } = await db
+    .from('project_members')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('user_id', user.id)
+  if (error) throw error
+}
+
+// Apakah pengguna ini Project Manager pada minimal satu project?
+// Dipakai Home untuk memilih tampilan: My Member (PM) atau Tugas Saya (Member).
+export async function hasManagerRole(): Promise<boolean> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return false
+
+  const { data: owned } = await db
+    .from('projects')
+    .select('id')
+    .eq('owner_id', user.id)
+    .limit(1)
+  if ((owned ?? []).length > 0) return true
+
+  const { data: managed } = await db
+    .from('project_members')
+    .select('project_id')
+    .eq('user_id', user.id)
+    .eq('role', 'project_manager')
+    .limit(1)
+  return (managed ?? []).length > 0
+}
+
+// ======================== TUGAS SAYA (POV MEMBER) ========================
+
+export interface MyTaskItem {
+  id: string
+  title: string
+  due_date: string | null
+  priority: Priority
+  checked: boolean
+  status_label: string | null
+  status_color: string | null
+  group_title: string | null
+  project_id: string
+  project_name: string
+  project_scope: string | null
+  subtask_total: number
+  subtask_done: number
+  /** Selisih hari terhadap hari ini (negatif = sudah lewat). */
+  days_left: number | null
+}
+
+// Tugas yang ditugaskan kepada pengguna yang sedang login, diurutkan dari
+// tenggat terdekat. Dipakai kartu "Tugas Saya" di Home versi Member.
+export async function listMyTasks(limit = 12): Promise<MyTaskItem[]> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return []
+
+  const { data, error } = await db
+    .from('tasks')
+    .select(
+      'id, title, due_date, priority, checked, projects(id, name, scope), statuses(label, color_code), task_groups(title)',
+    )
+    .eq('assignee_id', user.id)
+    .eq('checked', false)
+    .order('due_date', { ascending: true, nullsFirst: false })
+    .limit(limit)
+  if (error) throw error
+
+  const rows = (data ?? []) as any[]
+  const taskIds = rows.map((r) => r.id)
+
+  // Hitung progres subtask untuk tiap tugas.
+  const progress = new Map<string, { total: number; done: number }>()
+  if (taskIds.length) {
+    const { data: subs } = await db
+      .from('subtasks')
+      .select('task_id, done')
+      .in('task_id', taskIds)
+    for (const s of (subs ?? []) as { task_id: string; done: boolean }[]) {
+      const entry = progress.get(s.task_id) ?? { total: 0, done: 0 }
+      entry.total += 1
+      if (s.done) entry.done += 1
+      progress.set(s.task_id, entry)
+    }
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  return rows.map((row) => {
+    const due = row.due_date ? new Date(row.due_date) : null
+    const daysLeft = due
+      ? Math.round((due.getTime() - today.getTime()) / 86400000)
+      : null
+    const stat = progress.get(row.id) ?? { total: 0, done: 0 }
+    return {
+      id: row.id,
+      title: row.title,
+      due_date: row.due_date ?? null,
+      priority: row.priority ?? 'medium',
+      checked: row.checked ?? false,
+      status_label: row.statuses?.label ?? null,
+      status_color: row.statuses?.color_code ?? null,
+      group_title: row.task_groups?.title ?? null,
+      project_id: row.projects?.id ?? '',
+      project_name: row.projects?.name ?? '',
+      project_scope: row.projects?.scope ?? null,
+      subtask_total: stat.total,
+      subtask_done: stat.done,
+      days_left: daysLeft,
+    }
+  })
 }
 
 // Tetapkan peran anggota pada project (UC-03: mengelola pengguna dan hak akses).
@@ -653,12 +898,19 @@ export interface ProjectMemberRow {
   email: string
   role: 'project_manager' | 'member'
   avatar_url: string | null
+  /** 'invited' bila undangan belum diterima (butuh migrasi undangan). */
+  status: 'active' | 'invited'
 }
 
 export async function listProjectMembers(projectId: string): Promise<ProjectMemberRow[]> {
+  const invites = await hasInvitationSupport()
+  const columns = invites
+    ? 'role, status, profiles(id, name, email, avatar_url)'
+    : 'role, profiles(id, name, email, avatar_url)'
+
   const { data, error } = await supabase()
     .from('project_members')
-    .select('role, profiles(id, name, email, avatar_url)')
+    .select(columns)
     .eq('project_id', projectId)
   if (error) throw error
 
@@ -671,9 +923,14 @@ export async function listProjectMembers(projectId: string): Promise<ProjectMemb
         email: row.profiles.email ?? '',
         role: row.role === 'project_manager' ? 'project_manager' : 'member',
         avatar_url: row.profiles.avatar_url ?? null,
+        status: row.status === 'invited' ? 'invited' : 'active',
       }),
     )
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      // Anggota aktif lebih dulu, undangan menyusul.
+      if (a.status !== b.status) return a.status === 'active' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
 }
 
 export async function removeMember(projectId: string, userId: string): Promise<void> {

@@ -71,9 +71,13 @@ export function ProjectMembersPage({
     setBusy(true)
     setInviteError('')
     try {
-      await addMemberByEmail(projectId, email, inviteRole)
+      const result = await addMemberByEmail(projectId, email, inviteRole)
       await refresh()
-      setNotice(`${email} ditambahkan sebagai ${roleLabel(inviteRole)}.`)
+      setNotice(
+        result.invited
+          ? `Undangan terkirim ke ${email} sebagai ${roleLabel(inviteRole)}. Menunggu persetujuan.`
+          : `${email} ditambahkan sebagai ${roleLabel(inviteRole)}.`,
+      )
       setInviteEmail('')
       setInviteRole('member')
       setShowInvite(false)
@@ -213,6 +217,12 @@ export function ProjectMembersPage({
                       {m.email || '—'}
                     </p>
                   </div>
+
+                  {m.status === 'invited' && (
+                    <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                      Menunggu
+                    </span>
+                  )}
 
                   {can.manageRoles ? (
                     <div className="flex items-center gap-2 shrink-0">

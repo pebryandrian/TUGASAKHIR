@@ -2,18 +2,21 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
-import { AtSign, Bookmark, ChevronDown, ChevronRight, Loader2, Reply, ThumbsUp, X } from 'lucide-react'
+import { AtSign, Bookmark, ChevronDown, ChevronRight, Loader2, Reply, ThumbsUp, UserPlus, X } from 'lucide-react'
 import {
   addComment,
   getSessionProfile,
   likeComment,
+  listMyInvitations,
   listNotifications,
+  respondToInvitation,
+  type InvitationItem,
   type NotificationItem,
 } from '@/lib/db'
 
 const STORE_KEY = 'invisual.notifications'
 
-type Tab = 'all' | 'mention' | 'bookmarked'
+type Tab = 'all' | 'invitation' | 'mention' | 'bookmarked'
 
 // Baca/tulis preferensi lokal (bookmark + waktu terakhir panel dibuka).
 function readStore(): { bookmarks: string[]; seenAt: string } {
@@ -55,6 +58,8 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
   const [board, setBoard] = useState<string | null>(null)
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
+  const [invitations, setInvitations] = useState<InvitationItem[]>([])
+  const [responding, setResponding] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
   const [myName, setMyName] = useState('')
@@ -71,14 +76,38 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
     setSeenAt(store.seenAt)
     setNotice('')
     setLoading(true)
-    Promise.all([listNotifications(), getSessionProfile().catch(() => null)])
-      .then(([rows, profile]) => {
+    Promise.all([
+      listNotifications(),
+      getSessionProfile().catch(() => null),
+      listMyInvitations().catch(() => [] as InvitationItem[]),
+    ])
+      .then(([rows, profile, invites]) => {
         setItems(rows)
         setMyName(profile?.name ?? '')
+        setInvitations(invites)
       })
       .catch((e) => setNotice(e?.message || 'Gagal memuat notifikasi.'))
       .finally(() => setLoading(false))
   }, [open])
+
+  // Terima / tolak undangan dari Project Manager.
+  const onRespondInvitation = async (projectId: string, accept: boolean) => {
+    setResponding(projectId)
+    setNotice('')
+    try {
+      await respondToInvitation(projectId, accept)
+      setInvitations((prev) => prev.filter((i) => i.project_id !== projectId))
+      setNotice(
+        accept
+          ? 'Undangan diterima. Project sekarang muncul di halaman Home.'
+          : 'Undangan ditolak.',
+      )
+    } catch (e: any) {
+      setNotice(e?.message || 'Gagal memproses undangan.')
+    } finally {
+      setResponding(null)
+    }
+  }
 
   // Tandai sudah dibaca saat panel ditutup, bukan saat dibuka.
   useEffect(() => {
@@ -167,6 +196,19 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
             <button type="button" className={tabClass('all')} onClick={() => setTab('all')}>
               All Notification
             </button>
+            <button
+              type="button"
+              className={tabClass('invitation')}
+              onClick={() => setTab('invitation')}
+            >
+              <UserPlus size={15} strokeWidth={1.8} />
+              Undangan
+              {invitations.length > 0 && (
+                <span className="ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none">
+                  {invitations.length}
+                </span>
+              )}
+            </button>
             <button type="button" className={tabClass('mention')} onClick={() => setTab('mention')}>
               <AtSign size={15} strokeWidth={1.8} />
               I got a mention
@@ -208,6 +250,72 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
           </aside>
 
           <main className="flex-1 overflow-y-auto p-8">
+            {notice && <p className="mb-4 text-xs text-red-400">{notice}</p>}
+
+            {tab === 'invitation' ? (
+              loading ? (
+                <p className="flex items-center gap-2 text-sm text-neutral-400">
+                  <Loader2 size={16} className="animate-spin" /> Memuat…
+                </p>
+              ) : invitations.length === 0 ? (
+                <p className="text-sm text-neutral-500">Tidak ada undangan yang menunggu.</p>
+              ) : (
+                <div className="space-y-4 max-w-4xl">
+                  {invitations.map((inv) => (
+                    <article
+                      key={inv.project_id}
+                      className="bg-[#1a1b1f] border border-blue-500/30 rounded-2xl p-5"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-400 flex items-center justify-center shrink-0">
+                          <UserPlus size={17} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-neutral-200">
+                            <span className="font-semibold text-white">
+                              {inv.invited_by_name ?? 'Project Manager'}
+                            </span>{' '}
+                            mengundang Anda ke project{' '}
+                            <span className="font-semibold text-white">
+                              {inv.project_scope ? `${inv.project_scope} / ` : ''}
+                              {inv.project_name}
+                            </span>{' '}
+                            sebagai{' '}
+                            <span className="font-semibold text-blue-300">
+                              {inv.role === 'project_manager' ? 'Project Manager' : 'Member'}
+                            </span>
+                            .
+                          </p>
+                          <p className="text-[11px] text-neutral-500 mt-1">
+                            {relativeTime(inv.invited_at)} lalu
+                          </p>
+
+                          <div className="flex items-center gap-2 mt-4">
+                            <button
+                              type="button"
+                              onClick={() => onRespondInvitation(inv.project_id, true)}
+                              disabled={responding === inv.project_id}
+                              className="h-8 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-xs font-semibold text-white transition cursor-pointer"
+                            >
+                              {responding === inv.project_id ? 'Memproses…' : 'Terima'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onRespondInvitation(inv.project_id, false)}
+                              disabled={responding === inv.project_id}
+                              className="h-8 px-4 rounded-lg bg-neutral-800 hover:bg-neutral-700 disabled:opacity-60 text-xs font-semibold text-neutral-300 transition cursor-pointer"
+                            >
+                              Tolak
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )
+            ) : (
+            <>
             <button
               type="button"
               onClick={() => setUnreadOnly((v) => !v)}
@@ -216,8 +324,6 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
               {unreadOnly ? 'Show All notification' : 'Show Unread notification'}
               <ChevronDown size={16} className={`transition-transform ${unreadOnly ? 'rotate-180' : ''}`} />
             </button>
-
-            {notice && <p className="mb-4 text-xs text-red-400">{notice}</p>}
 
             {loading ? (
               <p className="flex items-center gap-2 text-sm text-neutral-400">
@@ -310,6 +416,8 @@ export function NotificationPanel({ open, onClose }: { open: boolean; onClose: (
                   )
                 })}
               </div>
+            )}
+            </>
             )}
           </main>
         </div>
