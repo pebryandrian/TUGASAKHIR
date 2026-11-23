@@ -1336,6 +1336,26 @@ export default function ProjectDetailPage() {
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   // Pengelolaan workspace (buat baru) hanya untuk Project Manager.
   const [canManageWorkspace, setCanManageWorkspace] = useState(false)
+  // Dropdown workspace di sidebar dirender lewat portal agar tidak terpotong
+  // oleh `overflow-y-auto` milik sidebar (sidebar punya scroll sendiri).
+  const workspaceTriggerRef = useRef<HTMLButtonElement>(null)
+  const [workspaceAnchor, setWorkspaceAnchor] = useState<{ top: number; left: number } | null>(null)
+
+  // Dropdown berposisi fixed; tutup saat sidebar/halaman di-scroll agar tidak
+  // melayang di posisi yang salah.
+  useEffect(() => {
+    if (!showWorkspaceMenu) return
+    const close = () => {
+      setShowWorkspaceMenu(false)
+      setWorkspaceAnchor(null)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [showWorkspaceMenu])
   const [members, setMembers] = useState<Member[]>([])
   const [customViews, setCustomViews] = useState<CustomView[]>([])
   const [showAddViewMenu, setShowAddViewMenu] = useState(false)
@@ -3168,9 +3188,9 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#111214] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden w-full bg-[#111214] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header Bar */}
-      <header className="w-full h-16 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
+      <header className="w-full h-16 shrink-0 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <Link href="/home" className="inline-flex items-center gap-2.5">
             <Image
@@ -3286,10 +3306,12 @@ export default function ProjectDetailPage() {
         </div>
       </header>
 
-      {/* Main Layout: Left Sidebar + Content */}
-      <div className="flex-1 flex flex-col lg:flex-row">
+      {/* Main Layout: Left Sidebar + Content.
+          Di layar besar tinggi dikunci (h-screen) dan hanya <main> yang
+          menggulir, sehingga sidebar kiri tetap di tempat — sama seperti Home. */}
+      <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
         {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:min-h-[calc(100vh-4rem)] flex flex-col justify-between shrink-0">
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:h-full lg:overflow-y-auto lg:overflow-x-hidden flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
@@ -3346,8 +3368,25 @@ export default function ProjectDetailPage() {
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <button
+                    ref={workspaceTriggerRef}
                     type="button"
-                    onClick={() => setShowWorkspaceMenu((v) => !v)}
+                    onClick={() => {
+                      if (showWorkspaceMenu) {
+                        setShowWorkspaceMenu(false)
+                        setWorkspaceAnchor(null)
+                        return
+                      }
+                      const rect = workspaceTriggerRef.current?.getBoundingClientRect()
+                      if (rect) {
+                        const width = Math.min(286, window.innerWidth - 16)
+                        setWorkspaceAnchor({
+                          top: Math.min(rect.bottom + 6, window.innerHeight - 16),
+                          left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+                        })
+                      }
+                      setShowWorkspaceMenu(true)
+                    }}
+                    aria-expanded={showWorkspaceMenu}
                     className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
                   >
                     <div className="flex items-center gap-2.5 overflow-hidden">
@@ -3369,94 +3408,116 @@ export default function ProjectDetailPage() {
                     <ChevronDown size={15} className="text-neutral-400 shrink-0" />
                   </button>
 
-                  {showWorkspaceMenu && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setShowWorkspaceMenu(false)} />
-                      <div className="absolute left-0 top-full mt-1.5 z-30 w-[286px] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100">
-                        {/* Search */}
-                        <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
-                          <Search size={15} className="text-neutral-400 shrink-0" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={workspaceSearch}
-                            onChange={(e) => setWorkspaceSearch(e.target.value)}
-                            placeholder="Search for a workspace"
-                            className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
-                          />
-                        </div>
+                  {showWorkspaceMenu &&
+                    workspaceAnchor &&
+                    createPortal(
+                      <>
+                        <div
+                          className="fixed inset-0 z-[130]"
+                          onClick={() => {
+                            setShowWorkspaceMenu(false)
+                            setWorkspaceAnchor(null)
+                          }}
+                        />
+                        <div
+                          className="fixed z-[131] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100"
+                          style={{
+                            top: workspaceAnchor.top,
+                            left: workspaceAnchor.left,
+                            width: Math.min(286, typeof window === 'undefined' ? 286 : window.innerWidth - 16),
+                          }}
+                        >
+                          {/* Search */}
+                          <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
+                            <Search size={15} className="text-neutral-400 shrink-0" />
+                            <input
+                              type="text"
+                              autoFocus
+                              value={workspaceSearch}
+                              onChange={(e) => setWorkspaceSearch(e.target.value)}
+                              placeholder="Search for a workspace"
+                              className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
+                            />
+                          </div>
 
-                        {/* Recent workspace */}
-                        <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
-                          Recent workspace
-                        </p>
-                        <div className="space-y-0.5 max-h-56 overflow-y-auto">
-                          {workspaces
-                            .filter((ws) =>
+                          {/* Recent workspace */}
+                          <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
+                            Recent workspace
+                          </p>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            {workspaces
+                              .filter((ws) =>
+                                ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
+                              )
+                              .map((ws) => (
+                                <button
+                                  key={ws.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedWorkspace(ws.name)
+                                    setShowWorkspaceMenu(false)
+                                    setWorkspaceAnchor(null)
+                                    setWorkspaceSearch('')
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
+                                    ws.name === selectedWorkspace
+                                      ? 'bg-blue-600 text-white font-semibold'
+                                      : 'text-neutral-200 hover:bg-neutral-800'
+                                  }`}
+                                >
+                                  {ws.name}
+                                </button>
+                              ))}
+                            {workspaces.filter((ws) =>
                               ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
-                            )
-                            .map((ws) => (
+                            ).length === 0 && (
+                              <p className="px-3 py-2 text-xs text-neutral-500">
+                                Workspace tidak ditemukan.
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Footer */}
+                          <div className="flex items-center justify-between gap-1 mt-1.5 pt-2 border-t border-neutral-800">
+                            {canManageWorkspace ? (
                               <button
-                                key={ws.id}
                                 type="button"
                                 onClick={() => {
-                                  setSelectedWorkspace(ws.name)
                                   setShowWorkspaceMenu(false)
-                                  setWorkspaceSearch('')
+                                  setWorkspaceAnchor(null)
+                                  setNewWorkspaceName('')
+                                  setShowAddWorkspaceModal(true)
                                 }}
-                                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
-                                  ws.name === selectedWorkspace
-                                    ? 'bg-blue-600 text-white font-semibold'
-                                    : 'text-neutral-200 hover:bg-neutral-800'
-                                }`}
+                                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
                               >
-                                {ws.name}
+                                <Plus size={14} className="shrink-0" />
+                                <span>Add Workspace</span>
                               </button>
-                            ))}
-                          {workspaces.filter((ws) =>
-                            ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
-                          ).length === 0 && (
-                            <p className="px-3 py-2 text-xs text-neutral-500">
-                              Workspace tidak ditemukan.
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
-                          {canManageWorkspace ? (
+                            ) : (
+                              <span
+                                className="px-2 py-1.5 text-[11px] text-neutral-600 whitespace-nowrap"
+                                title="Hanya Project Manager yang dapat membuat atau mengubah workspace"
+                              >
+                                Hanya PM
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
                                 setShowWorkspaceMenu(false)
-                                setNewWorkspaceName('')
-                                setShowAddWorkspaceModal(true)
+                                setWorkspaceAnchor(null)
+                                router.push('/home')
                               }}
-                              className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                              className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
                             >
-                              <Plus size={14} />
-                              <span>Add Workspace</span>
+                              <LayoutGrid size={13} className="shrink-0" />
+                              <span>Browse All</span>
                             </button>
-                          ) : (
-                            <span className="px-2 py-1.5 text-[11px] text-neutral-600">
-                              Hanya Project Manager
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowWorkspaceMenu(false)
-                              router.push('/home')
-                            }}
-                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <LayoutGrid size={13} />
-                            <span>Browse All</span>
-                          </button>
+                          </div>
                         </div>
-                      </div>
-                    </>
-                  )}
+                      </>,
+                      document.body,
+                    )}
                 </div>
                 {canManageWorkspace && (
                   <button
@@ -3478,7 +3539,7 @@ export default function ProjectDetailPage() {
         </aside>
 
         {/* Main Content Pane */}
-        <main className="flex-1 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11] relative">
+        <main className="flex-1 lg:min-h-0 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11] relative">
           {/* Outer Rounded Board Card */}
           <div className="w-full bg-[#141517] border border-neutral-800/80 rounded-2xl p-6 lg:p-8 min-h-[calc(100vh-7rem)] flex flex-col shadow-2xl">
             {/* Breadcrumb Header */}

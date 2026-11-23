@@ -153,6 +153,21 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Halaman board (Main Table): sidebar tidak ikut ter-scroll.
+  (a) **Perubahan layout**: sama seperti Home — akar halaman memakai
+  `min-h-screen lg:h-screen lg:overflow-hidden`, baris konten `lg:min-h-0`, sidebar
+  `lg:h-full lg:overflow-y-auto lg:overflow-x-hidden`, dan `<main>` `lg:min-h-0`. Dengan
+  demikian hanya area konten (Main Table, Kanban, Gantt, Chart, Doc) yang menggulir,
+  sementara sidebar kiri dan header atas tetap di tempat. Di layar kecil (HP) tata letak
+  bertumpuk seperti sebelumnya.
+  (b) **Dropdown workspace di sidebar board**: karena sidebar kini punya scroll sendiri,
+  dropdown yang tadinya `position: absolute` di dalamnya akan terpotong. Dropdown dipindah
+  ke `createPortal` ke `<body>` dengan posisi `fixed` yang dihitung dari tombol pemicu
+  (selalu di dalam layar), ditutup otomatis saat di-scroll/resize, dan footer-nya dirapikan
+  (label "Hanya PM" + tooltip) agar tidak terpotong.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/project/client/aqua` (PM dan
+  Member) serta halaman Anggota Proyek balas 200.
+
 - **2026-11-24** – Dropdown workspace terpotong di sidebar.
   (a) **Penyebab**: agar sidebar tidak ikut ter-scroll, sidebar diberi `overflow-y-auto`. Dropdown
   dan menu `⋯` pada `WorkspaceSelector` masih memakai `position: absolute` di dalam sidebar,
