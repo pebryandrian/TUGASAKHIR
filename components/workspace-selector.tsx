@@ -20,10 +20,16 @@ export function WorkspaceSelector({
   initial = '',
   value,
   onChange,
+  canManage = true,
 }: {
   initial?: string
   value?: string
   onChange?: (workspace: Workspace | null) => void
+  /**
+   * `false` = hanya boleh memilih workspace. Tombol Add / Rename / Delete
+   * disembunyikan (dipakai untuk Member; pengelolaan workspace hanya PM).
+   */
+  canManage?: boolean
 }) {
   const controlled = value !== undefined
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -77,6 +83,7 @@ export function WorkspaceSelector({
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canManage) return
     const trimmed = name.trim()
     if (!trimmed || creating) return
     setCreating(true)
@@ -98,6 +105,7 @@ export function WorkspaceSelector({
   const selectedWs = workspaces.find((w) => w.name === selected)
 
   const handleRename = async () => {
+    if (!canManage) return
     const trimmed = editName.trim()
     if (!selectedWs || !trimmed) return
     try {
@@ -112,6 +120,7 @@ export function WorkspaceSelector({
   }
 
   const handleDelete = async () => {
+    if (!canManage) return
     if (!selectedWs) return
     try {
       await deleteWorkspace(selectedWs.id)
@@ -195,18 +204,24 @@ export function WorkspaceSelector({
                 </div>
 
                 <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpen(false)
-                      setName('')
-                      setShowModal(true)
-                    }}
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>Add Workspace</span>
-                  </button>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false)
+                        setName('')
+                        setShowModal(true)
+                      }}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                    >
+                      <Plus size={14} />
+                      <span>Add Workspace</span>
+                    </button>
+                  ) : (
+                    <span className="px-2 py-1.5 text-[11px] text-neutral-600">
+                      Hanya Project Manager
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
@@ -223,18 +238,19 @@ export function WorkspaceSelector({
 
         <button
           type="button"
-          disabled={!selectedWs}
+          disabled={!selectedWs || !canManage}
           onClick={() => {
             setError('')
             setMenuOpen((v) => !v)
           }}
           className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer shrink-0"
-          aria-label="Opsi workspace"
+          aria-label={canManage ? 'Opsi workspace' : 'Hanya Project Manager yang dapat mengubah workspace'}
+          title={canManage ? 'Opsi workspace' : 'Hanya Project Manager yang dapat mengubah workspace'}
         >
           <MoreHorizontal size={16} />
         </button>
 
-        {menuOpen && (
+        {menuOpen && canManage && (
           <>
             <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
             <div className="absolute right-0 top-full mt-1.5 z-30 w-44 bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 animate-in fade-in zoom-in-95 duration-100">
@@ -268,7 +284,7 @@ export function WorkspaceSelector({
         )}
       </div>
 
-      {showModal && (
+      {showModal && canManage && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -323,7 +339,7 @@ export function WorkspaceSelector({
         </div>
       )}
 
-      {dialog && (
+      {dialog && canManage && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"

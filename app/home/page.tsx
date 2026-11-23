@@ -36,6 +36,7 @@ import {
 } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
 import {
+  canCreateProject,
   createProject,
   deleteProject,
   getSessionProfile,
@@ -287,6 +288,8 @@ export default function DashboardPage() {
   const [teamError, setTeamError] = useState('')
   // Peran efektif anggota pada project yang dikelola PM ini.
   const [teamRoles, setTeamRoles] = useState<Record<string, TeamRoleInfo>>({})
+  // Boleh membuat/mengelola workspace & project? Hanya Project Manager.
+  const [canCreate, setCanCreate] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
@@ -346,7 +349,7 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles, chips] =
+      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles, chips, creator] =
         await Promise.all([
           listProjects(activeWorkspace?.id),
           listProfiles().catch(() => [] as Profile[]),
@@ -358,6 +361,7 @@ export default function DashboardPage() {
           listProjectRoles().catch(() => ({}) as ProjectRoleMap),
           listTeamRoles(activeWorkspace?.id).catch(() => ({}) as Record<string, TeamRoleInfo>),
           listProjectMemberChips().catch(() => ({}) as Record<string, ProjectMemberChip[]>),
+          canCreateProject().catch(() => false),
         ])
       setProjects(rows)
       setProfiles(people)
@@ -369,6 +373,7 @@ export default function DashboardPage() {
       setProjectRoles(roles)
       setTeamRoles(teamRoles)
       setProjectMembers(chips)
+      setCanCreate(creator)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -488,6 +493,10 @@ export default function DashboardPage() {
   // dan isi tab Doc. Project yang sudah ada dilewati.
   const handleSeedDemo = async () => {
     if (seedingDemo) return
+    if (!canCreate) {
+      setError('Hanya Project Manager yang dapat membuat project baru.')
+      return
+    }
     setSeedingDemo(true)
     setDemoNotice('')
     setError('')
@@ -510,6 +519,10 @@ export default function DashboardPage() {
     e.preventDefault()
     const title = newScopeName.trim()
     if (!title || creating) return
+    if (!canCreate) {
+      setCreateError('Hanya Project Manager yang dapat membuat scope baru.')
+      return
+    }
     if (scopes.some((s) => s.title.toLowerCase() === title.toLowerCase())) {
       setCreateError('Scope dengan nama itu sudah ada.')
       return
@@ -529,6 +542,10 @@ export default function DashboardPage() {
   }
 
   const openNewCardModal = () => {
+    if (!canCreate) {
+      setError('Hanya Project Manager yang dapat membuat project baru.')
+      return
+    }
     setNewCardName('')
     setNewCardDesc('')
     setNewCardWithTemplate(true)
@@ -543,6 +560,10 @@ export default function DashboardPage() {
     if (!name) return
     if (cardsFrom(selectedScope.title).some((c) => c.name.toLowerCase() === name.toLowerCase())) {
       setCreateError('Card dengan nama itu sudah ada di scope ini.')
+      return
+    }
+    if (!canCreate) {
+      setCreateError('Hanya Project Manager yang dapat membuat card baru.')
       return
     }
     setCreating(true)
@@ -914,6 +935,7 @@ export default function DashboardPage() {
                   setActiveWorkspace(ws)
                   setSelectedScope(null)
                 }}
+                canManage={canCreate}
               />
             </div>
 
@@ -972,31 +994,36 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-5 gap-3">
               <h2 className="text-xl font-bold text-white tracking-tight">Scope Of Work</h2>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSeedDemo}
-                  disabled={seedingDemo}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  {seedingDemo ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <Sparkles size={15} />
-                  )}
-                  <span>{seedingDemo ? 'Memuat…' : 'Muat contoh'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewScopeName('')
-                    setCreateError('')
-                    setShowNewScopeModal(true)
-                  }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
-                >
-                  <Plus size={16} strokeWidth={2.5} />
-                  <span>New Scope</span>
-                </button>
+                {/* Membuat workspace/project/scope hanya untuk Project Manager. */}
+                {canCreate && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSeedDemo}
+                      disabled={seedingDemo}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {seedingDemo ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={15} />
+                      )}
+                      <span>{seedingDemo ? 'Memuat…' : 'Muat contoh'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewScopeName('')
+                        setCreateError('')
+                        setShowNewScopeModal(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
+                    >
+                      <Plus size={16} strokeWidth={2.5} />
+                      <span>New Scope</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1014,36 +1041,39 @@ export default function DashboardPage() {
             ) : scopes.length === 0 ? (
               <div className="rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
                 <p className="text-sm text-neutral-400">
-                  Belum ada scope. Buat scope pertama, atau muat contoh project lengkap untuk
-                  melihat tampilan board yang sudah terisi.
+                  {canCreate
+                    ? 'Belum ada scope. Buat scope pertama, atau muat contoh project lengkap untuk melihat tampilan board yang sudah terisi.'
+                    : 'Belum ada project yang dibagikan kepada Anda. Project akan muncul di sini setelah Project Manager menambahkan Anda sebagai anggota.'}
                 </p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewScopeName('')
-                      setCreateError('')
-                      setShowNewScopeModal(true)
-                    }}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
-                  >
-                    <Plus size={16} strokeWidth={2.5} />
-                    <span>New Scope</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSeedDemo}
-                    disabled={seedingDemo}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    {seedingDemo ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : (
-                      <Sparkles size={15} />
-                    )}
-                    <span>{seedingDemo ? 'Memuat…' : 'Muat contoh project'}</span>
-                  </button>
-                </div>
+                {canCreate && (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewScopeName('')
+                        setCreateError('')
+                        setShowNewScopeModal(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
+                    >
+                      <Plus size={16} strokeWidth={2.5} />
+                      <span>New Scope</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSeedDemo}
+                      disabled={seedingDemo}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {seedingDemo ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={15} />
+                      )}
+                      <span>{seedingDemo ? 'Memuat…' : 'Muat contoh project'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1329,7 +1359,7 @@ export default function DashboardPage() {
       </div>
 
       {/* =================== CREATE NEW SCOPE MODAL =================== */}
-      {showNewScopeModal && (
+      {showNewScopeModal && canCreate && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -1376,7 +1406,7 @@ export default function DashboardPage() {
       )}
 
       {/* =================== CREATE NEW CARD MODAL =================== */}
-      {showNewCardModal && selectedScope && (
+      {showNewCardModal && selectedScope && canCreate && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -1496,14 +1526,16 @@ export default function DashboardPage() {
                   className="w-full h-9 pl-9 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
                 />
               </div>
-              <button
-                type="button"
-                onClick={openNewCardModal}
-                className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
-              >
-                <Plus size={15} strokeWidth={2.5} />
-                <span>New Card</span>
-              </button>
+              {canCreate && (
+                <button
+                  type="button"
+                  onClick={openNewCardModal}
+                  className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
+                >
+                  <Plus size={15} strokeWidth={2.5} />
+                  <span>New Card</span>
+                </button>
+              )}
             </div>
 
             {/* Modal Cards Grid */}
@@ -1515,7 +1547,7 @@ export default function DashboardPage() {
                       ? 'Belum ada card di scope ini.'
                       : `No cards found matching "${modalSearch}"`}
                   </span>
-                  {modalCards.length === 0 && (
+                  {modalCards.length === 0 && canCreate && (
                     <button
                       type="button"
                       onClick={openNewCardModal}

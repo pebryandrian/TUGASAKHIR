@@ -24,7 +24,7 @@ import {
   Lock,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
-import { getSessionProfile, updateProfile, changePassword, uploadAvatar } from '@/lib/db'
+import { getSessionProfile, updateProfile, changePassword, uploadAvatar, canCreateProject } from '@/lib/db'
 import { signOut } from '@/lib/auth'
 
 type Role = 'Team Member' | 'Project Manager' | 'Admin' | 'Owner'
@@ -53,6 +53,8 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  // Pengelolaan workspace (buat/ubah/hapus) hanya untuk Project Manager.
+  const [canManageWorkspace, setCanManageWorkspace] = useState(false)
 
   const [profile, setProfile] = useState<ProfileData>(emptyProfile)
   const [form, setForm] = useState<ProfileData>(emptyProfile)
@@ -108,6 +110,10 @@ export default function ProfilePage() {
         setLoadError(err instanceof Error ? err.message : 'Gagal memuat profil.'),
       )
       .finally(() => setLoading(false))
+
+    canCreateProject()
+      .then(setCanManageWorkspace)
+      .catch(() => setCanManageWorkspace(false))
   }, [])
 
   const handleFieldChange = (field: 'firstName' | 'lastName', value: string) => {
@@ -382,7 +388,7 @@ export default function ProfilePage() {
                   </button>
                 </div>
               </div>
-              <WorkspaceSelector />
+              <WorkspaceSelector canManage={canManageWorkspace} />
             </div>
           </div>
 

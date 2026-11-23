@@ -6,6 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
+  canCreateProject,
   findProject,
   loadBoard,
   listWorkspaces,
@@ -1333,6 +1334,8 @@ export default function ProjectDetailPage() {
   const [workspaceSearch, setWorkspaceSearch] = useState('')
   const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false)
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  // Pengelolaan workspace (buat baru) hanya untuk Project Manager.
+  const [canManageWorkspace, setCanManageWorkspace] = useState(false)
   const [members, setMembers] = useState<Member[]>([])
   const [customViews, setCustomViews] = useState<CustomView[]>([])
   const [showAddViewMenu, setShowAddViewMenu] = useState(false)
@@ -1400,6 +1403,11 @@ export default function ProjectDetailPage() {
       getSessionProfile()
         .then((p) => {
           if (alive && p) setMe({ name: p.name, avatar: p.avatar_url ?? '' })
+        })
+        .catch(() => {})
+      canCreateProject()
+        .then((allowed) => {
+          if (alive) setCanManageWorkspace(allowed)
         })
         .catch(() => {})
 
@@ -3416,18 +3424,24 @@ export default function ProjectDetailPage() {
 
                         {/* Footer */}
                         <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowWorkspaceMenu(false)
-                              setNewWorkspaceName('')
-                              setShowAddWorkspaceModal(true)
-                            }}
-                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <Plus size={14} />
-                            <span>Add Workspace</span>
-                          </button>
+                          {canManageWorkspace ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowWorkspaceMenu(false)
+                                setNewWorkspaceName('')
+                                setShowAddWorkspaceModal(true)
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                            >
+                              <Plus size={14} />
+                              <span>Add Workspace</span>
+                            </button>
+                          ) : (
+                            <span className="px-2 py-1.5 text-[11px] text-neutral-600">
+                              Hanya Project Manager
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
@@ -3444,17 +3458,20 @@ export default function ProjectDetailPage() {
                     </>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewWorkspaceName('')
-                    setShowAddWorkspaceModal(true)
-                  }}
-                  className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
-                  aria-label="Add workspace"
-                >
-                  <Plus size={18} strokeWidth={2.5} />
-                </button>
+                {canManageWorkspace && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewWorkspaceName('')
+                      setShowAddWorkspaceModal(true)
+                    }}
+                    className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
+                    aria-label="Add workspace"
+                    title="Tambah workspace (Project Manager)"
+                  >
+                    <Plus size={18} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -6515,7 +6532,7 @@ export default function ProjectDetailPage() {
       )}
 
       {/* ======================== ADD WORKSPACE MODAL ======================== */}
-      {showAddWorkspaceModal && (
+      {showAddWorkspaceModal && canManageWorkspace && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"

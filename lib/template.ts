@@ -204,6 +204,25 @@ export async function seedDemoProjects(options: { workspaceId?: string | null } 
   } = await db.auth.getUser()
   if (!user) throw new Error('Harus login dulu untuk memuat contoh project.')
 
+  // Hanya Project Manager (atau akun yang belum punya project) yang boleh
+  // membuat project. Pemeriksaan dilakukan di sini juga karena fungsi ini
+  // membuat beberapa project sekaligus. Tidak memakai import dari lib/db.ts
+  // agar tidak terjadi impor melingkar (db.ts memakai modul ini).
+  {
+    const { data: owned } = await db.from('projects').select('id').eq('owner_id', user.id).limit(1)
+    const { data: mine } = await db.from('project_members').select('role').eq('user_id', user.id)
+    const rows = (mine ?? []) as { role: string }[]
+    const allowed =
+      (owned ?? []).length > 0 ||
+      rows.some((r) => r.role === 'project_manager') ||
+      rows.length === 0
+    if (!allowed) {
+      throw new Error(
+        'Hanya Project Manager yang dapat menambah atau mengubah workspace dan membuat project baru.',
+      )
+    }
+  }
+
   let workspaceId = options.workspaceId ?? null
   if (!workspaceId) {
     const { data: workspaces } = await db

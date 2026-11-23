@@ -153,6 +153,27 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Workspace dan pembuatan project/scope hanya untuk Project Manager.
+  (a) **Masalah**: Member masih melihat dan memakai tombol *Add Workspace*, menu `⋯`
+  (rename/delete workspace), *New Scope*, *Muat contoh*, dan *New Card*.
+  (b) **Aturan** (`canCreateProject()` di `lib/db.ts`): boleh bila pengguna Project Manager pada
+  minimal satu project, **atau** belum tergabung di project mana pun (pendaftar baru, supaya tidak
+  terkunci di Home kosong). Member yang sudah tergabung di project tidak boleh.
+  (c) **UI**: `WorkspaceSelector` menerima prop `canManage` (Home & Profil) — tombol Add Workspace
+  dan menu `⋯` disembunyikan, diganti keterangan "Hanya Project Manager". Home menyembunyikan
+  *Muat contoh*, *New Scope*, dan *New Card* (termasuk pada keadaan kosong); board menyembunyikan
+  tombol `+` Add Workspace di header. Semua handler (`handleSeedDemo`, `handleCreateScope`,
+  `openNewCardModal`, `handleCreateCard`, serta create/rename/delete workspace) menolak lebih dulu
+  dengan pesan jelas.
+  (d) **Pengaman database**: migrasi baru
+  `supabase/migrations/20261126000000_workspace_scope_manager_only.sql` —
+  `invisual_can_manage_projects()` + policy tulis `workspaces` (insert/update/delete) dan
+  `projects` insert hanya untuk PM; policy tulis lama yang longgar dibuang.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase —
+  `canCreate` = true untuk PM, **false** untuk Member, true untuk akun baru; setelah migrasi
+  dijalankan, Member ditolak RLS saat membuat project/workspace. `/home`, `/profile`, dan board
+  balas 200 untuk kedua akun; PM dan Member tetap melihat **5 scope**.
+
 - **2026-11-24** – Ikon orang pada kartu project di Scope Of Work dikembalikan.
   (a) **Penyebab hilang**: permintaan sebelumnya ("hilangkan ikon orang pada Scope Of Work di
   Home") diterapkan pada **dua** tempat sekaligus — kartu *scope* dan kartu *project* di dalam modal

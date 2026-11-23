@@ -164,6 +164,43 @@ export async function changePassword(password: string) {
 
 // ======================== WORKSPACES ========================
 
+// Siapa yang boleh mengelola workspace dan membuat project/scope (F-03/F-15):
+//   * Project Manager pada minimal satu project, ATAU
+//   * akun yang belum tergabung di project mana pun (pendaftar baru), supaya
+//     pengguna pertama tidak terkunci di Home kosong dan tetap bisa membuat
+//     project pertamanya.
+// Member yang sudah tergabung di project TIDAK boleh menambah workspace,
+// mengubah/menghapus workspace, atau membuat scope/card baru.
+export async function canCreateProject(): Promise<boolean> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return false
+
+  const { data: owned } = await db
+    .from('projects')
+    .select('id')
+    .eq('owner_id', user.id)
+    .limit(1)
+  if ((owned ?? []).length > 0) return true
+
+  const { data: mine } = await db
+    .from('project_members')
+    .select('role')
+    .eq('user_id', user.id)
+  const rows = (mine ?? []) as { role: string }[]
+  if (rows.some((r) => r.role === 'project_manager')) return true
+  return rows.length === 0
+}
+
+const NO_PROJECT_MANAGER_MESSAGE =
+  'Hanya Project Manager yang dapat menambah atau mengubah workspace dan membuat project baru.'
+
+async function assertCanManageProjects(): Promise<void> {
+  if (!(await canCreateProject())) throw new Error(NO_PROJECT_MANAGER_MESSAGE)
+}
+
 export async function listWorkspaces(): Promise<Workspace[]> {
   const { data, error } = await supabase()
     .from('workspaces')
@@ -174,6 +211,7 @@ export async function listWorkspaces(): Promise<Workspace[]> {
 }
 
 export async function createWorkspace(name: string): Promise<Workspace> {
+  await assertCanManageProjects()
   const db = supabase()
   const { data: { user } } = await db.auth.getUser()
   const { data, error } = await db
@@ -186,6 +224,7 @@ export async function createWorkspace(name: string): Promise<Workspace> {
 }
 
 export async function renameWorkspace(id: string, name: string): Promise<void> {
+  await assertCanManageProjects()
   const { error } = await supabase().from('workspaces').update({ name }).eq('id', id)
   if (error) throw error
 }
@@ -193,6 +232,7 @@ export async function renameWorkspace(id: string, name: string): Promise<void> {
 // `projects.workspace_id` ON DELETE SET NULL: project TIDAK ikut terhapus, hanya
 // kehilangan workspace-nya. `workspace_members` CASCADE, jadi keanggotaan ikut hilang.
 export async function deleteWorkspace(id: string): Promise<void> {
+  await assertCanManageProjects()
   const { error } = await supabase().from('workspaces').delete().eq('id', id)
   if (error) throw error
 }
@@ -291,6 +331,7 @@ export async function createProject(
   },
   options: { template?: boolean } = {},
 ): Promise<Project> {
+  await assertCanManageProjects()
   const db = supabase()
   const { data: { user } } = await db.auth.getUser()
 
