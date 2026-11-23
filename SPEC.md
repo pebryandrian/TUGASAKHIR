@@ -153,6 +153,21 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Perbaikan login tidak bisa dipakai.
+  (a) **Penyebab**: login dipindah ke server action (`app/signin/actions.ts`) tetapi cookie sesi
+  Supabase (≈2.9 KB) tidak ikut terkirim ke browser, sehingga sesi tidak pernah terbentuk dan
+  `/home` selalu berbalik ke halaman login.
+  (b) **Perbaikan**: login ditangani route handler `POST /api/auth/signin`
+  (`app/api/auth/signin/route.ts`). Kredensial divalidasi di server, diverifikasi Supabase Auth
+  (dengan 3× percobaan ulang bila jaringan gagal sesaat), lalu cookie sesi ditulis **eksplisit**
+  ke `NextResponse` (`response.cookies.set`), bukan hanya ke `cookies().set`. Form login
+  memanggil endpoint ini. `app/signin/actions.ts` dihapus.
+  (c) `/signin` menampilkan form login (default `initialMode` = `login`), `/signup` form daftar.
+  (d) Home: `isManager` awalnya `null` (menampilkan "Memuat…") agar Member tidak sempat melihat
+  bagian "My Member" sebelum peran diketahui.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses (13 rute + `/api/auth/signin`), login
+  kedua akun demo mengembalikan 200 dengan 1 cookie sesi dan `/home` balas 200.
+
 - **2026-11-23** – Alur undangan anggota + Home versi Member.
   (a) **Undangan**: `project_members` mendapat `status` (`invited`/`active`), `invited_by`,
   `invited_at` lewat migrasi `20261123000000_project_invitations.sql`. PM mengundang lewat

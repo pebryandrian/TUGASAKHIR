@@ -486,6 +486,9 @@ const SUBTASK_META_COLUMNS = ['assignee_id', 'status_id', 'due_date', 'priority'
 export const MISSING_SUBTASK_COLUMNS_MESSAGE =
   'Kolom meta subtask belum ada di database. Jalankan migrasi supabase/migrations/20261113000000_subtask_meta.sql di Supabase → SQL Editor.'
 
+export const MISSING_INVITATION_POLICY_MESSAGE =
+  'Undangan belum dapat diproses karena kebijakan akses database belum diperbarui. Jalankan migrasi supabase/migrations/20261123000000_project_invitations.sql di Supabase → SQL Editor.'
+
 let subtaskColumnsPromise: Promise<Set<string>> | null = null
 
 export function getSubtaskColumns(): Promise<Set<string>> {
@@ -749,21 +752,29 @@ export async function respondToInvitation(projectId: string, accept: boolean): P
   if (!user) throw new Error('Harus login.')
 
   if (accept) {
-    const { error } = await db
+    const { data, error } = await db
       .from('project_members')
       .update({ status: 'active' })
       .eq('project_id', projectId)
       .eq('user_id', user.id)
+      .select('project_id')
     if (error) throw error
+    if (!data || data.length === 0) {
+      throw new Error(MISSING_INVITATION_POLICY_MESSAGE)
+    }
     return
   }
 
-  const { error } = await db
+  const { data, error } = await db
     .from('project_members')
     .delete()
     .eq('project_id', projectId)
     .eq('user_id', user.id)
+    .select('project_id')
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error(MISSING_INVITATION_POLICY_MESSAGE)
+  }
 }
 
 // Apakah pengguna ini Project Manager pada minimal satu project?

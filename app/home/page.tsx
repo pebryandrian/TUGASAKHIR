@@ -261,7 +261,8 @@ export default function DashboardPage() {
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null)
 
   // POV member: Project Manager melihat My Member, Member melihat Tugas Saya.
-  const [isManager, setIsManager] = useState(true)
+  // `null` = belum diketahui, supaya tidak sempat menampilkan bagian yang salah.
+  const [isManager, setIsManager] = useState<boolean | null>(null)
   const [myTasks, setMyTasks] = useState<MyTaskItem[]>([])
   // Jumlah undangan yang menunggu jawaban (badge pada ikon lonceng).
   const [invitationCount, setInvitationCount] = useState(0)
@@ -874,7 +875,13 @@ export default function DashboardPage() {
           </section>
 
           {/* POV Project Manager: My Member */}
-          {isManager ? (
+          {isManager === null ? (
+            <section className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm">
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-8">
+                <Loader2 size={16} className="animate-spin" /> Memuat…
+              </div>
+            </section>
+          ) : isManager ? (
           <section
             ref={membersSectionRef}
             className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
