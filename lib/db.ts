@@ -230,17 +230,38 @@ export async function ensureDefaultWorkspace(name = '2026 INVISUAL'): Promise<Wo
 
 export async function listProjects(workspaceId?: string): Promise<Project[]> {
   const db = supabase()
-  let q = db.from('projects').select('*').order('created_at')
-  if (workspaceId) q = q.eq('workspace_id', workspaceId)
-  const { data, error } = await q
+  const { data, error } = await db.from('projects').select('*').order('created_at')
   if (error) throw error
 
-  const rows = (data as Project[]) ?? []
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+
+  let rows = (data as Project[]) ?? []
+
+  // Workspace menyaring daftar project, TETAPI project yang tidak bisa
+  // dijangkau lewat pemilih workspace tidak boleh ikut tersembunyi.
+  // Contoh nyata: project PM berada di workspace yang tidak terlihat oleh
+  // Member (dan sebaliknya), sehingga filter `.eq('workspace_id', …)` membuat
+  // undangan/project bersama hilang dari Home. Sekarang filter hanya berlaku
+  // untuk workspace yang memang terlihat oleh pengguna; project tanpa workspace
+  // juga tetap ditampilkan agar data lama tidak lenyap.
+  if (workspaceId) {
+    const { data: visibleWorkspaces } = await db.from('workspaces').select('id')
+    const visible = new Set(
+      ((visibleWorkspaces ?? []) as { id: string }[]).map((w) => w.id),
+    )
+    rows = rows.filter(
+      (p) =>
+        !p.workspace_id ||
+        p.workspace_id === workspaceId ||
+        !visible.has(p.workspace_id),
+    )
+  }
 
   // Undangan yang belum diterima tidak boleh menampilkan isi project.
   // (RLS juga menanganinya lewat is_project_member, ini lapisan kedua.)
   if (await hasInvitationSupport()) {
-    const { data: { user } } = await db.auth.getUser()
     if (!user) return []
     const { data: mine } = await db
       .from('project_members')

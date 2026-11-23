@@ -225,6 +225,9 @@ export default function DashboardPage() {
   const router = useRouter()
   const memberSearchRef = useRef<HTMLInputElement>(null)
   const membersSectionRef = useRef<HTMLElement>(null)
+  // Di layar besar hanya <main> yang menggulir (sidebar tetap), jadi tombol
+  // "Home" harus menggulir container itu, bukan hanya window.
+  const mainRef = useRef<HTMLElement>(null)
 
   const [searchMember, setSearchMember] = useState('')
   const [memberSort, setMemberSort] = useState<MemberSort>('name-asc')
@@ -331,6 +334,41 @@ export default function DashboardPage() {
       .then(setProfile)
       .catch(() => setProfile(null))
   }, [])
+
+  // History disimpan di localStorage. Entri lama bisa merujuk project yang sudah
+  // dihapus atau berganti nama/scope (mis. "Studio Client" -> "Studio Project"),
+  // sehingga tautannya mati. Setelah daftar project dimuat, entri yang tidak ada
+  // dibuang dan judulnya diperbarui mengikuti database.
+  useEffect(() => {
+    if (projects.length === 0) return
+    let changed = false
+    const valid: RecentProject[] = []
+    for (const entry of listRecentProjects()) {
+      const match =
+        projects.find(
+          (p) => slugify(p.scope) === entry.scope && slugify(p.name) === entry.card,
+        ) ?? projects.find((p) => slugify(p.name) === entry.card)
+      if (!match) {
+        changed = true
+        continue
+      }
+      const scopeSlug = slugify(match.scope)
+      const cardSlug = slugify(match.name)
+      if (scopeSlug !== entry.scope || cardSlug !== entry.card || match.scope !== entry.scopeTitle) {
+        changed = true
+      }
+      valid.push({
+        scope: scopeSlug,
+        card: cardSlug,
+        name: match.name,
+        scopeTitle: match.scope ?? entry.scopeTitle,
+      })
+    }
+    if (changed) {
+      localStorage.setItem('invisual.recent-projects', JSON.stringify(valid))
+      setRecentProjects(valid)
+    }
+  }, [projects])
 
   // Scope diturunkan dari project nyata. Tidak ada scope contoh.
   // Urutan mengikuti daftar scope template (Client, Font, Marketplace,
@@ -589,9 +627,9 @@ export default function DashboardPage() {
   const firstName = displayName.split(' ')[0]
 
   return (
-    <div className="min-h-screen w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header Bar */}
-      <header className="w-full h-16 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
+      <header className="w-full h-16 shrink-0 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <Link href="/" className="inline-flex items-center gap-2.5">
             <Image
@@ -701,15 +739,20 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Main Container: Sidebar + Content */}
-      <div className="flex-1 flex flex-col lg:flex-row">
+      {/* Main Container: Sidebar + Content.
+          Di layar besar tinggi dikunci (h-screen) dan hanya <main> yang
+          menggulir, sehingga sidebar kiri tetap di tempat saat konten di-scroll. */}
+      <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
         {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:min-h-[calc(100vh-4rem)] flex flex-col justify-between shrink-0">
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:h-full lg:overflow-y-auto flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
                 type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                onClick={() => {
+                  mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer bg-blue-600 text-white shadow-sm"
               >
                 <Home size={18} strokeWidth={1.8} />
@@ -800,7 +843,10 @@ export default function DashboardPage() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 p-6 sm:p-8 lg:p-10 xl:p-12 overflow-y-auto">
+        <main
+          ref={mainRef}
+          className="flex-1 lg:min-h-0 p-6 sm:p-8 lg:p-10 xl:p-12 overflow-y-auto"
+        >
           <div className="mb-8">
             <p className="text-xs sm:text-sm text-neutral-400 font-normal">{today || '\u00a0'}</p>
             <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">

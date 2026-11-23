@@ -153,6 +153,24 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Scope Of Work hanya menampilkan 3 dari 5 scope, dan sidebar ikut ter-scroll.
+  (a) **Penyebab 3 scope**: `listProjects(workspaceId)` memakai `.eq('workspace_id', …)`, sedangkan
+  project contoh tersebar di **dua workspace** (project PM di workspace PM, project Member di
+  workspace Member). Workspace yang tidak terlihat oleh pengguna membuat project di dalamnya ikut
+  hilang, sehingga Member hanya melihat Mockup, Studio Project, dan Font. Perbaikan: filter
+  workspace kini hanya diterapkan pada project yang workspace-nya **terlihat** oleh pengguna;
+  project di workspace yang tidak terjangkau (dan project tanpa workspace) tetap ditampilkan.
+  Hasil: akun PM melihat 6 project dan akun Member 5 project, keduanya **5 scope**
+  (Client, Font, Marketplace, Studio Project, Mockup).
+  (b) **History** (localStorage) menyimpan entri lama yang menunjuk project yang sudah berganti
+  nama/scope (`Studio Client` → `Studio Project`) atau sudah dihapus. Setelah project dimuat,
+  entri dibersihkan dan judulnya diselaraskan dengan database, sehingga tautannya tidak mati.
+  (c) **Sidebar tidak ikut ter-scroll**: layout Home diubah menjadi tinggi tetap di layar besar
+  (`lg:h-screen lg:overflow-hidden`) sehingga hanya `<main>` yang menggulir; sidebar punya
+  `lg:overflow-y-auto` sendiri. Tombol *Home* di sidebar menggulir `main`, bukan hanya `window`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  PM dan Member sama-sama memperoleh 5 scope; `/home` dan board balas 200.
+
 - **2026-11-24** – Scope Of Work: ikon orang dihapus, template jadi 5 scope tetap.
   (a) **Ikon orang dihapus**: tumpukan avatar anggota (`MemberStack`, `listProjectMemberChips`,
   state `projectMembers`) dibuang dari kartu scope maupun kartu project di modal Scope Of Work.
