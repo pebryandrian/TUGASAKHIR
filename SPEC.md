@@ -153,6 +153,22 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Scope Of Work: ikon orang dihapus, template jadi 5 scope tetap.
+  (a) **Ikon orang dihapus**: tumpukan avatar anggota (`MemberStack`, `listProjectMemberChips`,
+  state `projectMembers`) dibuang dari kartu scope maupun kartu project di modal Scope Of Work.
+  Kartu kembali ringkas: gambar, nama scope/project, jumlah card, dan progress. Pemeriksaan peran
+  (`listProjectRoles`) tetap dipakai untuk menyembunyikan tombol Ubah/Hapus dari Member.
+  (b) **Template 5 scope**: `demoProjects` di `lib/project-template.json` diubah dari
+  "Studio Client" menjadi **"Studio Project"**, sehingga template tepat berisi lima scope:
+  **Client, Font, Marketplace, Studio Project, Mockup**. Home juga mengurutkan kartu scope sesuai
+  urutan itu (`SCOPE_ORDER`), dan gambar kartu dipetakan **per nama scope** (`SCOPE_IMAGES`)
+  sehingga tidak lagi bergantung urutan kemunculan project.
+  (c) Data lama dimigrasikan: project dengan scope "Studio Client" (Arunika) diubah menjadi
+  "Studio Project" lewat akun PM.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; scope unik di database untuk akun PM
+  maupun Member = Client, Font, Marketplace, Mockup, Studio Project; `/home` dan
+  `/project/studio-project/arunika` membalas 200.
+
 - **2026-11-24** – Ikon anggota pada Scope Of Work + tombol Ubah/Hapus project khusus Project Manager.
   (a) **Ikon orang**: `listProjectMemberChips()` mengumpulkan anggota **aktif** per project
   (`project_members` + `profiles`, undangan `status = 'invited'` tidak dihitung). Home
@@ -336,8 +352,8 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 - **2026-11-13** – Template contoh project. Sumber data tunggal `lib/project-template.json`:
   (a) `template` generik (3 grup + 8 tugas + subtask + komentar + 6 blok Doc) dipakai saat
   project baru dibuat lewat `createProject(..., { template: true })`; (b) `demoProjects` berisi
-  5 project siap pakai (Client/Aqua, Marketplace/Glowup, Mockup/Nusantara, Studio Client/Arunika,
-  Font/Grotesk) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
+  5 project siap pakai (Client/Aqua, Font/Grotesk, Marketplace/Glowup, Studio Project/Arunika,
+  Mockup/Nusantara) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
   user yang login sehingga tetap tunduk pada RLS. Tanggal tugas memakai offset hari dari hari ini,
   jadi isi contoh selalu terlihat sedang berjalan. Board kosong menampilkan tombol
   **Isi contoh tugas**; modal Create New Card punya opsi "Sertakan contoh tugas".

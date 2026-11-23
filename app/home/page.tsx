@@ -43,7 +43,6 @@ import {
   listFavoriteProjects,
   listMyInvitations,
   listMyTasks,
-  listProjectMemberChips,
   listProjectRoles,
   listProjectTaskStats,
   listProjects,
@@ -53,7 +52,6 @@ import {
   type MyTaskItem,
   type Profile,
   type Project,
-  type ProjectMemberChip,
   type ProjectRoleMap,
   type Workspace,
 } from '@/lib/db'
@@ -82,13 +80,24 @@ const MEMBER_SORT_LABEL: Record<MemberSort, string> = {
 }
 
 // Gambar hanya dekorasi kartu scope; tidak ada hubungannya dengan data project.
-const SCOPE_IMAGES = [
-  '/images/scope/scope-client.jpg',
-  '/images/scope/scope-marketplace.jpg',
-  '/images/scope/scope-mockup.jpg',
-  '/images/scope/scope-studio.jpg',
-  '/images/scope/scope-font.jpg',
-]
+// Dipetakan per nama scope supaya kelima scope template selalu memakai gambar
+// yang sesuai, bukan bergantung urutan kemunculan project.
+const SCOPE_IMAGES: Record<string, string> = {
+  client: '/images/scope/scope-client.jpg',
+  font: '/images/scope/scope-font.jpg',
+  marketplace: '/images/scope/scope-marketplace.jpg',
+  mockup: '/images/scope/scope-mockup.jpg',
+  'studio project': '/images/scope/scope-studio.jpg',
+}
+
+const SCOPE_IMAGE_FALLBACK = Object.values(SCOPE_IMAGES)
+
+// Urutan tampil scope pada Home.
+const SCOPE_ORDER = ['client', 'font', 'marketplace', 'studio project', 'mockup']
+
+function scopeImage(title: string, index: number): string {
+  return SCOPE_IMAGES[title.trim().toLowerCase()] ?? SCOPE_IMAGE_FALLBACK[index % SCOPE_IMAGE_FALLBACK.length]
+}
 
 function Avatar({ name, src, size = 32 }: { name: string; src: string | null; size?: number }) {
   const initials =
@@ -120,50 +129,6 @@ function Avatar({ name, src, size = 32 }: { name: string; src: string | null; si
       style={{ width: size, height: size }}
     >
       {initials}
-    </div>
-  )
-}
-
-// Tumpukan avatar anggota project — ikon "siapa saja yang mengerjakan project
-// ini" pada kartu Scope Of Work. Bila anggota lebih banyak dari `max`, sisanya
-// diringkas menjadi "+N".
-function MemberStack({
-  members,
-  max = 4,
-  size = 24,
-}: {
-  members: { id: string; name: string; avatar_url: string | null }[]
-  max?: number
-  size?: number
-}) {
-  if (members.length === 0) return null
-  const shown = members.slice(0, max)
-  const rest = members.length - shown.length
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex -space-x-2">
-        {shown.map((m) => (
-          <span
-            key={m.id}
-            title={m.name}
-            className="rounded-full ring-2 ring-[#191a1e] overflow-hidden shrink-0"
-          >
-            <Avatar name={m.name} src={m.avatar_url} size={size} />
-          </span>
-        ))}
-        {rest > 0 && (
-          <span
-            title={members
-              .slice(max)
-              .map((m) => m.name)
-              .join(', ')}
-            className="rounded-full ring-2 ring-[#191a1e] bg-neutral-700 border border-neutral-600 text-neutral-200 flex items-center justify-center font-semibold shrink-0"
-            style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }}
-          >
-            +{rest}
-          </span>
-        )}
-      </div>
     </div>
   )
 }
@@ -274,11 +239,9 @@ export default function DashboardPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [taskStats, setTaskStats] = useState<Record<string, { total: number; done: number }>>({})
-  // Peran per project (Project Manager / Member) dan anggotanya, untuk
-  // menampilkan ikon orang pada kartu Scope Of Work serta menyembunyikan
-  // tombol Ubah/Hapus dari Member.
+  // Peran per project (Project Manager / Member), untuk menyembunyikan tombol
+  // Ubah/Hapus dari Member.
   const [projectRoles, setProjectRoles] = useState<ProjectRoleMap>({})
-  const [projectMembers, setProjectMembers] = useState<Record<string, ProjectMemberChip[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -323,18 +286,16 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, favs, manager, tasks, invites, roles, chips] =
-        await Promise.all([
-          listProjects(activeWorkspace?.id),
-          listProfiles().catch(() => [] as Profile[]),
-          listProjectTaskStats().catch(() => ({})),
-          listFavoriteProjects().catch(() => []),
-          hasManagerRole().catch(() => true),
-          listMyTasks(12).catch(() => [] as MyTaskItem[]),
-          listMyInvitations().catch(() => []),
-          listProjectRoles().catch(() => ({}) as ProjectRoleMap),
-          listProjectMemberChips().catch(() => ({}) as Record<string, ProjectMemberChip[]>),
-        ])
+      const [rows, people, taskStats, favs, manager, tasks, invites, roles] = await Promise.all([
+        listProjects(activeWorkspace?.id),
+        listProfiles().catch(() => [] as Profile[]),
+        listProjectTaskStats().catch(() => ({})),
+        listFavoriteProjects().catch(() => []),
+        hasManagerRole().catch(() => true),
+        listMyTasks(12).catch(() => [] as MyTaskItem[]),
+        listMyInvitations().catch(() => []),
+        listProjectRoles().catch(() => ({}) as ProjectRoleMap),
+      ])
       setProjects(rows)
       setProfiles(people)
       setTaskStats(taskStats)
@@ -343,7 +304,6 @@ export default function DashboardPage() {
       setMyTasks(tasks)
       setInvitationCount(invites.length)
       setProjectRoles(roles)
-      setProjectMembers(chips)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -373,14 +333,24 @@ export default function DashboardPage() {
   }, [])
 
   // Scope diturunkan dari project nyata. Tidak ada scope contoh.
+  // Urutan mengikuti daftar scope template (Client, Font, Marketplace,
+  // Studio Project, Mockup); scope lain di belakang sesuai urutan dibuat.
   const scopes: ScopeItem[] = useMemo(() => {
     const titles = Array.from(
       new Set(projects.map((p) => p.scope).filter((s): s is string => Boolean(s))),
     )
-    return titles.map((title, i) => ({
+    const rank = (title: string) => {
+      const i = SCOPE_ORDER.indexOf(title.trim().toLowerCase())
+      return i === -1 ? SCOPE_ORDER.length : i
+    }
+    const ordered = titles
+      .map((title, i) => ({ title, i }))
+      .sort((a, b) => rank(a.title) - rank(b.title) || a.i - b.i)
+      .map((entry) => entry.title)
+    return ordered.map((title, i) => ({
       id: `scope-${title}`,
       title,
-      image: SCOPE_IMAGES[i % SCOPE_IMAGES.length],
+      image: scopeImage(title, i),
     }))
   }, [projects])
 
@@ -412,20 +382,6 @@ export default function DashboardPage() {
   const canManageProject = useCallback(
     (projectId: string) => projectRoles[projectId] === 'project_manager',
     [projectRoles],
-  )
-
-  // Gabungan anggota dari semua project dalam satu scope, untuk ikon orang pada
-  // kartu Scope Of Work.
-  const scopeMembers = useCallback(
-    (title: string) => {
-      const seen = new Map<string, ProjectMemberChip>()
-      for (const p of projects) {
-        if (p.scope !== title) continue
-        for (const m of projectMembers[p.id] ?? []) if (!seen.has(m.id)) seen.set(m.id, m)
-      }
-      return Array.from(seen.values())
-    },
-    [projects, projectMembers],
   )
 
   // Muat beberapa project contoh lengkap dengan grup, tugas, subtask, komentar,
@@ -939,47 +895,31 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                {scopes.map((item) => {
-                  const people = scopeMembers(item.title)
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => openScopeModal(item)}
-                      className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
-                    >
-                      <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
-                        <Image
-                          src={item.image}
-                          alt={item.title}
-                          fill
-                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                          className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
-                        />
-                      </div>
-                      <div className="px-4 py-3 bg-[#191a1e] space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition truncate">
-                            {item.title}
-                          </h3>
-                          <span className="text-[10px] text-neutral-500 shrink-0">
-                            {cardsFrom(item.title).length} card
-                          </span>
-                        </div>
-                        {/* Ikon orang: siapa saja yang mengerjakan project di scope ini */}
-                        <div className="flex items-center justify-between gap-2">
-                          {people.length > 0 ? (
-                            <MemberStack members={people} max={4} size={22} />
-                          ) : (
-                            <span className="text-[10px] text-neutral-600">Belum ada anggota</span>
-                          )}
-                          <span className="text-[10px] text-neutral-500 shrink-0">
-                            {people.length} orang
-                          </span>
-                        </div>
-                      </div>
+                {scopes.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => openScopeModal(item)}
+                    className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                  >
+                    <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
+                      <Image
+                        src={item.image}
+                        alt={item.title}
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                        className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
+                      />
                     </div>
-                  )
-                })}
+                    <div className="px-4 py-3 bg-[#191a1e] flex items-center justify-between">
+                      <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition truncate">
+                        {item.title}
+                      </h3>
+                      <span className="text-[10px] text-neutral-500 shrink-0">
+                        {cardsFrom(item.title).length} card
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>
@@ -1389,7 +1329,6 @@ export default function DashboardPage() {
                     const pct = card.total ? Math.round((card.done / card.total) * 100) : 0
                     const isStarred = favorites.some((f) => f.id === card.id)
                     const canManage = canManageProject(card.id)
-                    const people = projectMembers[card.id] ?? []
                     return (
                       <div
                         key={card.id}
@@ -1463,18 +1402,6 @@ export default function DashboardPage() {
                         <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3 flex-1">
                           {card.description || 'Belum ada deskripsi.'}
                         </p>
-
-                        {/* Ikon orang: siapa saja yang mengerjakan project ini */}
-                        <div className="flex items-center justify-between gap-2">
-                          {people.length > 0 ? (
-                            <MemberStack members={people} max={5} size={22} />
-                          ) : (
-                            <span className="text-[10px] text-neutral-600">Belum ada anggota</span>
-                          )}
-                          <span className="text-[10px] text-neutral-500 shrink-0">
-                            {people.length} orang
-                          </span>
-                        </div>
 
                         {/* Progress Bar */}
                         <div className="mt-auto space-y-1.5">

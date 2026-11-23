@@ -379,7 +379,7 @@
     },
     {
       "name": "Arunika",
-      "scope": "Studio Client",
+      "scope": "Studio Project",
       "description": "Company profile deck untuk Arunika Studio.",
       "progress": 25,
       "groups": [
