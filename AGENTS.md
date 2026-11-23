@@ -19,12 +19,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   menyerahkan tautan compare ke pengguna):
 
   ```powershell
-  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-pr.ps1
+  node scripts/open-pr.mjs
   ```
 
   Skrip ini memakai GitHub REST API dengan token dari Git Credential Manager (tidak butuh `gh`
-  CLI), menampilkan PR yang sudah terbuka, dan hanya membuat PR baru bila belum ada. Selalu
-  laporkan nomor dan tautan PR di jawaban akhir.
+  CLI), menampilkan PR yang sudah terbuka, dan hanya membuat PR baru bila belum ada. Bila PR sudah
+  ada dan isinya perlu disegarkan setelah menambah commit, jalankan
+  `node scripts/open-pr.mjs --update`. Selalu laporkan nomor dan tautan PR di jawaban akhir.
 - Jangan pernah mencetak token GitHub ke output, ke berkas, atau ke dalam commit.
 - Jangan commit skrip uji sementara (`scripts/_tmp-*.mjs`) maupun hasil build (`.next/`).
 - Jangan mengubah berkas laporan (`*.docx`, `*.pdf`) di folder induk.
