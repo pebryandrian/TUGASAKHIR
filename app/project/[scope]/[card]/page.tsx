@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
@@ -337,6 +338,171 @@ export interface Member {
   avatar: string
 }
 
+// ======================== AVATAR & PENUGASAN ANGGOTA ========================
+// Sebelumnya semua anggota yang belum mengunggah foto memakai satu gambar
+// placeholder yang sama, sehingga mengganti penanggung jawab tugas tidak
+// terlihat berubah sama sekali. Sekarang setiap anggota tanpa foto ditampilkan
+// dengan inisial + warna tetap yang berbeda per nama.
+
+const AVATAR_PALETTE = [
+  'bg-blue-600',
+  'bg-emerald-600',
+  'bg-amber-600',
+  'bg-rose-600',
+  'bg-violet-600',
+  'bg-cyan-600',
+  'bg-orange-600',
+  'bg-teal-600',
+]
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+function colorOf(name: string): string {
+  let sum = 0
+  for (let i = 0; i < name.length; i++) sum = (sum + name.charCodeAt(i)) % 9973
+  return AVATAR_PALETTE[sum % AVATAR_PALETTE.length]
+}
+
+export function PersonAvatar({
+  name,
+  avatar,
+  size = 24,
+  className = '',
+}: {
+  name: string
+  avatar?: string | null
+  size?: number
+  className?: string
+}) {
+  if (avatar) {
+    return (
+      <Image
+        src={avatar}
+        alt={name}
+        width={size}
+        height={size}
+        title={name}
+        className={`rounded-full object-cover shrink-0 ${className}`}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+  return (
+    <span
+      aria-label={name}
+      title={name}
+      className={`rounded-full inline-flex items-center justify-center shrink-0 font-semibold text-white leading-none ${colorOf(
+        name,
+      )} ${className}`}
+      style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.42)) }}
+    >
+      {initialsOf(name)}
+    </span>
+  )
+}
+
+// Menu pemilihan penanggung jawab. Dirender lewat portal ke <body> supaya tidak
+// terpotong oleh container ber-overflow (tabel Main Table) atau modal detail.
+function AssigneeMenu({
+  members,
+  assignedNames,
+  onPick,
+  onClear,
+  anchor,
+  onClose,
+}: {
+  members: Member[]
+  assignedNames: string[]
+  onPick: (member: Member) => void
+  onClear: () => void
+  anchor: { top: number; left: number }
+  onClose: () => void
+}) {
+  const width = 250
+  const estimatedHeight = 72 + members.length * 34
+
+  const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+  const left = Math.max(8, Math.min(anchor.left - width / 2, viewportWidth - width - 8))
+  const openUp = anchor.top + estimatedHeight > viewportHeight - 8
+  const top = openUp
+    ? Math.max(8, anchor.top - Math.min(estimatedHeight, viewportHeight - 16))
+    : Math.min(anchor.top + 6, viewportHeight - 16)
+  const maxHeight = Math.max(160, Math.min(360, viewportHeight - 16))
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[140]" onClick={onClose} />
+      <div
+        className="fixed z-[141] bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100 text-left"
+        style={{ width, left, top, maxHeight }}
+        role="menu"
+        aria-label="Pilih penanggung jawab"
+      >
+        <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+          Penanggung Jawab
+        </div>
+        <div className="space-y-1 overflow-y-auto" style={{ maxHeight: maxHeight - 44 }}>
+          <button
+            type="button"
+            onClick={() => {
+              onClear()
+              onClose()
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+          >
+            <span className="w-5 h-5 rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
+              <X size={10} />
+            </span>
+            Tanpa penanggung jawab
+          </button>
+          {members.map((m) => {
+            const isAssigned = assignedNames.includes(m.name)
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  onPick(m)
+                  onClose()
+                }}
+                className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-xs transition cursor-pointer text-left ${
+                  isAssigned ? 'bg-blue-600/15' : 'hover:bg-neutral-800'
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                  <span className="text-neutral-200 text-xs truncate">{m.name}</span>
+                </span>
+                {isAssigned ? (
+                  <Check size={12} className="text-blue-400 shrink-0" />
+                ) : (
+                  <span className="text-[10px] text-neutral-500 shrink-0">
+                    {m.role === 'project_manager' ? 'PM' : 'Member'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          {members.length === 0 && (
+            <p className="px-2 py-2 text-[11px] text-neutral-500">
+              Belum ada anggota. Tambahkan anggota lewat halaman Anggota Proyek.
+            </p>
+          )}
+        </div>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
 // ======================== CUSTOM VIEWS (Gantt / Chart) ========================
 interface CustomView {
   id: string
@@ -515,12 +681,12 @@ function KanbanView({
                         {task.date}
                       </span>
                     )}
-                    {task.personAvatars?.[0] && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={task.personAvatars[0]}
-                        alt={task.personNames?.[0] ?? 'Assignee'}
-                        className="w-5 h-5 rounded-full object-cover ml-auto border border-neutral-700"
+                    {task.personNames?.[0] && (
+                      <PersonAvatar
+                        name={task.personNames[0]}
+                        avatar={task.personAvatars?.[0]}
+                        size={20}
+                        className="ml-auto border border-neutral-700"
                       />
                     )}
                   </div>
@@ -1249,7 +1415,8 @@ export default function ProjectDetailPage() {
             id: m.id,
             name: m.name,
             role: m.role,
-            avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+            // String kosong = belum punya foto -> PersonAvatar menampilkan inisial.
+            avatar: m.avatar_url || '',
           })),
         )
       }
@@ -1375,7 +1542,7 @@ export default function ProjectDetailPage() {
         id: m.id,
         name: m.name,
         role: m.role,
-        avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+        avatar: m.avatar_url || '',
       })),
     )
   }
@@ -1421,10 +1588,12 @@ export default function ProjectDetailPage() {
     taskId: string
   } | null>(null)
 
-  // Row Assignee Picker state
+  // Row Assignee Picker state (anchor = posisi tombol, untuk menu portal)
   const [activeAssigneePicker, setActiveAssigneePicker] = useState<{
     groupId: string
     taskId: string
+    top: number
+    left: number
   } | null>(null)
 
   // Row Date Picker state
@@ -1484,7 +1653,10 @@ export default function ProjectDetailPage() {
   // ======================== TASK DETAIL MODAL (klik task) ========================
   const [detailTask, setDetailTask] = useState<{ groupId: string; taskId: string } | null>(null)
   const [detailStatusOpen, setDetailStatusOpen] = useState(false)
-  const [detailPersonOpen, setDetailPersonOpen] = useState(false)
+  const [detailPersonAnchor, setDetailPersonAnchor] = useState<{
+    top: number
+    left: number
+  } | null>(null)
   const [detailDateOpen, setDetailDateOpen] = useState(false)
   const [detailMaximized, setDetailMaximized] = useState(false)
   const [detailSubtaskInput, setDetailSubtaskInput] = useState('')
@@ -1500,7 +1672,7 @@ export default function ProjectDetailPage() {
   const openTaskDetail = (groupId: string, taskId: string) => {
     setDetailTask({ groupId, taskId })
     setDetailStatusOpen(false)
-    setDetailPersonOpen(false)
+    setDetailPersonAnchor(null)
     setDetailDateOpen(false)
     setDetailMaximized(false)
     setDetailSubtaskInput('')
@@ -1510,7 +1682,7 @@ export default function ProjectDetailPage() {
   const closeTaskDetail = () => {
     setDetailTask(null)
     setDetailStatusOpen(false)
-    setDetailPersonOpen(false)
+    setDetailPersonAnchor(null)
     setDetailDateOpen(false)
   }
 
@@ -1607,40 +1779,50 @@ export default function ProjectDetailPage() {
 
   // ======================== TASK LIST HANDLERS ========================
 
-  // Toggle assignee membership on a task
+  // Menetapkan penanggung jawab tugas.
+  // Tabel `tasks` hanya punya satu kolom `assignee_id`, jadi penugasan bersifat
+  // tunggal: memilih anggota lain MENGGANTIKAN yang lama, dan memilih anggota
+  // yang sama akan melepas penugasan. Sebelumnya klik anggota yang sudah
+  // ditugaskan tidak mengubah apa pun (anggota selalu ditambahkan kembali).
   const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof members)[0]) => {
+    const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+    const alreadyAssigned = (current?.personNames || [])[0] === member.name
+    const next = alreadyAssigned ? null : member
     if (projectId) {
-      const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
-      const exists = (current?.personNames || []).includes(member.name)
-      updateTaskRow(taskId, { assignee_id: exists ? null : member.id }).catch(notifySaveError)
+      updateTaskRow(taskId, { assignee_id: next ? next.id : null }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
         return {
           ...g,
-          items: g.items.map((t) => {
-            if (t.id !== taskId) return t
-            const names = t.personNames || []
-            const avatars = t.personAvatars || []
-            const exists = names.includes(member.name)
-            let newNames: string[]
-            let newAvatars: string[]
-            if (exists) {
-              newNames = names.filter((n) => n !== member.name)
-              newAvatars = avatars.filter((a) => a !== member.avatar)
-            } else {
-              newNames = [...names, member.name]
-              newAvatars = [...avatars, member.avatar]
-            }
-            return {
-              ...t,
-              personNames: newNames.length > 0 ? newNames : [member.name],
-              personAvatars: newAvatars.length > 0 ? newAvatars : [member.avatar],
-            }
-          }),
+          items: g.items.map((t) =>
+            t.id !== taskId
+              ? t
+              : {
+                  ...t,
+                  personNames: next ? [next.name] : [],
+                  personAvatars: next ? [next.avatar] : [],
+                },
+          ),
         }
-      })
+      }),
+    )
+  }
+
+  // Melepas penanggung jawab tugas (assignee_id -> null).
+  const clearTaskAssignee = (groupId: string, taskId: string) => {
+    if (projectId) updateTaskRow(taskId, { assignee_id: null }).catch(notifySaveError)
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) =>
+            t.id !== taskId ? t : { ...t, personNames: [], personAvatars: [] },
+          ),
+        }
+      }),
     )
   }
 
@@ -2014,16 +2196,13 @@ export default function ProjectDetailPage() {
               className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
               title="Ubah assignee subtask"
             >
-              {assigneeMember?.avatar ? (
-                <div className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700">
-                  <Image
-                    src={assigneeMember.avatar}
-                    alt={assigneeMember.name}
-                    width={24}
-                    height={24}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
+              {assigneeMember ? (
+                <PersonAvatar
+                  name={assigneeMember.name}
+                  avatar={assigneeMember.avatar}
+                  size={24}
+                  className="border border-neutral-800"
+                />
               ) : (
                 <UserIcon size={14} className="text-neutral-500" />
               )}
@@ -2061,7 +2240,7 @@ export default function ProjectDetailPage() {
                         className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
                       >
                         <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                          <Image src={m.avatar} alt={m.name} width={20} height={20} className="w-full h-full object-cover" />
+                          <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
                         </div>
                         <span className="text-neutral-200 text-xs">{m.name}</span>
                         {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
@@ -3567,13 +3746,7 @@ export default function ProjectDetailPage() {
                               >
                                 <div className="flex items-center gap-2">
                                   <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                    <Image
-                                      src={m.avatar}
-                                      alt={m.name}
-                                      width={20}
-                                      height={20}
-                                      className="w-full h-full object-cover"
-                                    />
+                                    <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
                                   </div>
                                   <span>{m.name}</span>
                                 </div>
@@ -4160,91 +4333,67 @@ export default function ProjectDetailPage() {
 
                                       </td>
 
-                                      {/* Person Avatars (Interactive Assignee Picker) */}
-                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center relative">
-                                        <div
-                                          onClick={() =>
+                                      {/* Person: penanggung jawab tugas (klik = ubah) */}
+                                      <td className="px-2 py-2.5 border-r border-neutral-800/80 text-center relative">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            const rect = e.currentTarget.getBoundingClientRect()
                                             setActiveAssigneePicker(
                                               isAssigneePickerOpen
                                                 ? null
-                                                : { groupId: group.id, taskId: item.id }
+                                                : {
+                                                    groupId: group.id,
+                                                    taskId: item.id,
+                                                    top: rect.bottom,
+                                                    left: rect.left + rect.width / 2,
+                                                  },
                                             )
+                                          }}
+                                          className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                            item.personNames?.[0]
+                                              ? 'hover:bg-neutral-800/70'
+                                              : 'hover:bg-neutral-800/70 text-neutral-500'
+                                          }`}
+                                          title={
+                                            item.personNames?.[0]
+                                              ? `Penanggung jawab: ${item.personNames[0]} — klik untuk ubah`
+                                              : 'Klik untuk menugaskan anggota'
                                           }
-                                          className="flex items-center justify-center -space-x-1.5 cursor-pointer hover:opacity-80 transition"
-                                          title="Click to change assignee"
                                         >
-                                          {item.personAvatars.map((av, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
-                                            >
-                                              <Image
-                                                src={av}
-                                                alt="Assignee"
-                                                width={24}
-                                                height={24}
-                                                className="w-full h-full object-cover"
+                                          {item.personNames?.[0] ? (
+                                            <>
+                                              <PersonAvatar
+                                                name={item.personNames[0]}
+                                                avatar={item.personAvatars?.[0]}
+                                                size={22}
                                               />
-                                            </div>
-                                          ))}
-                                        </div>
+                                              <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
+                                                {item.personNames[0]}
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <span className="w-[22px] h-[22px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
+                                                <Plus size={11} strokeWidth={2.5} />
+                                              </span>
+                                              <span className="text-[11px]">Tugaskan</span>
+                                            </>
+                                          )}
+                                        </button>
 
-                                        {/* Assignee Popover */}
                                         {isAssigneePickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveAssigneePicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                                                Assign Members
-                                              </div>
-                                              <div className="space-y-1">
-                                                {members.map((m) => {
-                                                  const isAssigned = (item.personNames || []).includes(
-                                                    m.name
-                                                  )
-                                                  return (
-                                                    <button
-                                                      key={m.id}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        toggleTaskAssignee(group.id, item.id, m)
-                                                      }
-                                                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                                                    >
-                                                      <div className="flex items-center gap-2">
-                                                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                                          <Image
-                                                            src={m.avatar}
-                                                            alt={m.name}
-                                                            width={20}
-                                                            height={20}
-                                                            className="w-full h-full object-cover"
-                                                          />
-                                                        </div>
-                                                        <span className="text-neutral-200 text-xs">
-                                                          {m.name}
-                                                        </span>
-                                                      </div>
-                                                      <div
-                                                        className={`w-4 h-4 rounded border flex items-center justify-center ${
-                                                          isAssigned
-                                                            ? 'bg-blue-600 border-blue-500 text-white'
-                                                            : 'border-neutral-600'
-                                                        }`}
-                                                      >
-                                                        {isAssigned && (
-                                                          <Check size={11} strokeWidth={3} />
-                                                        )}
-                                                      </div>
-                                                    </button>
-                                                  )
-                                                })}
-                                              </div>
-                                            </div>
-                                          </>
+                                          <AssigneeMenu
+                                            members={members}
+                                            assignedNames={item.personNames || []}
+                                            anchor={{
+                                              top: activeAssigneePicker.top,
+                                              left: activeAssigneePicker.left,
+                                            }}
+                                            onPick={(m) => toggleTaskAssignee(group.id, item.id, m)}
+                                            onClear={() => clearTaskAssignee(group.id, item.id)}
+                                            onClose={() => setActiveAssigneePicker(null)}
+                                          />
                                         )}
                                       </td>
 
@@ -5061,13 +5210,7 @@ export default function ProjectDetailPage() {
                                 className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
                               >
                                 <div className="w-6 h-6 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                  <Image
-                                    src={member.avatar}
-                                    alt={member.name}
-                                    width={24}
-                                    height={24}
-                                    className="w-full h-full object-cover"
-                                  />
+                                  <PersonAvatar name={member.name} avatar={member.avatar} size={24} />
                                 </div>
                                 <div className="overflow-hidden">
                                   <p className="font-semibold text-xs leading-none truncate">
@@ -5662,10 +5805,10 @@ export default function ProjectDetailPage() {
                     >
                       {selectedAssigneeMember ? (
                         <div className="flex items-center gap-2">
-                          <img
-                            src={selectedAssigneeMember.avatar}
-                            alt={selectedAssigneeMember.name}
-                            className="w-5 h-5 rounded-full object-cover shrink-0"
+                          <PersonAvatar
+                            name={selectedAssigneeMember.name}
+                            avatar={selectedAssigneeMember.avatar}
+                            size={20}
                           />
                           <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
                         </div>
@@ -5706,7 +5849,7 @@ export default function ProjectDetailPage() {
                                 newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
                               }`}
                             >
-                              <img src={m.avatar} alt={m.name} className="w-5 h-5 rounded-full object-cover shrink-0" />
+                              <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
                               <span className="text-xs text-neutral-200">{m.name}</span>
                             </button>
                           ))}
@@ -6685,68 +6828,50 @@ export default function ProjectDetailPage() {
                     <div className="flex items-center gap-4 relative">
                       <UserIcon size={17} className="text-neutral-400 shrink-0" />
                       <span className="w-24 shrink-0 text-sm text-neutral-400">Person</span>
-                      <div className="flex items-center gap-2">
-                        {task.personAvatars.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setDetailPersonOpen((v) => !v)}
-                            className="flex items-center -space-x-2 cursor-pointer hover:opacity-80 transition"
-                            title="Ubah penanggung jawab"
-                          >
-                            {task.personAvatars.map((av, i) => (
-                              <span
-                                key={i}
-                                className="relative w-7 h-7 rounded-full border-2 border-[#0d0e10] overflow-hidden bg-neutral-700"
-                              >
-                                <Image src={av} alt="Assignee" fill sizes="28px" className="object-cover" />
-                              </span>
-                            ))}
-                          </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          if (detailPersonAnchor) {
+                            setDetailPersonAnchor(null)
+                            return
+                          }
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setDetailPersonAnchor({
+                            top: rect.bottom,
+                            left: rect.left + rect.width / 2,
+                          })
+                        }}
+                        className="flex items-center gap-2 rounded-lg px-1.5 py-1 -ml-1.5 hover:bg-neutral-800/70 transition cursor-pointer"
+                        title="Klik untuk mengubah penanggung jawab"
+                      >
+                        {task.personNames?.[0] ? (
+                          <>
+                            <PersonAvatar
+                              name={task.personNames[0]}
+                              avatar={task.personAvatars?.[0]}
+                              size={26}
+                            />
+                            <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
+                          </>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => setDetailPersonOpen((v) => !v)}
-                            className="text-xs text-neutral-500 hover:text-white transition cursor-pointer"
-                          >
-                            + Add person
-                          </button>
+                          <>
+                            <span className="w-[26px] h-[26px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center text-neutral-500 shrink-0">
+                              <Plus size={13} strokeWidth={2.5} />
+                            </span>
+                            <span className="text-sm text-neutral-500">Tugaskan anggota</span>
+                          </>
                         )}
-                        <span className="text-sm text-neutral-300">
-                          {(task.personNames || []).join(', ')}
-                        </span>
-                      </div>
+                      </button>
 
-                      {detailPersonOpen && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setDetailPersonOpen(false)} />
-                          <div className="absolute left-32 top-10 z-20 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100">
-                            {members.map((m) => {
-                              const isAssigned = (task.personNames || []).includes(m.name)
-                              return (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  onClick={() => toggleTaskAssignee(group.id, task.id, m)}
-                                  className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="relative w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                      <Image src={m.avatar} alt={m.name} fill sizes="20px" className="object-cover" />
-                                    </span>
-                                    <span className="text-neutral-200 text-xs">{m.name}</span>
-                                  </div>
-                                  <span
-                                    className={`w-4 h-4 rounded border flex items-center justify-center ${
-                                      isAssigned ? 'bg-blue-600 border-blue-500 text-white' : 'border-neutral-600'
-                                    }`}
-                                  >
-                                    {isAssigned && <Check size={11} strokeWidth={3} />}
-                                  </span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </>
+                      {detailPersonAnchor && (
+                        <AssigneeMenu
+                          members={members}
+                          assignedNames={task.personNames || []}
+                          anchor={detailPersonAnchor}
+                          onPick={(m) => toggleTaskAssignee(group.id, task.id, m)}
+                          onClear={() => clearTaskAssignee(group.id, task.id)}
+                          onClose={() => setDetailPersonAnchor(null)}
+                        />
                       )}
                     </div>
 

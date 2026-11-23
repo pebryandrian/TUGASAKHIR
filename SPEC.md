@@ -153,6 +153,27 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Perbaikan penanggung jawab tugas ("Person") tidak bisa diubah.
+  (a) **Penyebab tampak**: semua akun demo belum punya `avatar_url`, dan pemetaan board memakai
+  satu gambar placeholder yang sama (`/images/clients/SUNDDAE.jpg`) untuk semua anggota. Kolom
+  *Person* di Main Table hanya menampilkan avatar, sehingga mengganti penanggung jawab **tidak
+  terlihat berubah sama sekali**.
+  (b) **Penyebab nyata kedua**: `toggleTaskAssignee` selalu menambahkan anggota kembali
+  (`newNames.length > 0 ? newNames : [member.name]`), jadi penugasan tidak pernah bisa dilepas,
+  dan penghapusan avatar memakai `filter` berdasarkan nilai sehingga menghapus avatar anggota lain
+  yang kebetulan sama.
+  (c) **Perbaikan**: komponen `PersonAvatar` (foto bila ada, selain itu inisial + warna tetap per
+  nama) dipakai di Main Table, Kanban, detail tugas, pemilih anggota, dan daftar mention. Kolom
+  *Person* kini menampilkan avatar **dan nama** (atau tombol "Tugaskan" bila kosong).
+  `toggleTaskAssignee` disamakan dengan skema database (satu `tasks.assignee_id` per tugas):
+  memilih anggota lain menggantikan, memilih anggota yang sama melepas; ditambah aksi
+  "Tanpa penanggung jawab" (`clearTaskAssignee`).
+  (d) Menu pemilihan penanggung jawab dipindah ke `AssigneeMenu` yang dirender lewat
+  `createPortal` ke `<body>`, jadi tidak lagi terpotong oleh container `overflow-x-auto`
+  (tabel Main Table) atau area scroll modal detail, serta selalu di atas modal.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, halaman board PM/Member,
+  Anggota Proyek, dan `/home` balas 200.
+
 - **2026-11-24** – Perbaikan "Gagal memuat board".
   (a) **Penyebab**: kolom `invited_by` (FK ke `profiles`) yang ditambahkan untuk fitur undangan
   membuat `project_members` punya **dua** relasi ke `profiles` (`user_id` dan `invited_by`).
