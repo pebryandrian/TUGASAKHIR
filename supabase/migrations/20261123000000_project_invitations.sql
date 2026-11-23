@@ -68,9 +68,9 @@ begin
       )
       or exists (
         select 1
-        from public.projects p
-        where p.id = %1$I
-          and p.owner_id = auth.uid()
+        from public.projects proj
+        where proj.id = %1$I
+          and proj.owner_id = auth.uid()
       );
     $body$
   $fn$, arg_name);
