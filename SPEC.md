@@ -153,6 +153,24 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-23** – Akun contoh untuk membandingkan POV Project Manager vs Member.
+  `scripts/seed-demo-accounts.mjs` membuat:
+  **PM** `pm.demo@invisual.test` / `Manager2026!` (Rani Project Manager) dan
+  **Member** `member.demo@invisual.test` / `Member2026!` (Bagas Anggota Tim).
+  Keduanya anggota pada dua project contoh (Client/Aqua, Marketplace/Glowup); tugas yang punya
+  penanggung jawab ditugaskan ke akun Member sehingga POV member langsung berisi.
+  Verifikasi: PM memiliki kedua project sebagai owner, Member berperan `member` di keduanya dan
+  melihat 13 tugas (6 ditugaskan kepadanya).
+  Catatan: **migrasi `20261114000000_rls_roles.sql` belum dijalankan** — uji langsung menunjukkan
+  member masih bisa menghapus/membuat grup dan menambah label status di database, walaupun
+  tombolnya sudah disembunyikan di UI.
+
+- **2026-11-23** – Perbaikan halaman login: `/signin` sebelumnya memakai `initialMode = 'signup'`
+  sehingga menampilkan form daftar (pengguna mengira tidak bisa login). Default diubah ke
+  `'login'` dan `/signup` kini eksplisit meminta mode signup.
+  Verifikasi: `/signin` memuat "Hi, Welcome Back!", `/signup` memuat "Create Your Account",
+  `/forgot-password` memuat "Reset Your Password" (ketiganya 200).
+
 - **2026-11-14** – Menyesuaikan aplikasi dengan **`LaporanTA-PebryAndrian-revisi15.docx`**
   (laporan terbaru; revisi13 sudah digantikan).
   (a) **UC-01 / Gambar 4.13**: login dipindah ke **server action** (`app/signin/actions.ts`) —
