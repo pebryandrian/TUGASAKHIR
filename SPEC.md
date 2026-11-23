@@ -153,6 +153,22 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Sidebar kiri dipastikan punya scroll sendiri (Home & board).
+  (a) **Pengukuran langsung**: halaman diuji di Edge headless (CDP) pada lebar 1920, 1600, 1440,
+  1366, 1280, dan 1100 px. Hasilnya: tinggi dokumen = tinggi layar (tidak ada scroll halaman),
+  `<main>` yang menggulir (`scrollHeight` 1299 > `clientHeight` 744), dan posisi `<aside>` tetap
+  (top 64 → 64) baik saat `<main>` digulir maupun saat `window` digulir.
+  (b) **Penguatan**: sidebar diberi `lg:sticky lg:top-16` + `lg:h-[calc(100dvh-4rem)]
+  lg:self-start lg:overscroll-contain` (Home dan board). Efeknya dua lapis: pada kondisi normal
+  (hanya `<main>` menggulir) sticky tidak berpengaruh; bila halaman yang menggulir — mis. CSS lama
+  masih ter-cache atau tinggi jendela tidak terduga — sidebar tetap menempel di bawah header.
+  (c) **Bukti**: uji "fallback" (memaksa tinggi dokumen menjadi auto sehingga halaman menggulir
+  628 px) menunjukkan posisi sidebar tetap di 64 px; saat isi sidebar lebih tinggi dari layar
+  (jendela 380 px) sidebar memiliki scroll sendiri (`scrollHeight` 532 > `clientHeight` 224) dan
+  posisinya tidak berubah.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/home` dan `/project/client/aqua`
+  (PM dan Member) balas 200.
+
 - **2026-11-24** – Halaman board (Main Table): sidebar tidak ikut ter-scroll.
   (a) **Perubahan layout**: sama seperti Home — akar halaman memakai
   `min-h-screen lg:h-screen lg:overflow-hidden`, baris konten `lg:min-h-0`, sidebar

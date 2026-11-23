@@ -870,8 +870,9 @@ export default function DashboardPage() {
           Di layar besar tinggi dikunci (h-screen) dan hanya <main> yang
           menggulir, sehingga sidebar kiri tetap di tempat saat konten di-scroll. */}
       <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
-        {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:h-full lg:overflow-y-auto lg:overflow-x-hidden flex flex-col justify-between shrink-0">
+        {/* Left Sidebar — menempel di bawah header dan punya scroll sendiri
+            (`lg:sticky` + tinggi tetap), sama seperti halaman board. */}
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:sticky lg:top-16 lg:h-[calc(100dvh-4rem)] lg:self-start lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-contain flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
