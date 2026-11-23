@@ -153,6 +153,21 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – Dropdown workspace terpotong di sidebar.
+  (a) **Penyebab**: agar sidebar tidak ikut ter-scroll, sidebar diberi `overflow-y-auto`. Dropdown
+  dan menu `⋯` pada `WorkspaceSelector` masih memakai `position: absolute` di dalam sidebar,
+  sehingga **terpangkas** oleh container ber-overflow itu (hanya terlihat beberapa baris), dan
+  sidebar ikut tergeser ke samping karena isi dropdown (286px) lebih lebar daripada sidebar (224px).
+  (b) **Perbaikan**: kedua popup dirender lewat `createPortal` ke `<body>` dengan posisi `fixed`
+  yang dihitung dari posisi tombol pemicu (otomatis membuka ke atas bila ruang bawah kurang, dan
+  tetap di dalam layar). Popup ditutup saat halaman/sidebar di-scroll atau ukuran jendela berubah,
+  supaya posisinya tidak melenceng.
+  (c) Footer dropdown dirapikan: tombol tidak lagi terpotong, label untuk Member dipendekkan menjadi
+  "Hanya PM" (dengan tooltip penjelasan), dan sidebar diberi `lg:overflow-x-hidden` agar tidak ada
+  geser horizontal.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/home` dan `/profile` balas 200 untuk
+  akun PM maupun Member.
+
 - **2026-11-24** – Workspace dan pembuatan project/scope hanya untuk Project Manager.
   (a) **Masalah**: Member masih melihat dan memakai tombol *Add Workspace*, menu `⋯`
   (rename/delete workspace), *New Scope*, *Muat contoh*, dan *New Card*.

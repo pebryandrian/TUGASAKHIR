@@ -871,7 +871,7 @@ export default function DashboardPage() {
           menggulir, sehingga sidebar kiri tetap di tempat saat konten di-scroll. */}
       <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
         {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:h-full lg:overflow-y-auto flex flex-col justify-between shrink-0">
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:h-full lg:overflow-y-auto lg:overflow-x-hidden flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
