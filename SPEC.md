@@ -153,6 +153,28 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-24** – My Member: Project Manager dapat mengubah peran anggota.
+  (a) **Daftar**: semua pengguna yang mendaftar otomatis masuk **My Member** dengan peran default
+  **Member** (kolom `profiles.role` default `'member'`, baris dibuat oleh trigger saat sign up).
+  (b) **Ubah peran**: kolom *Role* pada tabel My Member menjadi dropdown dengan **dua pilihan saja**
+  — `Member` dan `Project Manager`. Baris milik sendiri tidak bisa diubah (ditandai "Anda").
+  Pilihan tervalidasi lagi di `updateTeamMemberRole` (menolak peran lain dan menolak mengubah
+  peran sendiri).
+  (c) **Peran efektif**: yang ditampilkan adalah peran yang benar-benar berlaku pada project yang
+  dikelola PM (`listTeamRoles`), dengan `profiles.role` sebagai cadangan. Perubahan diterapkan ke
+  baris `project_members` di project yang dikelola PM (langsung berpengaruh pada hak akses) dan
+  `profiles.role` sebagai peran default. PM tidak bisa menurunkan peran pada project milik orang
+  tersebut.
+  (d) **Migrasi baru** `supabase/migrations/20261125000000_team_member_roles.sql`: kolom
+  `profiles.role` + check constraint dua nilai, policy `profiles_update_manager` (PM boleh mengubah
+  peran anggota), dan trigger `trg_profiles_guard_role_update` yang membatasi PM hanya pada kolom
+  `role` serta melarang siapa pun mengubah perannya sendiri. Sebelum migrasi dijalankan, perubahan
+  tetap berhasil untuk anggota yang sudah tergabung di project PM; untuk pengguna tanpa project
+  muncul pesan agar migrasi dijalankan.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase — promosi dan
+  pengembalian peran anggota pada 2 project PM berhasil (2 baris berubah, lalu dikembalikan);
+  `/home` dan halaman Anggota Proyek balas 200.
+
 - **2026-11-24** – Penanggung jawab tugas hanya bisa diubah Project Manager (F-13).
   (a) **Masalah**: kolom *Person* (Main Table), panel detail tugas, dan pemilih penanggung jawab
   subtask bisa diubah siapa pun, termasuk Member. Pembagian tugas adalah wewenang PM.

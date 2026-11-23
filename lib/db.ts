@@ -143,13 +143,18 @@ export async function updateProfile(patch: Partial<Pick<Profile, 'name' | 'avata
 }
 
 // Daftar anggota (dipakai section "My Member" di Home).
+// Semua pengguna yang mendaftar otomatis ada di tabel `profiles` (dibuat oleh
+// trigger saat sign up) dan default perannya 'member'.
 export async function listProfiles(): Promise<Profile[]> {
   const { data, error } = await supabase()
     .from('profiles')
     .select('id, name, email, role, avatar_url')
     .order('name')
   if (error) throw error
-  return (data as Profile[]) ?? []
+  return ((data ?? []) as Profile[]).map((p) => ({
+    ...p,
+    role: p.role === 'project_manager' ? 'project_manager' : 'member',
+  }))
 }
 
 export async function changePassword(password: string) {
@@ -1013,6 +1018,144 @@ export async function removeMember(projectId: string, userId: string): Promise<v
     .eq('project_id', projectId)
     .eq('user_id', userId)
   if (error) throw error
+}
+
+// ======================== PERAN ANGGOTA TIM (My Member) ========================
+
+// Pilihan peran yang boleh diberikan dari halaman Home: hanya dua ini.
+export type TeamRole = 'project_manager' | 'member'
+
+export interface TeamRoleInfo {
+  role: TeamRole
+  /** Jumlah project (milik PM ini) yang diikuti orang tersebut. */
+  projects: number
+}
+
+export const MISSING_TEAM_ROLE_POLICY_MESSAGE =
+  'Peran belum dapat diubah karena kebijakan akses database belum diperbarui. Jalankan migrasi supabase/migrations/20261125000000_team_member_roles.sql di Supabase → SQL Editor, atau tambahkan orang tersebut ke salah satu project Anda lebih dulu.'
+
+// Project yang dikelola pengguna ini: miliknya sendiri atau tempat ia berperan PM.
+async function managedProjectIds(workspaceId?: string | null): Promise<Set<string>> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) return new Set()
+
+  const [{ data: owned }, { data: managed }] = await Promise.all([
+    db.from('projects').select('id, workspace_id').eq('owner_id', user.id),
+    db.from('project_members').select('project_id').eq('user_id', user.id).eq('role', 'project_manager'),
+  ])
+
+  const all = new Set<string>()
+  for (const row of (owned ?? []) as { id: string; workspace_id: string | null }[]) {
+    if (!workspaceId || row.workspace_id === workspaceId) all.add(row.id)
+  }
+  for (const row of (managed ?? []) as { project_id: string }[]) all.add(row.project_id)
+
+  // Saat workspace dipilih, batasi ke project di workspace tersebut.
+  if (workspaceId) {
+    const { data: projects } = await db.from('projects').select('id, workspace_id').in('id', [...all])
+    for (const row of (projects ?? []) as { id: string; workspace_id: string | null }[]) {
+      if (row.workspace_id !== workspaceId) all.delete(row.id)
+    }
+  }
+  return all
+}
+
+// Peran anggota pada project yang dikelola PM ini. Dipakai "My Member" supaya
+// yang tampil adalah peran yang benar-benar berlaku, bukan label kosong.
+export async function listTeamRoles(
+  workspaceId?: string | null,
+): Promise<Record<string, TeamRoleInfo>> {
+  const db = supabase()
+  const projectIds = await managedProjectIds(workspaceId)
+  if (projectIds.size === 0) return {}
+
+  const { data, error } = await db
+    .from('project_members')
+    .select('user_id, project_id, role')
+    .in('project_id', [...projectIds])
+  if (error) throw error
+
+  const info: Record<string, TeamRoleInfo> = {}
+  for (const row of (data ?? []) as { user_id: string; role: string }[]) {
+    const entry = (info[row.user_id] ??= { role: 'member', projects: 0 })
+    entry.projects += 1
+    if (row.role === 'project_manager') entry.role = 'project_manager'
+  }
+  return info
+}
+
+// Ubah peran anggota dari "My Member" (Home, POV Project Manager).
+//
+// Peran diterapkan pada dua tempat:
+//  1. Baris keanggotaan di semua project yang dikelola PM ini (langsung berlaku).
+//  2. `profiles.role` sebagai peran default pengguna (butuh migrasi
+//     20261125000000_team_member_roles.sql; diabaikan bila belum dijalankan).
+// Baris keanggotaan yang belum ada TIDAK dibuat, supaya PM tidak diam-diam
+// menambahkan orang ke project yang belum diikuti.
+export async function updateTeamMemberRole(
+  userId: string,
+  role: TeamRole,
+  workspaceId?: string | null,
+): Promise<{ labelUpdated: boolean; projectsUpdated: number }> {
+  const db = supabase()
+  const {
+    data: { user },
+  } = await db.auth.getUser()
+  if (!user) throw new Error('Harus login.')
+
+  if (user.id === userId) {
+    throw new Error('Anda tidak dapat mengubah peran Anda sendiri.')
+  }
+  if (role !== 'member' && role !== 'project_manager') {
+    throw new Error('Peran hanya boleh Member atau Project Manager.')
+  }
+
+  // 1. Project yang dikelola PM ini (project milik target dilewati agar tidak menurunkan PM lain).
+  const projectIds = await managedProjectIds(workspaceId)
+  let projectsUpdated = 0
+  if (projectIds.size > 0) {
+    const { data: ownedByTarget } = await db
+      .from('projects')
+      .select('id')
+      .eq('owner_id', userId)
+      .in('id', [...projectIds])
+    const skip = new Set(((ownedByTarget ?? []) as { id: string }[]).map((p) => p.id))
+
+    const { data: rows } = await db
+      .from('project_members')
+      .select('project_id, role')
+      .eq('user_id', userId)
+      .in('project_id', [...projectIds])
+
+    for (const row of (rows ?? []) as { project_id: string; role: string }[]) {
+      if (skip.has(row.project_id) || row.role === role) continue
+      const { error } = await db
+        .from('project_members')
+        .update({ role })
+        .eq('project_id', row.project_id)
+        .eq('user_id', userId)
+      if (error) throw error
+      projectsUpdated += 1
+    }
+  }
+
+  // 2. Peran default pengguna. Sebelum migrasi dijalankan RLS menolak dengan
+  //    0 baris (bukan error), jadi hasilnya dilaporkan lewat `labelUpdated`.
+  const { data: updated, error } = await db
+    .from('profiles')
+    .update({ role })
+    .eq('id', userId)
+    .select('id')
+  const labelUpdated = !error && Boolean(updated && updated.length > 0)
+
+  if (!labelUpdated && projectsUpdated === 0) {
+    throw new Error(MISSING_TEAM_ROLE_POLICY_MESSAGE)
+  }
+
+  return { labelUpdated, projectsUpdated }
 }
 
 // ======================== FAVORIT (kolom project_members.favorite) ========================

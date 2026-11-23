@@ -47,12 +47,16 @@ import {
   listProjectTaskStats,
   listProjects,
   listProfiles,
+  listTeamRoles,
   setProjectFavorite,
   updateProject,
+  updateTeamMemberRole,
   type MyTaskItem,
   type Profile,
   type Project,
   type ProjectRoleMap,
+  type TeamRole,
+  type TeamRoleInfo,
   type Workspace,
 } from '@/lib/db'
 import { seedDemoProjects } from '@/lib/template'
@@ -232,6 +236,12 @@ export default function DashboardPage() {
   const [searchMember, setSearchMember] = useState('')
   const [memberSort, setMemberSort] = useState<MemberSort>('name-asc')
   const [showMemberSort, setShowMemberSort] = useState(false)
+  // Ubah peran anggota dari "My Member" (POV Project Manager).
+  const [roleBusyId, setRoleBusyId] = useState<string | null>(null)
+  const [teamNotice, setTeamNotice] = useState('')
+  const [teamError, setTeamError] = useState('')
+  // Peran efektif anggota pada project yang dikelola PM ini.
+  const [teamRoles, setTeamRoles] = useState<Record<string, TeamRoleInfo>>({})
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
@@ -289,16 +299,18 @@ export default function DashboardPage() {
   const refreshProjects = useCallback(async () => {
     setError('')
     try {
-      const [rows, people, taskStats, favs, manager, tasks, invites, roles] = await Promise.all([
-        listProjects(activeWorkspace?.id),
-        listProfiles().catch(() => [] as Profile[]),
-        listProjectTaskStats().catch(() => ({})),
-        listFavoriteProjects().catch(() => []),
-        hasManagerRole().catch(() => true),
-        listMyTasks(12).catch(() => [] as MyTaskItem[]),
-        listMyInvitations().catch(() => []),
-        listProjectRoles().catch(() => ({}) as ProjectRoleMap),
-      ])
+      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles] =
+        await Promise.all([
+          listProjects(activeWorkspace?.id),
+          listProfiles().catch(() => [] as Profile[]),
+          listProjectTaskStats().catch(() => ({})),
+          listFavoriteProjects().catch(() => []),
+          hasManagerRole().catch(() => true),
+          listMyTasks(12).catch(() => [] as MyTaskItem[]),
+          listMyInvitations().catch(() => []),
+          listProjectRoles().catch(() => ({}) as ProjectRoleMap),
+          listTeamRoles(activeWorkspace?.id).catch(() => ({}) as Record<string, TeamRoleInfo>),
+        ])
       setProjects(rows)
       setProfiles(people)
       setTaskStats(taskStats)
@@ -307,6 +319,7 @@ export default function DashboardPage() {
       setMyTasks(tasks)
       setInvitationCount(invites.length)
       setProjectRoles(roles)
+      setTeamRoles(teamRoles)
       return rows
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat project.')
@@ -622,6 +635,50 @@ export default function DashboardPage() {
       return a.name.localeCompare(b.name)
     })
   }, [profiles, searchMember, memberSort])
+
+  // ======================== PERAN ANGGOTA (MY MEMBER) ========================
+
+  // Hanya Project Manager yang boleh mengubah peran anggota.
+  const handleTeamRoleChange = async (member: Profile, role: TeamRole) => {
+    const current = teamRoles[member.id]?.role ?? member.role
+    if (roleBusyId || current === role) return
+    if (!isManager) return
+    const previousRole = current
+    const previousInfo = teamRoles[member.id]
+    setRoleBusyId(member.id)
+    setTeamError('')
+    setTeamNotice('')
+    // Optimistis: ubah tampilan dulu, kembalikan bila gagal.
+    setProfiles((prev) => prev.map((p) => (p.id === member.id ? { ...p, role } : p)))
+    setTeamRoles((prev) => ({
+      ...prev,
+      [member.id]: { role, projects: prev[member.id]?.projects ?? 0 },
+    }))
+    try {
+      const result = await updateTeamMemberRole(member.id, role, activeWorkspace?.id ?? null)
+      const label = role === 'project_manager' ? 'Project Manager' : 'Member'
+      setTeamNotice(
+        result.projectsUpdated > 0
+          ? `Peran ${member.name} menjadi ${label} pada ${result.projectsUpdated} project Anda.`
+          : `Peran ${member.name} diubah menjadi ${label}.`,
+      )
+      // Muat ulang agar peran yang tampil benar-benar dari database.
+      await refreshProjects()
+    } catch (err) {
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === member.id ? { ...p, role: previousRole } : p)),
+      )
+      setTeamRoles((prev) => {
+        const next = { ...prev }
+        if (previousInfo) next[member.id] = previousInfo
+        else delete next[member.id]
+        return next
+      })
+      setTeamError(err instanceof Error ? err.message : 'Gagal mengubah peran anggota.')
+    } finally {
+      setRoleBusyId(null)
+    }
+  }
 
   const displayName = profile?.name || 'there'
   const firstName = displayName.split(' ')[0]
@@ -983,7 +1040,12 @@ export default function DashboardPage() {
             className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
           >
             <div className="mb-4">
-              <h2 className="text-lg font-bold text-white tracking-tight mb-4">My Member</h2>
+              <h2 className="text-lg font-bold text-white tracking-tight mb-1">My Member</h2>
+              <p className="text-xs text-neutral-500 mb-4">
+                Semua pengguna yang mendaftar otomatis masuk daftar ini dengan peran{' '}
+                <span className="text-neutral-300 font-medium">Member</span>. Peran hanya dapat
+                diubah oleh Project Manager.
+              </p>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
                 <div className="relative flex-1 max-w-md">
                   <Search
@@ -1038,37 +1100,83 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {teamError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{teamError}</span>
+              </div>
+            )}
+            {teamNotice && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+                <Check size={16} className="mt-0.5 shrink-0" />
+                <span>{teamNotice}</span>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
                     <th className="pb-3 font-normal">Member Name</th>
-                    <th className="pb-3 text-right font-normal">Role</th>
+                    <th className="pb-3 text-right font-normal w-52">Role</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800/60">
-                  {filteredMembers.map((member) => (
-                    <tr key={member.id} className="group hover:bg-neutral-800/30 transition-colors">
-                      <td className="py-3.5 pr-4">
-                        <div className="flex items-center gap-3">
-                          <Avatar
-                            name={member.name}
-                            src={member.avatar_url}
-                            size={36}
-                          />
-                          <div>
-                            <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
-                              {member.name}
-                            </p>
-                            <p className="text-xs text-neutral-400">{member.email}</p>
+                  {filteredMembers.map((member) => {
+                    const isSelf = member.id === profile?.id
+                    const busy = roleBusyId === member.id
+                    const info = teamRoles[member.id]
+                    const effectiveRole: TeamRole = info?.role ?? member.role
+                    return (
+                      <tr
+                        key={member.id}
+                        className="group hover:bg-neutral-800/30 transition-colors"
+                      >
+                        <td className="py-3.5 pr-4">
+                          <div className="flex items-center gap-3">
+                            <Avatar name={member.name} src={member.avatar_url} size={36} />
+                            <div>
+                              <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
+                                {member.name}
+                                {isSelf && (
+                                  <span className="ml-2 rounded bg-neutral-700/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-300">
+                                    Anda
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-neutral-400">{member.email}</p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-3.5 pl-4 text-right text-xs sm:text-sm text-neutral-400 whitespace-nowrap">
-                        {member.role === 'project_manager' ? 'Project Manager' : 'Member'}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-3.5 pl-4 text-right whitespace-nowrap">
+                          {isSelf ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-lg border border-neutral-700/70 bg-neutral-800/50 px-2.5 py-1 text-xs text-neutral-400"
+                              title="Peran Anda sendiri tidak dapat diubah dari sini"
+                            >
+                              Project Manager
+                            </span>
+                          ) : (
+                            <div className="inline-flex items-center gap-2">
+                              {busy && <Loader2 size={13} className="animate-spin text-blue-400" />}
+                              <select
+                                value={effectiveRole}
+                                disabled={busy}
+                                onChange={(e) =>
+                                  handleTeamRoleChange(member, e.target.value as TeamRole)
+                                }
+                                className="h-9 pl-2.5 pr-8 bg-[#1b1c20] border border-neutral-700 rounded-lg text-xs text-neutral-200 outline-none focus:border-blue-500 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                                aria-label={`Peran ${member.name}`}
+                              >
+                                <option value="member">Member</option>
+                                <option value="project_manager">Project Manager</option>
+                              </select>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                   {!loading && filteredMembers.length === 0 && (
                     <tr>
                       <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
