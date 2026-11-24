@@ -35,6 +35,8 @@ import {
   getDocFileUrl,
   saveDoc,
   getSessionProfile,
+  listFavoriteProjects,
+  setProjectFavorite,
   type Workspace,
   type Priority,
 } from '@/lib/db'
@@ -110,6 +112,7 @@ import {
   ShieldCheck,
   Link2,
   Upload,
+  Star,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -1405,6 +1408,13 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<string>('Main Table')
   const [groups, setGroups] = useState<TaskGroup[]>([])
   const [activeNav, setActiveNav] = useState('Home')
+  // Favorit: daftar project yang dibintangi pengguna. Sebelumnya tombol
+  // "Favorites" di sidebar board langsung berpindah ke Home, sehingga terasa
+  // seperti salah navigasi. Sekarang daftarnya dibuka di tempat (collapsible),
+  // sama seperti di Home.
+  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
+  const [showFavorites, setShowFavorites] = useState(true)
+  const [favoriteBusy, setFavoriteBusy] = useState(false)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [selectedWorkspace, setSelectedWorkspace] = useState('')
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false)
@@ -1505,6 +1515,11 @@ export default function ProjectDetailPage() {
       canCreateProject()
         .then((allowed) => {
           if (alive) setCanManageWorkspace(allowed)
+        })
+        .catch(() => {})
+      listFavoriteProjects()
+        .then((rows) => {
+          if (alive) setFavorites(rows)
         })
         .catch(() => {})
 
@@ -1648,6 +1663,32 @@ export default function ProjectDetailPage() {
       }`,
     )
   }
+  // Bintangi / lepas bintang project yang sedang dibuka. Perubahan disimpan ke
+  // `project_members.favorite` sehingga ikut terlihat di Home dan sidebar.
+  const isFavorite = favorites.some((f) => f.id === projectId)
+  const handleToggleFavorite = async () => {
+    if (!projectId || favoriteBusy) return
+    const next = !isFavorite
+    const snapshot = favorites
+    setFavoriteBusy(true)
+    // Optimistis: ubah tampilan dulu, kembalikan bila gagal.
+    setFavorites((prev) =>
+      next
+        ? [...prev, { id: projectId, name: projectMeta?.name ?? cardTitle, scope: projectMeta?.scope ?? scopeTitle }]
+        : prev.filter((f) => f.id !== projectId),
+    )
+    try {
+      await setProjectFavorite(projectId, next)
+    } catch (err) {
+      setFavorites(snapshot)
+      setNotice(
+        `Gagal menyimpan favorit: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setFavoriteBusy(false)
+    }
+  }
+
   const refreshMembers = async () => {
     if (!projectId) return
     const board = await loadBoard(projectId)
@@ -3697,16 +3738,49 @@ export default function ProjectDetailPage() {
 
               <button
                 type="button"
-                onClick={() => router.push('/home')}
+                onClick={() => setShowFavorites((v) => !v)}
                 className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
                   activeNav === 'Favorites'
                     ? 'text-white'
                     : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
                 }`}
+                aria-expanded={showFavorites}
               >
                 <span>Favorites</span>
-                <ChevronDown size={15} strokeWidth={1.8} />
+                <ChevronDown
+                  size={15}
+                  strokeWidth={1.8}
+                  className={`transition-transform ${showFavorites ? '' : '-rotate-90'}`}
+                />
               </button>
+
+              {showFavorites && (
+                <div className="pl-3 space-y-0.5">
+                  {favorites.length === 0 ? (
+                    <p className="px-4 py-1.5 text-xs text-neutral-600">
+                      Belum ada favorit. Klik bintang pada proyek.
+                    </p>
+                  ) : (
+                    favorites.map((f) => (
+                      <Link
+                        key={f.id}
+                        href={`/project/${slugify(f.scope)}/${slugify(f.name)}`}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition ${
+                          f.id === projectId
+                            ? 'bg-neutral-800/60 text-white'
+                            : 'text-neutral-300 hover:text-white hover:bg-neutral-800/40'
+                        }`}
+                      >
+                        <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
+                          {f.scope ?? ''}
+                        </span>
+                      </Link>
+                    ))
+                  )}
+                </div>
+              )}
             </nav>
 
             <div className="pt-2">
@@ -3934,6 +4008,22 @@ export default function ProjectDetailPage() {
                     {roleLabel(permissions.role)}
                   </span>
                 )}
+                {/* Bintangi project ini (masuk ke Favorites) */}
+                <button
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  disabled={!projectId || favoriteBusy}
+                  className={`ml-1 p-1.5 rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+                    isFavorite
+                      ? 'text-yellow-400 hover:bg-yellow-400/10'
+                      : 'text-neutral-500 hover:text-yellow-400 hover:bg-neutral-800/60'
+                  }`}
+                  aria-pressed={isFavorite}
+                  aria-label={isFavorite ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                  title={isFavorite ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                >
+                  <Star size={16} strokeWidth={1.8} fill={isFavorite ? 'currentColor' : 'none'} />
+                </button>
               </div>
             </div>
 
