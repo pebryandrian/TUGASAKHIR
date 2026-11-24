@@ -17,6 +17,8 @@ export interface ProjectPermissions {
   inviteMembers: boolean
   manageRoles: boolean
   deleteTasks: boolean
+  /** Hanya Project Manager yang boleh membuat tugas baru (UC-03). */
+  createTasks: boolean
   /** Hanya Project Manager yang boleh menetapkan penanggung jawab tugas. */
   assignTasks: boolean
   editProject: boolean
@@ -30,6 +32,7 @@ const MANAGER_ONLY: Omit<ProjectPermissions, 'role' | 'isManager' | 'loading'> =
   inviteMembers: true,
   manageRoles: true,
   deleteTasks: true,
+  createTasks: true,
   assignTasks: true,
   editProject: true,
   deleteProject: true,
@@ -42,6 +45,7 @@ const MEMBER_ONLY: Omit<ProjectPermissions, 'role' | 'isManager' | 'loading'> = 
   inviteMembers: false,
   manageRoles: false,
   deleteTasks: false,
+  createTasks: false,
   assignTasks: false,
   editProject: false,
   deleteProject: false,

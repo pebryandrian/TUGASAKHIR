@@ -676,12 +676,15 @@ function KanbanView({
   onMove,
   onOpen,
   onAdd,
+  canAdd = true,
 }: {
   groups: TaskGroup[]
   statusList: StatusDef[]
   onMove: (groupId: string, taskId: string, statusLabel: string) => void
   onOpen: (groupId: string, taskId: string) => void
   onAdd: (statusLabel: string) => void
+  /** Hanya Project Manager yang boleh menambah tugas (UC-03). */
+  canAdd?: boolean
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [overColumn, setOverColumn] = useState<string | null>(null)
@@ -774,14 +777,16 @@ function KanbanView({
                 </div>
               ))}
 
-              <button
-                type="button"
-                onClick={() => onAdd(status.label)}
-                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700/80 py-2 text-[11px] text-neutral-500 hover:text-white hover:border-neutral-600 transition cursor-pointer"
-              >
-                <Plus size={12} strokeWidth={2.5} />
-                Add task
-              </button>
+              {canAdd && (
+                <button
+                  type="button"
+                  onClick={() => onAdd(status.label)}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700/80 py-2 text-[11px] text-neutral-500 hover:text-white hover:border-neutral-600 transition cursor-pointer"
+                >
+                  <Plus size={12} strokeWidth={2.5} />
+                  Add task
+                </button>
+              )}
             </div>
           </div>
         )
@@ -2345,6 +2350,11 @@ export default function ProjectDetailPage() {
 
   // Buka modal New Item dengan nilai awal dari data nyata.
   const openNewItemModal = (date?: string, status?: string) => {
+    // Hanya Project Manager yang boleh membuat tugas (UC-03).
+    if (!can.createTasks) {
+      setNotice('Hanya Project Manager yang dapat membuat tugas baru.')
+      return
+    }
     setNewTaskTitle('New Item')
     setNewTaskGroup(groups[0]?.id ?? '')
     setNewTaskAssignee('')
@@ -4204,25 +4214,27 @@ export default function ProjectDetailPage() {
                 />
                 {/* Action Toolbar for Main Table */}
                 <div className="flex flex-wrap items-center gap-3 mb-6">
-                  {/* + New item button with split options */}
-                  <div className="inline-flex rounded-md shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => openNewItemModal()}
-                      className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
-                    >
-                      <Plus size={14} strokeWidth={2.5} />
-                      <span>New item</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openNewItemModal()}
-                      className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
-                      aria-label="More new item options"
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
+                  {/* + New item — hanya Project Manager (UC-03) */}
+                  {can.createTasks && (
+                    <div className="inline-flex rounded-md shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => openNewItemModal()}
+                        className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
+                      >
+                        <Plus size={14} strokeWidth={2.5} />
+                        <span>New item</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openNewItemModal()}
+                        className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
+                        aria-label="More new item options"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Search Input / Toggle */}
                   <div className="relative">
@@ -4705,23 +4717,25 @@ export default function ProjectDetailPage() {
                           <span className="text-[11px] text-neutral-500 font-normal ml-1">
                             ({group.items.length})
                           </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setNewTaskGroup(group.id)
-                              setShowGroupDropdown(false)
-                              setShowPersonDropdown(false)
-                              setShowStatusDropdown(false)
-                              setShowDateDropdown(false)
-                              setShowNewItemModal(true)
-                            }}
-                            className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
-                            title="Tambah task"
-                            aria-label="Tambah task"
-                          >
-                            <Plus size={14} strokeWidth={2.5} />
-                          </button>
+                          {can.createTasks && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setNewTaskGroup(group.id)
+                                setShowGroupDropdown(false)
+                                setShowPersonDropdown(false)
+                                setShowStatusDropdown(false)
+                                setShowDateDropdown(false)
+                                setShowNewItemModal(true)
+                              }}
+                              className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
+                              title="Tambah task"
+                              aria-label="Tambah task"
+                            >
+                              <Plus size={14} strokeWidth={2.5} />
+                            </button>
+                          )}
                         </div>
 
                         {/* Table View (When Expanded) */}
@@ -5516,6 +5530,7 @@ export default function ProjectDetailPage() {
                 onMove={setTaskStatus}
                 onOpen={openTaskDetail}
                 onAdd={(statusLabel) => openNewItemModal(undefined, statusLabel)}
+                canAdd={can.createTasks}
               />
             )}
 
