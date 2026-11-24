@@ -30,3 +30,15 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Jangan commit skrip uji sementara (`scripts/_tmp-*.mjs`) maupun hasil build (`.next/`).
 - Jangan mengubah berkas laporan (`*.docx`, `*.pdf`) di folder induk.
 
+## Konteks & pemadatan (compaction)
+
+- **Auto-compact pada 500k token.** Begitu konteks percakapan mendekati ~500 ribu token, ringkas
+  (compact) konteks secara otomatis lalu lanjutkan pekerjaan tanpa menunggu perintah pengguna.
+- Saat memadatkan, hal yang **wajib dipertahankan**: tujuan yang sedang dikerjakan, keputusan
+  teknis beserta alasannya, daftar berkas yang diubah, status commit/PR, migrasi Supabase yang
+  belum dijalankan, dan langkah berikutnya.
+- Hal yang boleh dibuang: isi keluaran perintah yang panjang (log build, dump JSON, hasil query
+  mentah), potongan kode yang sudah tidak relevan, dan percobaan yang sudah gagal.
+- Sebelum memadatkan, pastikan tidak ada perubahan yang belum di-commit; kalau ada, selesaikan
+  commit + push + PR lebih dulu.
+
