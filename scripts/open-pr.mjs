@@ -63,20 +63,48 @@ const headers = {
   'User-Agent': 'invisual-agent',
 }
 
-async function gh(pathname, init = {}) {
-  const res = await fetch(`${api}${pathname}`, { headers, ...init })
-  const text = await res.text()
-  let data = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = text
+// Panggilan API dengan percobaan ulang. Jaringan di mesin ini kadang gagal
+// sesaat (UND_ERR_CONNECT_TIMEOUT / fetch failed), jadi kegagalan jaringan
+// diulang beberapa kali dengan jeda bertahap. Error 4xx tidak diulang karena
+// bukan masalah sementara.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function gh(pathname, init = {}, attempts = 4) {
+  let lastError
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const res = await fetch(`${api}${pathname}`, {
+        headers,
+        signal: AbortSignal.timeout(20000),
+        ...init,
+      })
+      const text = await res.text()
+      let data = null
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        data = text
+      }
+      if (!res.ok) {
+        const reason = typeof data === 'object' && data?.message ? data.message : text
+        const error = new Error(`${res.status} ${reason}`)
+        // 4xx = permintaan salah, tidak berguna diulang.
+        if (res.status < 500) throw error
+        lastError = error
+      } else {
+        return data
+      }
+    } catch (err) {
+      lastError = err
+      // Kesalahan klien (mis. 404/422) langsung dilempar.
+      if (/^4\d\d /.test(err.message)) throw err
+    }
+    if (i < attempts) {
+      console.warn(`  koneksi ke GitHub gagal (percobaan ${i}/${attempts}), mencoba lagi…`)
+      await sleep(2000 * i)
+    }
   }
-  if (!res.ok) {
-    const reason = typeof data === 'object' && data?.message ? data.message : text
-    throw new Error(`${res.status} ${reason}`)
-  }
-  return data
+  throw lastError
 }
 
 const git = (...argv) =>
