@@ -329,6 +329,9 @@ export async function createProject(
     name: string
     scope?: string
     description?: string
+    /** Jadwal proyek (UC-01: nama, deskripsi, dan jadwal diisi saat membuat). */
+    start_date?: string | null
+    due_date?: string | null
     workspace_id?: string | null
   },
   options: { template?: boolean } = {},

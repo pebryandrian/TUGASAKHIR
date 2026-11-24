@@ -326,6 +326,10 @@ export default function DashboardPage() {
 
   const [showNewScopeModal, setShowNewScopeModal] = useState(false)
   const [newScopeName, setNewScopeName] = useState('')
+  // UC-01 langkah 4: form proyek baru diisi nama, deskripsi, dan jadwal proyek.
+  const [newScopeDesc, setNewScopeDesc] = useState('')
+  const [newScopeStart, setNewScopeStart] = useState('')
+  const [newScopeDue, setNewScopeDue] = useState('')
   const [showNewCardModal, setShowNewCardModal] = useState(false)
   const [newCardName, setNewCardName] = useState('')
   const [newCardDesc, setNewCardDesc] = useState('')
@@ -518,21 +522,40 @@ export default function DashboardPage() {
   const handleCreateScope = async (e: React.FormEvent) => {
     e.preventDefault()
     const title = newScopeName.trim()
-    if (!title || creating) return
+    if (creating) return
     if (!canCreate) {
       setCreateError('Hanya Project Manager yang dapat membuat scope baru.')
+      return
+    }
+    // Skenario alternatif UC-01 4a: nama kosong -> pesan validasi, form tetap terbuka.
+    if (!title) {
+      setCreateError('Nama proyek wajib diisi.')
       return
     }
     if (scopes.some((s) => s.title.toLowerCase() === title.toLowerCase())) {
       setCreateError('Scope dengan nama itu sudah ada.')
       return
     }
+    if (newScopeStart && newScopeDue && newScopeDue < newScopeStart) {
+      setCreateError('Tenggat proyek tidak boleh lebih awal daripada tanggal mulai.')
+      return
+    }
     setCreating(true)
     setCreateError('')
     try {
-      await createProject({ name: title, scope: title, workspace_id: activeWorkspace?.id ?? null })
+      await createProject({
+        name: title,
+        scope: title,
+        description: newScopeDesc.trim() || undefined,
+        start_date: newScopeStart || null,
+        due_date: newScopeDue || null,
+        workspace_id: activeWorkspace?.id ?? null,
+      })
       await refreshProjects()
       setNewScopeName('')
+      setNewScopeDesc('')
+      setNewScopeStart('')
+      setNewScopeDue('')
       setShowNewScopeModal(false)
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Gagal membuat scope.')
@@ -1015,6 +1038,9 @@ export default function DashboardPage() {
                       type="button"
                       onClick={() => {
                         setNewScopeName('')
+                        setNewScopeDesc('')
+                        setNewScopeStart('')
+                        setNewScopeDue('')
                         setCreateError('')
                         setShowNewScopeModal(true)
                       }}
@@ -1052,6 +1078,9 @@ export default function DashboardPage() {
                       type="button"
                       onClick={() => {
                         setNewScopeName('')
+                        setNewScopeDesc('')
+                        setNewScopeStart('')
+                        setNewScopeDue('')
                         setCreateError('')
                         setShowNewScopeModal(true)
                       }}
@@ -1382,21 +1411,60 @@ export default function DashboardPage() {
               </button>
             </div>
 
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Nama Proyek
+            </label>
             <input
               type="text"
               autoFocus
               value={newScopeName}
               onChange={(e) => setNewScopeName(e.target.value)}
               placeholder="scope name"
-              className="w-full h-14 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+              className="w-full h-12 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
+
+            <label className="block text-xs font-medium text-neutral-400 mt-4 mb-1.5">
+              Deskripsi
+            </label>
+            <textarea
+              rows={3}
+              value={newScopeDesc}
+              onChange={(e) => setNewScopeDesc(e.target.value)}
+              placeholder="deskripsi proyek (opsional)"
+              className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
+            />
+
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Tanggal Mulai
+                </label>
+                <input
+                  type="date"
+                  value={newScopeStart}
+                  onChange={(e) => setNewScopeStart(e.target.value)}
+                  className="w-full h-11 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Tenggat
+                </label>
+                <input
+                  type="date"
+                  value={newScopeDue}
+                  onChange={(e) => setNewScopeDue(e.target.value)}
+                  className="w-full h-11 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
 
             {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}
 
             <div className="flex items-center justify-end pt-6">
               <button
                 type="submit"
-                disabled={!newScopeName.trim() || creating}
+                disabled={creating}
                 className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
                 {creating ? 'Creating…' : 'Create'}
