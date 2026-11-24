@@ -1444,7 +1444,13 @@ export default function ProjectDetailPage() {
     }
   }, [showWorkspaceMenu])
   const [members, setMembers] = useState<Member[]>([])
-  const [customViews, setCustomViews] = useState<CustomView[]>([])
+  // Gantt dan Chart adalah tab tetap, sesuai Tabel 3.5 skenario 12
+  // ("Pengguna membuka tab Gantt dan Chart"). Sebelumnya keduanya harus
+  // ditambahkan manual lewat tombol "+".
+  const [customViews, setCustomViews] = useState<CustomView[]>([
+    { id: 'view-gantt', name: 'Gantt', type: 'gantt' },
+    { id: 'view-chart', name: 'Chart', type: 'chart' },
+  ])
   const [showAddViewMenu, setShowAddViewMenu] = useState(false)
 
   // ======================== DYNAMIC STATUS LIST ========================
