@@ -286,24 +286,13 @@ export async function listProjects(workspaceId?: string): Promise<Project[]> {
 
   let rows = (data as Project[]) ?? []
 
-  // Workspace menyaring daftar project, TETAPI project yang tidak bisa
-  // dijangkau lewat pemilih workspace tidak boleh ikut tersembunyi.
-  // Contoh nyata: project PM berada di workspace yang tidak terlihat oleh
-  // Member (dan sebaliknya), sehingga filter `.eq('workspace_id', …)` membuat
-  // undangan/project bersama hilang dari Home. Sekarang filter hanya berlaku
-  // untuk workspace yang memang terlihat oleh pengguna; project tanpa workspace
-  // juga tetap ditampilkan agar data lama tidak lenyap.
+  // Daftar proyek mengikuti workspace aktif (F-15, Tabel 3.5 skenario 16).
+  // Sebelumnya proyek dari workspace yang tidak terlihat oleh pengguna tetap
+  // ditampilkan, sehingga daftar tidak lagi mencerminkan workspace aktif.
+  // Agar perilaku ini konsisten, seluruh proyek contoh ditempatkan pada satu
+  // workspace yang diikuti oleh Project Manager maupun Member.
   if (workspaceId) {
-    const { data: visibleWorkspaces } = await db.from('workspaces').select('id')
-    const visible = new Set(
-      ((visibleWorkspaces ?? []) as { id: string }[]).map((w) => w.id),
-    )
-    rows = rows.filter(
-      (p) =>
-        !p.workspace_id ||
-        p.workspace_id === workspaceId ||
-        !visible.has(p.workspace_id),
-    )
+    rows = rows.filter((p) => p.workspace_id === workspaceId)
   }
 
   // Undangan yang belum diterima tidak boleh menampilkan isi project.
