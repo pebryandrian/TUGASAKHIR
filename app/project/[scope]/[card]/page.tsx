@@ -2019,6 +2019,8 @@ export default function ProjectDetailPage() {
 
   // Modal pengganti prompt()/confirm() bawaan browser agar konsisten dengan UI.
   const [showAddGroupModal, setShowAddGroupModal] = useState(false)
+  // Warna grup dipilih Project Manager (Tabel 3.5 skenario 11), bukan otomatis.
+  const [newGroupColor, setNewGroupColor] = useState('#6c7ff5')
   const [newGroupName, setNewGroupName] = useState('')
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
 
@@ -2980,8 +2982,9 @@ export default function ProjectDetailPage() {
   const handleAddNewGroup = async () => {
     const groupName = newGroupName.trim()
     if (!groupName) return
-    const colors = ['text-[#6c7ff5]', 'text-[#ea384c]', 'text-[#22c55e]', 'text-[#f59e0b]', 'text-[#ec4899]']
-    const color = colors[groups.length % colors.length]
+    // Warna dipilih PM pada modal; disimpan sebagai kelas teks Tailwind agar
+    // konsisten dengan cara grup yang sudah ada dirender.
+    const color = `text-[${newGroupColor}]`
     let id = `group-${Date.now()}`
     if (projectId) {
       const row = await createGroup(projectId, groupName, color, groups.length).catch((err) => {
@@ -4502,6 +4505,7 @@ export default function ProjectDetailPage() {
                               onClick={() => {
                                 setShowMoreTableMenu(false)
                                 setNewGroupName('')
+                                setNewGroupColor('#6c7ff5')
                                 setShowAddGroupModal(true)
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
@@ -4632,6 +4636,7 @@ export default function ProjectDetailPage() {
                             type="button"
                             onClick={() => {
                               setNewGroupName('')
+                              setNewGroupColor('#6c7ff5')
                               setShowAddGroupModal(true)
                             }}
                             className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-md transition cursor-pointer"
@@ -8263,6 +8268,40 @@ export default function ProjectDetailPage() {
               placeholder="mis. Desain Logo"
               className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
+
+            {/* Penanda warna grup (dipilih Project Manager) */}
+            <label className="block text-xs font-medium text-neutral-400 mt-4 mb-2">
+              Warna Grup
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {COLOR_PALETTE.map((hex) => {
+                const active = newGroupColor.toLowerCase() === hex.toLowerCase()
+                return (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => setNewGroupColor(hex)}
+                    style={{ backgroundColor: hex }}
+                    className={`w-7 h-7 rounded-full border-2 transition cursor-pointer ${
+                      active
+                        ? 'border-white scale-110 shadow-lg'
+                        : 'border-transparent hover:scale-105'
+                    }`}
+                    aria-label={`Warna ${hex}`}
+                    aria-pressed={active}
+                    title={hex}
+                  />
+                )
+              })}
+            </div>
+            <p className="mt-2 flex items-center gap-2 text-[11px] text-neutral-500">
+              <span
+                className="inline-block w-3 h-3 rounded-full"
+                style={{ backgroundColor: newGroupColor }}
+              />
+              Pratinjau: <span style={{ color: newGroupColor }}>{newGroupName || 'Nama Grup'}</span>
+            </p>
+
             <div className="flex items-center justify-end gap-3 pt-5">
               <button
                 type="button"
