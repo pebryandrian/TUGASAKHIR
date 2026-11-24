@@ -133,7 +133,9 @@ for (const [type, list] of buckets) {
   sections.push(`### ${type}\n\n${list.map((c) => `- ${c}`).join('\n')}`)
 }
 
-const title = TITLE_ARG || `${HEAD} -> ${BASE}: ${commits.length} commit`
+// Judul: pakai --title bila diberikan. Saat memperbarui PR yang sudah ada,
+// judul lamanya dipertahankan agar judul deskriptif tidak tertimpa judul generik.
+const title = TITLE_ARG || (open.length > 0 ? open[0].title : `${HEAD} -> ${BASE}: ${commits.length} commit`)
 
 const body = BODY_FILE
   ? readFileSync(BODY_FILE, 'utf8')
