@@ -153,6 +153,23 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-25** – **Gantt dan Chart digabung menjadi satu tab timeline** (mengikuti foto acuan
+  pemilik aplikasi dan Tabel 3.5 #12 yang menyebut satu tab "Gantt dan Chart").
+  (a) Tab `Gantt & Chart` berisi **ringkasan distribusi status** (bar bertumpuk per status, jumlah,
+  persentase, progres keseluruhan) di bagian atas.
+  (b) Di bawahnya **Gantt bergaya tabel proyek**: kolom kiri tetap (`#`, Task Name, WBS, Start,
+  Finish) dan timeline yang bisa digulir horizontal. Baris grup ditebalkan beserta persentase
+  progres; baris tugas memakai penanda warna status.
+  (c) Header dua tingkat: nama bulan (`Nov 2026`, `Dec 2026`) dan tanggal harian; latar akhir pekan
+  dibedakan, ada **garis hari ini**, serta label persentase + penanggung jawab di ujung kanan
+  setiap batang.
+  (d) Tombol `+` (Add View) dihapus karena kedua tampilan sudah menjadi tab tetap. Komponen
+  `GanttView`/`ChartView` lama digantikan `GanttChartView`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji UI di Edge headless: tab hanya
+  `Gantt & Chart` (tidak ada Gantt/Chart terpisah), kolom Task Name/WBS/Start/Finish ada, 11 bar
+  tergambar, garis hari ini tampil, dan timeline bisa digulir horizontal (scrollWidth 1280 >
+  clientWidth 749) tanpa menggeser kolom kiri.
+
 - **2026-11-25** – Penyesuaian dengan **`LaporanTA-PebryAndrian-revisi22.pdf`** (23 Nov 2026,
   76 halaman; acuan terbaru). Lima ketidaksesuaian diperbaiki:
   (a) **Gantt & Chart menjadi tab tetap** (`customViews` awal berisi keduanya) — Tabel 3.5 #12
