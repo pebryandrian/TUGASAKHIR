@@ -28,6 +28,7 @@ import {
   ListTodo,
   Archive,
   ArchiveRestore,
+  ArrowRight,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -1317,27 +1318,40 @@ export default function DashboardPage() {
                         alt={item.title}
                         fill
                         sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                        className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
+                        className="object-cover object-center grayscale contrast-105 brightness-90 group-hover:scale-105 group-hover:grayscale-0 group-hover:brightness-100 transition-all duration-500 ease-out"
                       />
+                      {/* Gradasi bawah: menyatukan foto dengan latar kartu gelap
+                          supaya tepi gambar tidak terlihat sebagai potongan keras. */}
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#191a1e] via-[#191a1e]/25 to-transparent" />
+                      {/* Vignette tipis agar fokus ke tengah gambar. */}
+                      <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_60px_20px_rgba(0,0,0,0.35)]" />
+
+                      {/* Jumlah proyek aktif, dipindah ke atas gambar agar baris
+                          judul di bawah tetap lega. */}
+                      {(() => {
+                        const all = cardsFrom(item.title)
+                        const active = all.filter((c) => !c.archived).length
+                        const archived = all.length - active
+                        return (
+                          <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[10px] font-medium text-neutral-200 backdrop-blur-sm">
+                            {active} card
+                            {archived > 0 && (
+                              <span className="text-amber-300/90">· {archived} arsip</span>
+                            )}
+                          </span>
+                        )
+                      })()}
                     </div>
-                    <div className="px-4 py-3 bg-[#191a1e] flex items-center justify-between gap-2">
+                    <div className="px-4 py-3.5 bg-[#191a1e] flex items-center justify-between gap-2">
                       <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition truncate">
                         {item.title}
                       </h3>
-                      <span className="text-[10px] text-neutral-500 shrink-0">
-                        {(() => {
-                          const all = cardsFrom(item.title)
-                          const active = all.filter((c) => !c.archived).length
-                          const archived = all.length - active
-                          return (
-                            <>
-                              {active} card
-                              {archived > 0 && (
-                                <span className="ml-1 text-amber-400/80">· {archived} arsip</span>
-                              )}
-                            </>
-                          )
-                        })()}
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500 group-hover:text-blue-400 transition shrink-0">
+                        Buka
+                        <ArrowRight
+                          size={12}
+                          className="translate-x-0 group-hover:translate-x-0.5 transition-transform duration-200"
+                        />
                       </span>
                     </div>
                   </div>
