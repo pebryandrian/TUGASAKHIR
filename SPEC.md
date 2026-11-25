@@ -153,6 +153,33 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-25** – Penyesuaian dengan **`LaporanTA-PebryAndrian-revisi22.pdf`** (23 Nov 2026,
+  76 halaman; acuan terbaru). Lima ketidaksesuaian diperbaiki:
+  (a) **Gantt & Chart menjadi tab tetap** (`customViews` awal berisi keduanya) — Tabel 3.5 #12
+  menyebut "membuka tab Gantt dan Chart", sebelumnya harus ditambah manual lewat `+`.
+  (b) **Warna grup dipilih PM**: modal Tambah Grup Tugas mendapat 20 pilihan warna + pratinjau;
+  sebelumnya warna diambil otomatis dari daftar tetap — Tabel 3.5 #11.
+  (c) **Form proyek baru memuat deskripsi & jadwal**: `createProject` menerima `start_date` dan
+  `due_date`, modal Create New Scope mendapat kolom Deskripsi, Tanggal Mulai, dan Tenggat, plus
+  validasi nama kosong dan tenggat < tanggal mulai — UC-01 langkah 4.
+  (d) **Daftar proyek mengikuti workspace aktif**: `listProjects()` kembali menyaring ketat; agar
+  konsisten, kelima proyek contoh disatukan pada satu workspace "INVISUAL STUDIO" dan akun Member
+  didaftarkan sebagai anggotanya — Tabel 3.5 #16.
+  (e) **Pembuatan tugas hanya untuk PM**: `ProjectPermissions.createTasks`; tombol New item,
+  `+` per grup, dan Add task Kanban hanya untuk PM; `openNewItemModal` menolak lebih dulu —
+  UC-03 (aktor Project Manager).
+  (f) **My Member untuk kedua aktor**: F-02 & UC-05 menyebut My Member untuk PM dan Member,
+  sedangkan UC-06 menyebut Member membuka daftar tugas. Markup diekstrak menjadi
+  `renderMyMember(readOnly)`; Member kini melihat **Tugas Saya lalu My Member (hanya lihat)**.
+  (g) **Dokumen audit** `docs/audit-konsistensi-laporan.md` ditulis ulang dengan acuan revisi22
+  (15 F, 6 NF, 6 UC, 12 tabel, 16 skenario, 10 wireframe) beserta daftar migrasi yang belum
+  dijalankan. Fitur di luar laporan (alur undangan, kolom Files/Notes, dropdown peran di Home,
+  menu History, tombol Muat contoh) dipertahankan atas permintaan pemilik.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji UI di Edge headless — PM melihat
+  5 scope, form proyek berisi 4 kolom, tab Gantt/Chart ada, form grup menampilkan 20 warna;
+  Member tidak melihat New Scope/New item/Add task, tetapi melihat Tugas Saya + My Member.
+  Catatan: revisi22 berhenti di BAB 4 (BAB 5 dan 6 belum berisi).
+
 - **2026-11-24** – Kolom **Files** dan **Notes** di Main Table kini bisa diisi.
   (a) **Kolom tampil default**: `extraColumns` awal `['Priority', 'Files', 'Notes']`, sehingga kedua
   kolom langsung tersedia tanpa harus menambah manual. Pilihan kolom tetap disimpan per project
