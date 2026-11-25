@@ -776,6 +776,166 @@ export default function DashboardPage() {
   const displayName = profile?.name || 'there'
   const firstName = displayName.split(' ')[0]
 
+  // Bagian "My Member" pada Home. F-02 dan UC-05 menyebut bagian ini tampil untuk
+  // Project Manager maupun Member; bedanya Member hanya dapat melihat, sedangkan
+  // pengaturan peran (UC-02) hanya untuk Project Manager.
+  const renderMyMember = (readOnly: boolean) => (
+    <section
+      ref={readOnly ? undefined : membersSectionRef}
+      className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
+    >
+      <div className="mb-4">
+        <h2 className="text-lg font-bold text-white tracking-tight mb-1">My Member</h2>
+        <p className="text-xs text-neutral-500 mb-4">
+          {readOnly
+            ? 'Daftar anggota tim beserta perannya pada proyek. Peran hanya dapat diubah oleh Project Manager.'
+            : 'Semua pengguna yang mendaftar otomatis masuk daftar ini dengan peran Member. Peran hanya dapat diubah oleh Project Manager.'}
+        </p>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
+          <div className="relative flex-1 max-w-md">
+            <Search
+              size={16}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+            />
+            <input
+              ref={readOnly ? undefined : memberSearchRef}
+              type="text"
+              value={searchMember}
+              onChange={(e) => setSearchMember(e.target.value)}
+              placeholder="Search My Member"
+              className="w-full h-10 pl-10 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
+            />
+          </div>
+          <div className="relative self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setShowMemberSort((v) => !v)}
+              className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5"
+            >
+              <ArrowUpDown size={14} />
+              <span>{MEMBER_SORT_LABEL[memberSort]}</span>
+              <ChevronDown size={15} />
+            </button>
+            {showMemberSort && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowMemberSort(false)} />
+                <div className="absolute right-0 top-full mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                  {(Object.keys(MEMBER_SORT_LABEL) as MemberSort[]).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setMemberSort(key)
+                        setShowMemberSort(false)
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                        memberSort === key
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-300 hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>{MEMBER_SORT_LABEL[key]}</span>
+                      {memberSort === key && <Check size={14} />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!readOnly && teamError && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{teamError}</span>
+        </div>
+      )}
+      {!readOnly && teamNotice && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+          <Check size={16} className="mt-0.5 shrink-0" />
+          <span>{teamNotice}</span>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
+              <th className="pb-3 font-normal">Member Name</th>
+              <th className={`pb-3 text-right font-normal ${readOnly ? '' : 'w-52'}`}>Role</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-800/60">
+            {filteredMembers.map((member) => {
+              const isSelf = member.id === profile?.id
+              const busy = roleBusyId === member.id
+              const info = teamRoles[member.id]
+              const effectiveRole: TeamRole = info?.role ?? member.role
+              return (
+                <tr key={member.id} className="group hover:bg-neutral-800/30 transition-colors">
+                  <td className="py-3.5 pr-4">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={member.name} src={member.avatar_url} size={36} />
+                      <div>
+                        <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
+                          {member.name}
+                          {isSelf && (
+                            <span className="ml-2 rounded bg-neutral-700/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-300">
+                              Anda
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-neutral-400">{member.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3.5 pl-4 text-right whitespace-nowrap">
+                    {readOnly || isSelf ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-lg border border-neutral-700/70 bg-neutral-800/50 px-2.5 py-1 text-xs text-neutral-400"
+                        title={
+                          readOnly
+                            ? 'Peran hanya dapat diubah oleh Project Manager'
+                            : 'Peran Anda sendiri tidak dapat diubah dari sini'
+                        }
+                      >
+                        {effectiveRole === 'project_manager' ? 'Project Manager' : 'Member'}
+                      </span>
+                    ) : (
+                      <div className="inline-flex items-center gap-2">
+                        {busy && <Loader2 size={13} className="animate-spin text-blue-400" />}
+                        <select
+                          value={effectiveRole}
+                          disabled={busy}
+                          onChange={(e) => handleTeamRoleChange(member, e.target.value as TeamRole)}
+                          className="h-9 pl-2.5 pr-8 bg-[#1b1c20] border border-neutral-700 rounded-lg text-xs text-neutral-200 outline-none focus:border-blue-500 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                          aria-label={`Peran ${member.name}`}
+                        >
+                          <option value="member">Member</option>
+                          <option value="project_manager">Project Manager</option>
+                        </select>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+            {!loading && filteredMembers.length === 0 && (
+              <tr>
+                <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
+                  {profiles.length === 0
+                    ? 'Belum ada anggota yang bisa ditampilkan.'
+                    : `No members found matching "${searchMember}"`}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header Bar */}
@@ -1144,161 +1304,7 @@ export default function DashboardPage() {
               </div>
             </section>
           ) : isManager ? (
-          <section
-            ref={membersSectionRef}
-            className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
-          >
-            <div className="mb-4">
-              <h2 className="text-lg font-bold text-white tracking-tight mb-1">My Member</h2>
-              <p className="text-xs text-neutral-500 mb-4">
-                Semua pengguna yang mendaftar otomatis masuk daftar ini dengan peran{' '}
-                <span className="text-neutral-300 font-medium">Member</span>. Peran hanya dapat
-                diubah oleh Project Manager.
-              </p>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
-                <div className="relative flex-1 max-w-md">
-                  <Search
-                    size={16}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
-                  />
-                  <input
-                    ref={memberSearchRef}
-                    type="text"
-                    value={searchMember}
-                    onChange={(e) => setSearchMember(e.target.value)}
-                    placeholder="Search My Member"
-                    className="w-full h-10 pl-10 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                  />
-                </div>
-                <div className="relative self-end sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setShowMemberSort((v) => !v)}
-                    className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5"
-                  >
-                    <ArrowUpDown size={14} />
-                    <span>{MEMBER_SORT_LABEL[memberSort]}</span>
-                    <ChevronDown size={15} />
-                  </button>
-                  {showMemberSort && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setShowMemberSort(false)} />
-                      <div className="absolute right-0 top-full mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
-                        {(Object.keys(MEMBER_SORT_LABEL) as MemberSort[]).map((key) => (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => {
-                              setMemberSort(key)
-                              setShowMemberSort(false)
-                            }}
-                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
-                              memberSort === key
-                                ? 'bg-blue-600/15 text-blue-400 font-semibold'
-                                : 'text-neutral-300 hover:bg-neutral-800'
-                            }`}
-                          >
-                            <span>{MEMBER_SORT_LABEL[key]}</span>
-                            {memberSort === key && <Check size={14} />}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {teamError && (
-              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{teamError}</span>
-              </div>
-            )}
-            {teamNotice && (
-              <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-                <Check size={16} className="mt-0.5 shrink-0" />
-                <span>{teamNotice}</span>
-              </div>
-            )}
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
-                    <th className="pb-3 font-normal">Member Name</th>
-                    <th className="pb-3 text-right font-normal w-52">Role</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800/60">
-                  {filteredMembers.map((member) => {
-                    const isSelf = member.id === profile?.id
-                    const busy = roleBusyId === member.id
-                    const info = teamRoles[member.id]
-                    const effectiveRole: TeamRole = info?.role ?? member.role
-                    return (
-                      <tr
-                        key={member.id}
-                        className="group hover:bg-neutral-800/30 transition-colors"
-                      >
-                        <td className="py-3.5 pr-4">
-                          <div className="flex items-center gap-3">
-                            <Avatar name={member.name} src={member.avatar_url} size={36} />
-                            <div>
-                              <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
-                                {member.name}
-                                {isSelf && (
-                                  <span className="ml-2 rounded bg-neutral-700/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-300">
-                                    Anda
-                                  </span>
-                                )}
-                              </p>
-                              <p className="text-xs text-neutral-400">{member.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3.5 pl-4 text-right whitespace-nowrap">
-                          {isSelf ? (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-lg border border-neutral-700/70 bg-neutral-800/50 px-2.5 py-1 text-xs text-neutral-400"
-                              title="Peran Anda sendiri tidak dapat diubah dari sini"
-                            >
-                              Project Manager
-                            </span>
-                          ) : (
-                            <div className="inline-flex items-center gap-2">
-                              {busy && <Loader2 size={13} className="animate-spin text-blue-400" />}
-                              <select
-                                value={effectiveRole}
-                                disabled={busy}
-                                onChange={(e) =>
-                                  handleTeamRoleChange(member, e.target.value as TeamRole)
-                                }
-                                className="h-9 pl-2.5 pr-8 bg-[#1b1c20] border border-neutral-700 rounded-lg text-xs text-neutral-200 outline-none focus:border-blue-500 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
-                                aria-label={`Peran ${member.name}`}
-                              >
-                                <option value="member">Member</option>
-                                <option value="project_manager">Project Manager</option>
-                              </select>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {!loading && filteredMembers.length === 0 && (
-                    <tr>
-                      <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
-                        {profiles.length === 0
-                          ? 'Belum ada anggota yang bisa ditampilkan.'
-                          : `No members found matching "${searchMember}"`}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+            renderMyMember(false)
           ) : (
           /* POV Member: tugas yang harus dikerjakan, diurutkan dari tenggat terdekat */
           <section
@@ -1385,6 +1391,10 @@ export default function DashboardPage() {
             )}
           </section>
           )}
+
+          {/* POV Member: My Member (hanya lihat). F-02/UC-05 menyebut bagian ini
+              tampil untuk kedua aktor, sedangkan pengaturan peran tetap milik PM. */}
+          {isManager === false && <div className="mt-8">{renderMyMember(true)}</div>}
         </main>
       </div>
 
