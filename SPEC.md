@@ -153,6 +153,25 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-25** – **Progres proyek menghitung tugas berstatus Done** + **arsip proyek selesai**.
+  (a) **Bug progres**: seluruh tugas Aqua sudah berstatus *Done* tetapi kartu di Home tetap
+  menampilkan "0/8 tugas selesai", karena progres hanya menghitung `tasks.checked` sementara
+  perubahan status hanya menulis `status_id`. Sekarang `listProjectTaskStats()` menghitung tugas
+  selesai bila **`checked` ATAU statusnya "Done"**; `setTaskStatus()` dan bulk-set-status
+  menyamakan `checked` dengan status Done; `loadBoard()` menandai tugas Done sebagai selesai; dan
+  `listMyTasks()` tidak lagi menampilkan tugas Done di daftar tugas aktif. Hasil: Aqua terbaca
+  **8/8**.
+  (b) **Arsip proyek**: tombol *Arsip* pada kartu proyek (khusus PM) dan tombol **Arsip** pada
+  toolbar modal scope untuk menampilkan/mengembalikan proyek yang sudah selesai. Kartu scope
+  menampilkan jumlah proyek aktif dan jumlah arsip; kartu yang diarsipkan diberi badge
+  "Diarsipkan" dan warna berbeda; tombol *New Card* disembunyikan saat melihat arsip.
+  (c) **Migrasi baru** `supabase/migrations/20261128000000_project_archive.sql` (kolom
+  `projects.archived` + `archived_at`). Sebelum migrasi dijalankan, penanda arsip disimpan di
+  `localStorage` (dideteksi lewat `hasProjectArchiveSupport()`), jadi fitur tetap berfungsi.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji UI di Edge headless: kartu Aqua
+  menampilkan **8/8 tugas selesai**; setelah diarsipkan Aqua hilang dari daftar aktif dan muncul di
+  tab Arsip dengan badge "Diarsipkan"; setelah dikeluarkan, Aqua kembali ke daftar aktif.
+
 - **2026-11-25** – **Gantt dan Chart digabung menjadi satu tab timeline** (mengikuti foto acuan
   pemilik aplikasi dan Tabel 3.5 #12 yang menyebut satu tab "Gantt dan Chart").
   (a) Tab `Gantt & Chart` berisi **ringkasan distribusi status** (bar bertumpuk per status, jumlah,
