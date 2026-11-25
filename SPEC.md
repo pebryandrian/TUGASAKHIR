@@ -153,6 +153,18 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-25** – **9 contoh project typeface di scope Font**. Mengikuti katalog font acuan
+  (inviline.co), scope Font kini berisi 10 contoh project: Grotesk (sudah ada) ditambah *Come the
+  Hour*, *Bright Charms*, *Dawn Style*, *Sugar Zesty*, *Gather Friends*, *Voyage Haven*, *Coast
+  Royale*, *Muffin Crush*, dan *Felty Drops*. Setiap project memakai dua grup tugas (**Riset &
+  Konsep**, **Produksi & Rilis**) dengan 4 tugas yang berisi deskripsi, status, prioritas, tenggat,
+  dan subtask — sehingga board langsung terisi dan progres kartu tidak nol. Semua ditambahkan lewat
+  `lib/project-template.json` (`demoProjects`), jadi ikut terbuat oleh tombol **Muat contoh** dan
+  ikut dipakai `pickTemplate()` bila project baru diberi nama yang sama.
+  Verifikasi: `tsc --noEmit` bersih; setelah **Muat contoh** kartu scope Font berubah dari
+  `1 card` menjadi `10 card`, modal scope menampilkan kesepuluh project, dan board *Come the Hour*
+  berisi 2 grup / 4 tugas dengan status, tenggat, dan penanggung jawab.
+
 - **2026-11-25** – **Gambar Scope of Work bertema studio desain** + **kartu scope dirapikan**.
   (a) Kelima gambar kartu scope (`public/images/scope/*.jpg`) diganti agar sesuai tema INVISUAL
   Studio — studio identitas visual, ilustrasi, dan desain kemasan: *Client* (eksplorasi palet warna
@@ -610,8 +622,10 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 - **2026-11-13** – Template contoh project. Sumber data tunggal `lib/project-template.json`:
   (a) `template` generik (3 grup + 8 tugas + subtask + komentar + 6 blok Doc) dipakai saat
   project baru dibuat lewat `createProject(..., { template: true })`; (b) `demoProjects` berisi
-  5 project siap pakai (Client/Aqua, Font/Grotesk, Marketplace/Glowup, Studio Project/Arunika,
-  Mockup/Nusantara) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
+  14 project siap pakai: 5 project inti (Client/Aqua, Font/Grotesk, Marketplace/Glowup, Studio
+  Project/Arunika, Mockup/Nusantara) ditambah **9 contoh typeface di scope Font** (Come the Hour,
+  Bright Charms, Dawn Style, Sugar Zesty, Gather Friends, Voyage Haven, Coast Royale, Muffin Crush,
+  Felty Drops) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
   user yang login sehingga tetap tunduk pada RLS. Tanggal tugas memakai offset hari dari hari ini,
   jadi isi contoh selalu terlihat sedang berjalan. Board kosong menampilkan tombol
   **Isi contoh tugas**; modal Create New Card punya opsi "Sertakan contoh tugas".

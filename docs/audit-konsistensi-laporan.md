@@ -126,7 +126,7 @@ Dipertahankan atas permintaan pemilik aplikasi; tidak mengurangi pemenuhan kebut
 |---|---|---|
 | Nama menu | Home, Favorites, Workspaces | Home, Favorites, Workspaces, **History** |
 | Tab proyek | Main Table, Calendar, Doc (+ Kanban, Gantt, Chart di Tabel 3.5) | Main Table, Calendar, Doc, Kanban, **Gantt**, **Chart** (semua tab tetap) |
-| Data contoh | tidak diatur | 5 scope baku: Client, Font, Marketplace, Studio Project, Mockup |
+| Data contoh | tidak diatur | 5 scope baku: Client, Font, Marketplace, Studio Project, Mockup; scope **Font** berisi 10 contoh project (Grotesk + 9 typeface katalog: Come the Hour, Bright Charms, Dawn Style, Sugar Zesty, Gather Friends, Voyage Haven, Coast Royale, Muffin Crush, Felty Drops) |
 
 ## 9. Migrasi database yang belum dijalankan
 
