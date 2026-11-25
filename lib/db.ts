@@ -34,6 +34,9 @@ export interface Project {
   start_date: string | null
   due_date: string | null
   owner_id: string | null
+  /** Proyek yang sudah selesai dan disimpan di arsip. */
+  archived?: boolean
+  archived_at?: string | null
 }
 
 export interface Status {
@@ -273,6 +276,75 @@ export async function ensureDefaultWorkspace(name = '2026 INVISUAL'): Promise<Wo
   return data as Workspace
 }
 
+// ======================== ARSIP PROYEK ========================
+
+// Kolom `projects.archived` hanya ada setelah migrasi
+// 20261128000000_project_archive.sql dijalankan. Sebelum itu, penanda arsip
+// disimpan di localStorage agar fitur tetap bisa dipakai.
+let projectArchiveColumn: Promise<boolean> | null = null
+
+export function hasProjectArchiveSupport(): Promise<boolean> {
+  projectArchiveColumn ??= (async () => {
+    try {
+      const { error } = await supabase().from('projects').select('archived').limit(1)
+      return !error
+    } catch {
+      return false
+    }
+  })()
+  return projectArchiveColumn
+}
+
+const ARCHIVE_STORAGE_KEY = 'invisual.archived-projects'
+
+function readLocalArchive(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(ARCHIVE_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeLocalArchive(ids: string[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(Array.from(new Set(ids))))
+  } catch {
+    // Penyimpanan lokal tidak tersedia: arsip hanya berlaku untuk sesi ini.
+  }
+}
+
+/** ID proyek yang diarsipkan (dari basis data bila kolomnya ada). */
+export async function listArchivedProjectIds(): Promise<Set<string>> {
+  if (await hasProjectArchiveSupport()) {
+    const { data, error } = await supabase().from('projects').select('id').eq('archived', true)
+    if (error) throw error
+    return new Set(((data ?? []) as { id: string }[]).map((r) => r.id))
+  }
+  return new Set(readLocalArchive())
+}
+
+/** Arsipkan atau keluarkan proyek dari arsip. Hanya Project Manager. */
+export async function setProjectArchived(projectId: string, archived: boolean): Promise<void> {
+  await assertProjectManager(projectId)
+
+  if (await hasProjectArchiveSupport()) {
+    const { error } = await supabase()
+      .from('projects')
+      .update({ archived, archived_at: archived ? new Date().toISOString() : null })
+      .eq('id', projectId)
+    if (error) throw error
+    return
+  }
+
+  const ids = readLocalArchive().filter((id) => id !== projectId)
+  if (archived) ids.push(projectId)
+  writeLocalArchive(ids)
+}
+
 // ======================== PROJECTS ========================
 
 export async function listProjects(workspaceId?: string): Promise<Project[]> {
@@ -294,6 +366,11 @@ export async function listProjects(workspaceId?: string): Promise<Project[]> {
   if (workspaceId) {
     rows = rows.filter((p) => p.workspace_id === workspaceId)
   }
+
+  // Penanda arsip dinormalkan agar pemanggil tidak perlu tahu apakah kolom
+  // `projects.archived` sudah ada atau masih memakai localStorage.
+  const archivedIds = await listArchivedProjectIds().catch(() => new Set<string>())
+  rows = rows.map((p) => ({ ...p, archived: p.archived === true || archivedIds.has(p.id) }))
 
   // Undangan yang belum diterima tidak boleh menampilkan isi project.
   // (RLS juga menanganinya lewat is_project_member, ini lapisan kedua.)
@@ -355,19 +432,40 @@ export async function createProject(
   return project
 }
 
-// Ringkasan progres per project: jumlah tugas & yang sudah dicentang.
+// Ringkasan progres per project: jumlah tugas & yang sudah selesai.
 // Dipakai kartu di Home supaya progress bar mencerminkan data nyata.
+//
+// Tugas dianggap selesai bila dicentang ATAU statusnya "Done". Sebelumnya hanya
+// `checked` yang dihitung, sehingga project yang seluruh tugasnya sudah
+// dipindahkan ke status Done tetap tampil "0/8 tugas selesai".
 export async function listProjectTaskStats(): Promise<
   Record<string, { total: number; done: number }>
 > {
-  const { data, error } = await supabase().from('tasks').select('project_id, checked')
-  if (error) throw error
+  const db = supabase()
+  const [tasks, statuses] = await Promise.all([
+    db.from('tasks').select('project_id, checked, status_id'),
+    db.from('statuses').select('id, label'),
+  ])
+  if (tasks.error) throw tasks.error
+  if (statuses.error) throw statuses.error
+
+  const doneStatusIds = new Set(
+    ((statuses.data ?? []) as { id: string; label: string }[])
+      .filter((s) => s.label.trim().toLowerCase() === 'done')
+      .map((s) => s.id),
+  )
+
   const stats: Record<string, { total: number; done: number }> = {}
-  for (const row of (data ?? []) as { project_id: string | null; checked: boolean }[]) {
+  for (const row of (tasks.data ?? []) as {
+    project_id: string | null
+    checked: boolean
+    status_id: string | null
+  }[]) {
     if (!row.project_id) continue
     const entry = (stats[row.project_id] ??= { total: 0, done: 0 })
     entry.total += 1
-    if (row.checked) entry.done += 1
+    const isDone = row.checked || (row.status_id !== null && doneStatusIds.has(row.status_id))
+    if (isDone) entry.done += 1
   }
   return stats
 }
@@ -988,7 +1086,11 @@ export async function listMyTasks(limit = 12): Promise<MyTaskItem[]> {
     .limit(limit)
   if (error) throw error
 
-  const rows = (data ?? []) as any[]
+  const rows = ((data ?? []) as any[]).filter(
+    // Tugas berstatus "Done" tidak perlu muncul lagi di daftar tugas aktif,
+    // walaupun kotak centangnya belum ditandai.
+    (r) => (r.statuses?.label ?? '').trim().toLowerCase() !== 'done',
+  )
   const taskIds = rows.map((r) => r.id)
 
   // Hitung progres subtask untuk tiap tugas.

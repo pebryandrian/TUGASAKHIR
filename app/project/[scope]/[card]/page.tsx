@@ -1876,6 +1876,8 @@ export default function ProjectDetailPage() {
               .filter((t) => t.group_id === g.id)
               .map((t) => {
                 const assignee = board.members.find((m) => m.id === t.assignee_id)
+                const statusLabel =
+                  board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do'
                 return {
                   id: t.id,
                   title: t.title,
@@ -1883,9 +1885,12 @@ export default function ProjectDetailPage() {
                   description: t.description ?? undefined,
                   personAvatars: assignee?.avatar_url ? [assignee.avatar_url] : [],
                   personNames: assignee ? [assignee.name] : [],
-                  status: board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do',
+                  status: statusLabel,
                   date: fromISODate(t.due_date),
-                  checked: t.checked,
+                  // Status "Done" berarti tugas selesai, walau kotak centangnya
+                  // belum ditandai (data lama). Progres di Home memakai aturan
+                  // yang sama sehingga angkanya konsisten.
+                  checked: t.checked || statusLabel.trim().toLowerCase() === 'done',
                   priority: t.priority ?? null,
                   expanded: false,
                   subtasks: board.subtasks
@@ -2492,15 +2497,24 @@ export default function ProjectDetailPage() {
 
   // Select a status from the ordered dropdown list
   const setTaskStatus = (groupId: string, taskId: string, newStatus: TaskStatus) => {
+    // Status "Done" sekaligus menandai tugas selesai, dan sebaliknya. Tanpa ini
+    // `checked` dan status bisa berbeda sehingga progres project tidak berubah
+    // walaupun semua tugas sudah dipindahkan ke Done.
+    const isDone = newStatus.trim().toLowerCase() === 'done'
     if (projectId) {
-      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(notifySaveError)
+      updateTaskRow(taskId, {
+        status_id: statusIdByLabel(newStatus),
+        checked: isDone,
+      }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
         return {
           ...g,
-          items: g.items.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
+          items: g.items.map((t) =>
+            t.id === taskId ? { ...t, status: newStatus, checked: isDone } : t,
+          ),
         }
       })
     )
@@ -3273,9 +3287,11 @@ export default function ProjectDetailPage() {
   // Bulk set status
   const handleBulkSetStatus = (status: string) => {
     const statusId = statusIdByLabel(status)
+    // Samakan `checked` dengan status "Done", seperti setTaskStatus.
+    const isDone = status.trim().toLowerCase() === 'done'
     if (projectId) {
       selectedTasks.forEach((t) => {
-        updateTaskRow(t.id, { status_id: statusId }).catch((err) => {
+        updateTaskRow(t.id, { status_id: statusId, checked: isDone }).catch((err) => {
           setNotice(
             `Gagal menyimpan status: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
           )
@@ -3285,7 +3301,7 @@ export default function ProjectDetailPage() {
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
-        items: g.items.map((t) => (t.checked ? { ...t, status } : t)),
+        items: g.items.map((t) => (t.checked ? { ...t, status, checked: isDone } : t)),
       }))
     )
   }
