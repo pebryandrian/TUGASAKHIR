@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -17,12 +17,56 @@ import {
   X,
   Star,
   LogOut,
+  Loader2,
+  AlertCircle,
+  ArrowUpDown,
+  Check,
+  Sparkles,
+  Pencil,
+  Trash2,
+  Flag,
+  ListTodo,
+  Archive,
+  ArchiveRestore,
+  ArrowRight,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
-import { listRecentProjects, type RecentProject } from '@/lib/utils'
+import {
+  listRecentProjects,
+  slugify,
+  type RecentProject,
+} from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { createProject, listProjects, type Project } from '@/lib/db'
+import {
+  canCreateProject,
+  createProject,
+  deleteProject,
+  getSessionProfile,
+  hasManagerRole,
+  listFavoriteProjects,
+  listMyInvitations,
+  listMyTasks,
+  listProjectRoles,
+  listProjectTaskStats,
+  listProjects,
+  listProfiles,
+  listProjectMemberChips,
+  listTeamRoles,
+  setProjectFavorite,
+  setProjectArchived,
+  updateProject,
+  updateTeamMemberRole,
+  type MyTaskItem,
+  type Profile,
+  type Project,
+  type ProjectMemberChip,
+  type ProjectRoleMap,
+  type TeamRole,
+  type TeamRoleInfo,
+  type Workspace,
+} from '@/lib/db'
+import { seedDemoProjects } from '@/lib/template'
 
 interface ScopeItem {
   id: string
@@ -30,86 +74,327 @@ interface ScopeItem {
   image: string
 }
 
-interface MemberItem {
-  id: string
-  name: string
-  email: string
-  lastVisited: string
-  avatarColor: string
-}
-
 interface ProjectCard {
   id: string
   name: string
   description: string
-  progress: number
+  done: number
   total: number
-  starred: boolean
+  archived: boolean
 }
 
-const initialScopes: ScopeItem[] = [
-  { id: '1', title: 'Client', image: '/images/scope/scope-client.jpg' },
-  { id: '2', title: 'Marketplace', image: '/images/scope/scope-marketplace.jpg' },
-  { id: '3', title: 'Mockup', image: '/images/scope/scope-mockup.jpg' },
-  { id: '4', title: 'Studio Client', image: '/images/scope/scope-studio.jpg' },
-  { id: '5', title: 'Font', image: '/images/scope/scope-font.jpg' },
-]
+type MemberSort = 'name-asc' | 'name-desc' | 'email-asc'
 
-// Generate sample project cards for each scope
-const generateCards = (scopeTitle: string): ProjectCard[] => {
-  const names = ['Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua', 'Aqua']
-  const progresses = [95, 95, 85, 95, 95, 95, 95]
-  return names.map((name, i) => ({
-    id: `${scopeTitle}-${i}`,
-    name,
-    description: `Kolaborasi dengan ${name.toUpperCase()} untuk merencanakan dan mengelola secara optimal.`,
-    progress: progresses[i],
-    total: 100,
-    starred: false,
-  }))
+const MEMBER_SORT_LABEL: Record<MemberSort, string> = {
+  'name-asc': 'Name (A to Z)',
+  'name-desc': 'Name (Z to A)',
+  'email-asc': 'Email (A to Z)',
 }
 
-const initialMembers: MemberItem[] = [
-  { id: '1', name: 'Jordan Fufu', email: 'Jordan@example.com', lastVisited: 'Today', avatarColor: 'bg-amber-500' },
-  { id: '2', name: 'Puput Atira', email: 'Puput@example.com', lastVisited: 'Yesterday', avatarColor: 'bg-blue-500' },
-  { id: '3', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-purple-500' },
-  { id: '4', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-emerald-500' },
-  { id: '5', name: 'Rahmat Sudianto', email: 'RahmatSudianto@example.com', lastVisited: 'February 1 , 2026', avatarColor: 'bg-rose-500' },
-]
+// Gambar hanya dekorasi kartu scope; tidak ada hubungannya dengan data project.
+// Dipetakan per nama scope supaya kelima scope template selalu memakai gambar
+// yang sesuai, bukan bergantung urutan kemunculan project.
+const SCOPE_IMAGES: Record<string, string> = {
+  client: '/images/scope/scope-client.jpg',
+  font: '/images/scope/scope-font.jpg',
+  marketplace: '/images/scope/scope-marketplace.jpg',
+  mockup: '/images/scope/scope-mockup.jpg',
+  'studio project': '/images/scope/scope-studio.jpg',
+}
+
+const SCOPE_IMAGE_FALLBACK = Object.values(SCOPE_IMAGES)
+
+// Urutan tampil scope pada Home.
+const SCOPE_ORDER = ['client', 'font', 'marketplace', 'studio project', 'mockup']
+
+function scopeImage(title: string, index: number): string {
+  return SCOPE_IMAGES[title.trim().toLowerCase()] ?? SCOPE_IMAGE_FALLBACK[index % SCOPE_IMAGE_FALLBACK.length]
+}
+
+function Avatar({ name, src, size = 32 }: { name: string; src: string | null; size?: number }) {
+  const initials =
+    name
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || '?'
+
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name}
+        width={size}
+        height={size}
+        className="rounded-full object-cover shrink-0 border border-neutral-700"
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+
+  return (
+    <div
+      className="rounded-full bg-neutral-700 border border-neutral-600 flex items-center justify-center text-xs font-semibold text-neutral-200 shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {initials}
+    </div>
+  )
+}
+
+// Tumpukan avatar anggota project. Dipakai pada kartu project di dalam Scope Of
+// Work untuk menunjukkan siapa saja yang mengerjakan project tersebut.
+// Bila anggota lebih banyak dari `max`, sisanya diringkas menjadi "+N".
+function MemberStack({
+  members,
+  max = 4,
+  size = 22,
+}: {
+  members: { id: string; name: string; avatar_url: string | null }[]
+  max?: number
+  size?: number
+}) {
+  if (members.length === 0) return null
+  const shown = members.slice(0, max)
+  const rest = members.length - shown.length
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex -space-x-2" title={members.map((m) => m.name).join(', ')}>
+        {shown.map((m) => (
+          <span
+            key={m.id}
+            className="rounded-full ring-2 ring-[#1b1c20] overflow-hidden shrink-0"
+          >
+            <Avatar name={m.name} src={m.avatar_url} size={size} />
+          </span>
+        ))}
+        {rest > 0 && (
+          <span
+            title={members
+              .slice(max)
+              .map((m) => m.name)
+              .join(', ')}
+            className="rounded-full ring-2 ring-[#1b1c20] bg-neutral-700 border border-neutral-600 text-neutral-200 flex items-center justify-center font-semibold shrink-0"
+            style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+          >
+            +{rest}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function dueBadge(daysLeft: number | null): { text: string; className: string } {
+  if (daysLeft === null) return { text: 'Tanpa tenggat', className: 'text-neutral-500 border-neutral-700/70' }
+  if (daysLeft < 0)
+    return {
+      text: `Terlambat ${Math.abs(daysLeft)} hari`,
+      className: 'text-rose-300 border-rose-500/40 bg-rose-500/10',
+    }
+  if (daysLeft === 0)
+    return { text: 'Jatuh tempo hari ini', className: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+  if (daysLeft === 1)
+    return { text: 'Besok', className: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+  if (daysLeft <= 3)
+    return { text: `${daysLeft} hari lagi`, className: 'text-amber-300 border-amber-500/30 bg-amber-500/5' }
+  return { text: `${daysLeft} hari lagi`, className: 'text-neutral-400 border-neutral-700/70' }
+}
+
+const PRIORITY_STYLE: Record<string, { label: string; className: string }> = {
+  high: { label: 'High', className: 'text-rose-400' },
+  medium: { label: 'Medium', className: 'text-amber-400' },
+  low: { label: 'Low', className: 'text-blue-400' },
+}
+
+// Kartu satu tugas pada bagian "Tugas Saya" (POV Member).
+function MyTaskCard({ task, onOpen }: { task: MyTaskItem; onOpen: () => void }) {
+  const badge = dueBadge(task.days_left)
+  const priority = PRIORITY_STYLE[task.priority] ?? PRIORITY_STYLE.medium
+  const pct = task.subtask_total ? Math.round((task.subtask_done / task.subtask_total) * 100) : 0
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group text-left w-full rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4 hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-200 cursor-pointer flex flex-col gap-2.5"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-semibold text-white leading-snug line-clamp-2 group-hover:text-blue-300 transition">
+          {task.title}
+        </p>
+        <span
+          className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${badge.className}`}
+        >
+          {badge.text}
+        </span>
+      </div>
+
+      <p className="text-[11px] text-neutral-500 truncate">
+        {task.project_scope ? `${task.project_scope} / ` : ''}
+        {task.project_name}
+        {task.group_title ? ` · ${task.group_title}` : ''}
+      </p>
+
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className={`inline-flex items-center gap-1 ${priority.className}`}>
+          <Flag size={11} fill="currentColor" />
+          {priority.label}
+        </span>
+        {task.status_label && (
+          <span
+            className="rounded px-1.5 py-0.5 font-semibold text-white"
+            style={{ backgroundColor: task.status_color ?? '#64748b' }}
+          >
+            {task.status_label}
+          </span>
+        )}
+        {task.due_date && (
+          <span className="ml-auto text-neutral-500">
+            {new Date(task.due_date).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: 'short',
+            })}
+          </span>
+        )}
+      </div>
+
+      {task.subtask_total > 0 && (
+        <div className="space-y-1">
+          <div className="h-1.5 w-full rounded-full bg-neutral-700/60 overflow-hidden">
+            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-neutral-500">
+            Subtask {task.subtask_done}/{task.subtask_total}
+          </p>
+        </div>
+      )}
+    </button>
+  )
+}
 
 export default function DashboardPage() {
   const router = useRouter()
+  const memberSearchRef = useRef<HTMLInputElement>(null)
+  const membersSectionRef = useRef<HTMLElement>(null)
+  // Di layar besar hanya <main> yang menggulir (sidebar tetap), jadi tombol
+  // "Home" harus menggulir container itu, bukan hanya window.
+  const mainRef = useRef<HTMLElement>(null)
+
   const [searchMember, setSearchMember] = useState('')
-  const [activeNav, setActiveNav] = useState('Home')
+  const [memberSort, setMemberSort] = useState<MemberSort>('name-asc')
+  const [showMemberSort, setShowMemberSort] = useState(false)
+  // Ubah peran anggota dari "My Member" (POV Project Manager).
+  const [roleBusyId, setRoleBusyId] = useState<string | null>(null)
+  const [teamNotice, setTeamNotice] = useState('')
+  const [teamError, setTeamError] = useState('')
+  // Peran efektif anggota pada project yang dikelola PM ini.
+  const [teamRoles, setTeamRoles] = useState<Record<string, TeamRoleInfo>>({})
+  // Boleh membuat/mengelola workspace & project? Hanya Project Manager.
+  const [canCreate, setCanCreate] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
+  const [today, setToday] = useState('')
+
+  // Data dari Supabase
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [taskStats, setTaskStats] = useState<Record<string, { total: number; done: number }>>({})
+  // Peran per project (Project Manager / Member), untuk menyembunyikan tombol
+  // Ubah/Hapus dari Member.
+  const [projectRoles, setProjectRoles] = useState<ProjectRoleMap>({})
+  // Anggota aktif per project, untuk ikon orang pada kartu project.
+  const [projectMembers, setProjectMembers] = useState<Record<string, ProjectMemberChip[]>>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
-  const [modalCards, setModalCards] = useState<ProjectCard[]>([])
   const [modalSearch, setModalSearch] = useState('')
-  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string }[]>([])
+  // Arsip proyek: proyek selesai disembunyikan dari daftar utama dan dapat
+  // ditampilkan kembali lewat tombol "Arsip".
+  const [showArchived, setShowArchived] = useState(false)
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null)
+  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
   const [showFavorites, setShowFavorites] = useState(true)
 
-  // Scope Of Work — daftar scope diturunkan dari projects di Supabase.
-  const [projects, setProjects] = useState<Project[]>([])
+  // Ubah / hapus project (F-03)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editStartDate, setEditStartDate] = useState('')
+  const [editDueDate, setEditDueDate] = useState('')
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [projectActionBusy, setProjectActionBusy] = useState(false)
+  const [projectActionError, setProjectActionError] = useState('')
+
   const [showNewScopeModal, setShowNewScopeModal] = useState(false)
   const [newScopeName, setNewScopeName] = useState('')
+  // UC-01 langkah 4: form proyek baru diisi nama, deskripsi, dan jadwal proyek.
+  const [newScopeDesc, setNewScopeDesc] = useState('')
+  const [newScopeStart, setNewScopeStart] = useState('')
+  const [newScopeDue, setNewScopeDue] = useState('')
   const [showNewCardModal, setShowNewCardModal] = useState(false)
   const [newCardName, setNewCardName] = useState('')
   const [newCardDesc, setNewCardDesc] = useState('')
+  // Project baru langsung diisi contoh tugas supaya board tidak kosong.
+  const [newCardWithTemplate, setNewCardWithTemplate] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [seedingDemo, setSeedingDemo] = useState(false)
+  const [demoNotice, setDemoNotice] = useState('')
+
+  // Workspace aktif (F-15): pilihan di sidebar menyaring daftar proyek.
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null)
+
+  // POV member: Project Manager melihat My Member, Member melihat Tugas Saya.
+  // `null` = belum diketahui, supaya tidak sempat menampilkan bagian yang salah.
+  const [isManager, setIsManager] = useState<boolean | null>(null)
+  const [myTasks, setMyTasks] = useState<MyTaskItem[]>([])
+  // Jumlah undangan yang menunggu jawaban (badge pada ikon lonceng).
+  const [invitationCount, setInvitationCount] = useState(0)
 
   const refreshProjects = useCallback(async () => {
+    setError('')
     try {
-      const rows = await listProjects()
+      const [rows, people, taskStats, favs, manager, tasks, invites, roles, teamRoles, chips, creator] =
+        await Promise.all([
+          listProjects(activeWorkspace?.id),
+          listProfiles().catch(() => [] as Profile[]),
+          listProjectTaskStats().catch(() => ({})),
+          listFavoriteProjects().catch(() => []),
+          hasManagerRole().catch(() => true),
+          listMyTasks(12).catch(() => [] as MyTaskItem[]),
+          listMyInvitations().catch(() => []),
+          listProjectRoles().catch(() => ({}) as ProjectRoleMap),
+          listTeamRoles(activeWorkspace?.id).catch(() => ({}) as Record<string, TeamRoleInfo>),
+          listProjectMemberChips().catch(() => ({}) as Record<string, ProjectMemberChip[]>),
+          canCreateProject().catch(() => false),
+        ])
       setProjects(rows)
+      setProfiles(people)
+      setTaskStats(taskStats)
+      setFavorites(favs)
+      setIsManager(manager)
+      setMyTasks(tasks)
+      setInvitationCount(invites.length)
+      setProjectRoles(roles)
+      setTeamRoles(teamRoles)
+      setProjectMembers(chips)
+      setCanCreate(creator)
       return rows
-    } catch {
-      setProjects([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat project.')
       return []
+    } finally {
+      setLoading(false)
     }
-  }, [])
+  }, [activeWorkspace?.id])
 
   useEffect(() => {
     refreshProjects()
@@ -117,97 +402,583 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setRecentProjects(listRecentProjects())
+    setToday(
+      new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    )
+    getSessionProfile()
+      .then(setProfile)
+      .catch(() => setProfile(null))
   }, [])
 
-  const scopeImages = initialScopes.map((s) => s.image)
-  const scopes: ScopeItem[] =
-    projects.length > 0
-      ? Array.from(new Set(projects.map((p) => p.scope).filter(Boolean) as string[])).map(
-          (title, i) => ({ id: `scope-${title}`, title, image: scopeImages[i % scopeImages.length] }),
-        )
-      : initialScopes
+  // History disimpan di localStorage. Entri lama bisa merujuk project yang sudah
+  // dihapus atau berganti nama/scope (mis. "Studio Client" -> "Studio Project"),
+  // sehingga tautannya mati. Setelah daftar project dimuat, entri yang tidak ada
+  // dibuang dan judulnya diperbarui mengikuti database.
+  useEffect(() => {
+    if (projects.length === 0) return
+    let changed = false
+    const valid: RecentProject[] = []
+    for (const entry of listRecentProjects()) {
+      const match =
+        projects.find(
+          (p) => slugify(p.scope) === entry.scope && slugify(p.name) === entry.card,
+        ) ?? projects.find((p) => slugify(p.name) === entry.card)
+      if (!match) {
+        changed = true
+        continue
+      }
+      const scopeSlug = slugify(match.scope)
+      const cardSlug = slugify(match.name)
+      if (scopeSlug !== entry.scope || cardSlug !== entry.card || match.scope !== entry.scopeTitle) {
+        changed = true
+      }
+      valid.push({
+        scope: scopeSlug,
+        card: cardSlug,
+        name: match.name,
+        scopeTitle: match.scope ?? entry.scopeTitle,
+      })
+    }
+    if (changed) {
+      localStorage.setItem('invisual.recent-projects', JSON.stringify(valid))
+      setRecentProjects(valid)
+    }
+  }, [projects])
 
-  const cardsFrom = (title: string, rows: Project[]): ProjectCard[] => {
-    const scoped = rows.filter((p) => p.scope === title)
-    if (scoped.length === 0) return generateCards(title)
-    return scoped.map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description ?? '',
-      progress: p.progress,
-      total: 100,
-      starred: false,
+  // Scope diturunkan dari project nyata. Tidak ada scope contoh.
+  // Urutan mengikuti daftar scope template (Client, Font, Marketplace,
+  // Studio Project, Mockup); scope lain di belakang sesuai urutan dibuat.
+  const scopes: ScopeItem[] = useMemo(() => {
+    const titles = Array.from(
+      new Set(projects.map((p) => p.scope).filter((s): s is string => Boolean(s))),
+    )
+    const rank = (title: string) => {
+      const i = SCOPE_ORDER.indexOf(title.trim().toLowerCase())
+      return i === -1 ? SCOPE_ORDER.length : i
+    }
+    const ordered = titles
+      .map((title, i) => ({ title, i }))
+      .sort((a, b) => rank(a.title) - rank(b.title) || a.i - b.i)
+      .map((entry) => entry.title)
+    return ordered.map((title, i) => ({
+      id: `scope-${title}`,
+      title,
+      image: scopeImage(title, i),
     }))
-  }
+  }, [projects])
 
-  const cardsForScope = (title: string): ProjectCard[] => cardsFrom(title, projects)
+  const cardsFrom = useCallback(
+    (title: string): ProjectCard[] =>
+      projects
+        .filter((p) => p.scope === title)
+        .map((p) => {
+          const stat = taskStats[p.id] ?? { total: 0, done: 0 }
+          return {
+            id: p.id,
+            name: p.name,
+            description: p.description ?? '',
+            done: stat.done,
+            total: stat.total,
+            archived: p.archived === true,
+          }
+        }),
+    [projects, taskStats],
+  )
 
   const openScopeModal = (item: ScopeItem) => {
     setSelectedScope(item)
-    setModalCards(cardsForScope(item.title))
     setModalSearch('')
+    setShowArchived(false)
+  }
+
+  // Arsipkan / keluarkan proyek dari arsip (khusus Project Manager).
+  const handleToggleArchive = async (card: ProjectCard) => {
+    if (archiveBusyId) return
+    if (!canManageProject(card.id)) {
+      setError('Hanya Project Manager yang dapat mengarsipkan project ini.')
+      return
+    }
+    setArchiveBusyId(card.id)
+    setError('')
+    try {
+      await setProjectArchived(card.id, !card.archived)
+      await refreshProjects()
+      setProjectActionError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengubah arsip project.')
+    } finally {
+      setArchiveBusyId(null)
+    }
+  }
+
+  // Hanya Project Manager (atau pemilik) yang boleh mengubah/menghapus project.
+  // Member tetap bisa membuka board dan mengerjakan tugasnya, tetapi tidak
+  // boleh mengubah data project.
+  const canManageProject = useCallback(
+    (projectId: string) => projectRoles[projectId] === 'project_manager',
+    [projectRoles],
+  )
+
+  // Muat beberapa project contoh lengkap dengan grup, tugas, subtask, komentar,
+  // dan isi tab Doc. Project yang sudah ada dilewati.
+  const handleSeedDemo = async () => {
+    if (seedingDemo) return
+    if (!canCreate) {
+      setError('Hanya Project Manager yang dapat membuat project baru.')
+      return
+    }
+    setSeedingDemo(true)
+    setDemoNotice('')
+    setError('')
+    try {
+      const { created, skipped } = await seedDemoProjects()
+      await refreshProjects()
+      setDemoNotice(
+        created > 0
+          ? `${created} project contoh ditambahkan${skipped ? `, ${skipped} dilewati karena sudah ada` : ''}.`
+          : 'Semua project contoh sudah ada, tidak ada yang ditambahkan.',
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat contoh project.')
+    } finally {
+      setSeedingDemo(false)
+    }
   }
 
   const handleCreateScope = async (e: React.FormEvent) => {
     e.preventDefault()
     const title = newScopeName.trim()
-    if (!title) return
-    await createProject({ name: title, scope: title })
-    await refreshProjects()
-    setNewScopeName('')
-    setShowNewScopeModal(false)
+    if (creating) return
+    if (!canCreate) {
+      setCreateError('Hanya Project Manager yang dapat membuat scope baru.')
+      return
+    }
+    // Skenario alternatif UC-01 4a: nama kosong -> pesan validasi, form tetap terbuka.
+    if (!title) {
+      setCreateError('Nama proyek wajib diisi.')
+      return
+    }
+    if (scopes.some((s) => s.title.toLowerCase() === title.toLowerCase())) {
+      setCreateError('Scope dengan nama itu sudah ada.')
+      return
+    }
+    if (newScopeStart && newScopeDue && newScopeDue < newScopeStart) {
+      setCreateError('Tenggat proyek tidak boleh lebih awal daripada tanggal mulai.')
+      return
+    }
+    setCreating(true)
+    setCreateError('')
+    try {
+      await createProject({
+        name: title,
+        scope: title,
+        description: newScopeDesc.trim() || undefined,
+        start_date: newScopeStart || null,
+        due_date: newScopeDue || null,
+        workspace_id: activeWorkspace?.id ?? null,
+      })
+      await refreshProjects()
+      setNewScopeName('')
+      setNewScopeDesc('')
+      setNewScopeStart('')
+      setNewScopeDue('')
+      setShowNewScopeModal(false)
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Gagal membuat scope.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const openNewCardModal = () => {
+    if (!canCreate) {
+      setError('Hanya Project Manager yang dapat membuat project baru.')
+      return
+    }
     setNewCardName('')
     setNewCardDesc('')
+    setNewCardWithTemplate(true)
+    setCreateError('')
     setShowNewCardModal(true)
   }
 
   const handleCreateCard = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedScope) return
+    if (!selectedScope || creating) return
     const name = newCardName.trim()
     if (!name) return
-    await createProject({
-      name,
-      scope: selectedScope.title,
-      description: newCardDesc.trim() || undefined,
-    })
-    const rows = await refreshProjects()
-    setModalCards(cardsFrom(selectedScope.title, rows))
-    setShowNewCardModal(false)
+    if (cardsFrom(selectedScope.title).some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      setCreateError('Card dengan nama itu sudah ada di scope ini.')
+      return
+    }
+    if (!canCreate) {
+      setCreateError('Hanya Project Manager yang dapat membuat card baru.')
+      return
+    }
+    setCreating(true)
+    setCreateError('')
+    try {
+      await createProject(
+        {
+          name,
+          scope: selectedScope.title,
+          description: newCardDesc.trim() || undefined,
+          workspace_id: activeWorkspace?.id ?? null,
+        },
+        { template: newCardWithTemplate },
+      )
+      await refreshProjects()
+      setShowNewCardModal(false)
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Gagal membuat card.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const closeScopeModal = () => {
     setSelectedScope(null)
-    setModalCards([])
+    setModalSearch('')
     setShowNewCardModal(false)
+    setCreateError('')
   }
 
-  const toggleStar = (card: ProjectCard, scopeTitle: string) => {
+  const handleToggleFavorite = async (card: ProjectCard, scopeTitle: string) => {
+    const isFavorite = favorites.some((f) => f.id === card.id)
+    // Optimistis: ubah tampilan dulu, lalu simpan ke kolom project_members.favorite.
     setFavorites((prev) =>
-      prev.some((f) => f.id === card.id)
+      isFavorite
         ? prev.filter((f) => f.id !== card.id)
-        : [...prev, { id: card.id, name: card.name, scope: scopeTitle }]
+        : [...prev, { id: card.id, name: card.name, scope: scopeTitle }],
     )
+    try {
+      await setProjectFavorite(card.id, !isFavorite)
+    } catch (err) {
+      // Kembalikan bila gagal agar tampilan tidak berbohong.
+      setFavorites((prev) =>
+        isFavorite
+          ? [...prev, { id: card.id, name: card.name, scope: scopeTitle }]
+          : prev.filter((f) => f.id !== card.id),
+      )
+      setError(err instanceof Error ? err.message : 'Gagal menyimpan favorit.')
+    }
   }
 
-  const filteredModalCards = modalCards.filter(c =>
-    c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
-    c.description.toLowerCase().includes(modalSearch.toLowerCase())
-  )
+  // ======================== UBAH & HAPUS PROJECT (F-03) ========================
 
-  const filteredMembers = initialMembers.filter(
-    (m) =>
-      m.name.toLowerCase().includes(searchMember.toLowerCase()) ||
-      m.email.toLowerCase().includes(searchMember.toLowerCase())
+  const openEditProject = (card: ProjectCard) => {
+    const project = projects.find((p) => p.id === card.id)
+    if (!project) return
+    // Lapisan pengaman: tombolnya sudah disembunyikan untuk Member, tetapi
+    // modal tidak boleh terbuka sama sekali.
+    if (!canManageProject(project.id)) {
+      setError('Hanya Project Manager yang dapat mengubah project ini.')
+      return
+    }
+    setEditingProject(project)
+    setEditName(project.name)
+    setEditDesc(project.description ?? '')
+    setEditStartDate(project.start_date ?? '')
+    setEditDueDate(project.due_date ?? '')
+    setProjectActionError('')
+  }
+
+  const handleSaveProject = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingProject || projectActionBusy) return
+    const name = editName.trim()
+    if (!name) return
+    if (!canManageProject(editingProject.id)) {
+      setProjectActionError('Hanya Project Manager yang dapat mengubah project ini.')
+      return
+    }
+    setProjectActionBusy(true)
+    setProjectActionError('')
+    try {
+      await updateProject(editingProject.id, {
+        name,
+        description: editDesc.trim() || null,
+        start_date: editStartDate || null,
+        due_date: editDueDate || null,
+      })
+      await refreshProjects()
+      setEditingProject(null)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : 'Gagal menyimpan project.')
+    } finally {
+      setProjectActionBusy(false)
+    }
+  }
+
+  const handleDeleteProject = async () => {
+    if (!deletingProject || projectActionBusy) return
+    if (!canManageProject(deletingProject.id)) {
+      setProjectActionError('Hanya Project Manager yang dapat menghapus project ini.')
+      return
+    }
+    setProjectActionBusy(true)
+    setProjectActionError('')
+    try {
+      await deleteProject(deletingProject.id)
+      await refreshProjects()
+      setDeletingProject(null)
+      if (selectedScope) {
+        // Scope yang tersisa mungkin sudah kosong.
+        const remaining = (await listProjects()).filter((p) => p.scope === selectedScope.title)
+        if (remaining.length === 0) setSelectedScope(null)
+      }
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : 'Gagal menghapus project.')
+    } finally {
+      setProjectActionBusy(false)
+    }
+  }
+
+  const modalCards = selectedScope ? cardsFrom(selectedScope.title) : []
+
+  // Proyek aktif dan proyek yang sudah diarsipkan dipisah agar daftar utama
+  // tetap ringkas. Arsip hanya ditampilkan bila tombolnya dinyalakan.
+  const modalActiveCards = modalCards.filter((c) => !c.archived)
+  const modalArchivedCards = modalCards.filter((c) => c.archived)
+
+  const filterCards = (cards: ProjectCard[]) =>
+    cards.filter(
+      (c) =>
+        c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
+        c.description.toLowerCase().includes(modalSearch.toLowerCase()),
+    )
+
+  const filteredModalCards = filterCards(showArchived ? modalArchivedCards : modalActiveCards)
+
+  const filteredMembers = useMemo(() => {
+    const term = searchMember.trim().toLowerCase()
+    const rows = profiles.filter(
+      (m) =>
+        m.name.toLowerCase().includes(term) || (m.email ?? '').toLowerCase().includes(term),
+    )
+    return [...rows].sort((a, b) => {
+      if (memberSort === 'name-desc') return b.name.localeCompare(a.name)
+      if (memberSort === 'email-asc') return (a.email ?? '').localeCompare(b.email ?? '')
+      return a.name.localeCompare(b.name)
+    })
+  }, [profiles, searchMember, memberSort])
+
+  // ======================== PERAN ANGGOTA (MY MEMBER) ========================
+
+  // Hanya Project Manager yang boleh mengubah peran anggota.
+  const handleTeamRoleChange = async (member: Profile, role: TeamRole) => {
+    const current = teamRoles[member.id]?.role ?? member.role
+    if (roleBusyId || current === role) return
+    if (!isManager) return
+    const previousRole = current
+    const previousInfo = teamRoles[member.id]
+    setRoleBusyId(member.id)
+    setTeamError('')
+    setTeamNotice('')
+    // Optimistis: ubah tampilan dulu, kembalikan bila gagal.
+    setProfiles((prev) => prev.map((p) => (p.id === member.id ? { ...p, role } : p)))
+    setTeamRoles((prev) => ({
+      ...prev,
+      [member.id]: { role, projects: prev[member.id]?.projects ?? 0 },
+    }))
+    try {
+      const result = await updateTeamMemberRole(member.id, role, activeWorkspace?.id ?? null)
+      const label = role === 'project_manager' ? 'Project Manager' : 'Member'
+      setTeamNotice(
+        result.projectsUpdated > 0
+          ? `Peran ${member.name} menjadi ${label} pada ${result.projectsUpdated} project Anda.`
+          : `Peran ${member.name} diubah menjadi ${label}.`,
+      )
+      // Muat ulang agar peran yang tampil benar-benar dari database.
+      await refreshProjects()
+    } catch (err) {
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === member.id ? { ...p, role: previousRole } : p)),
+      )
+      setTeamRoles((prev) => {
+        const next = { ...prev }
+        if (previousInfo) next[member.id] = previousInfo
+        else delete next[member.id]
+        return next
+      })
+      setTeamError(err instanceof Error ? err.message : 'Gagal mengubah peran anggota.')
+    } finally {
+      setRoleBusyId(null)
+    }
+  }
+
+  const displayName = profile?.name || 'there'
+  const firstName = displayName.split(' ')[0]
+
+  // Bagian "My Member" pada Home. F-02 dan UC-05 menyebut bagian ini tampil untuk
+  // Project Manager maupun Member; bedanya Member hanya dapat melihat, sedangkan
+  // pengaturan peran (UC-02) hanya untuk Project Manager.
+  const renderMyMember = (readOnly: boolean) => (
+    <section
+      ref={readOnly ? undefined : membersSectionRef}
+      className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
+    >
+      <div className="mb-4">
+        <h2 className="text-lg font-bold text-white tracking-tight mb-1">My Member</h2>
+        <p className="text-xs text-neutral-500 mb-4">
+          {readOnly
+            ? 'Daftar anggota tim beserta perannya pada proyek. Peran hanya dapat diubah oleh Project Manager.'
+            : 'Semua pengguna yang mendaftar otomatis masuk daftar ini dengan peran Member. Peran hanya dapat diubah oleh Project Manager.'}
+        </p>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
+          <div className="relative flex-1 max-w-md">
+            <Search
+              size={16}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+            />
+            <input
+              ref={readOnly ? undefined : memberSearchRef}
+              type="text"
+              value={searchMember}
+              onChange={(e) => setSearchMember(e.target.value)}
+              placeholder="Search My Member"
+              className="w-full h-10 pl-10 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
+            />
+          </div>
+          <div className="relative self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setShowMemberSort((v) => !v)}
+              className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5"
+            >
+              <ArrowUpDown size={14} />
+              <span>{MEMBER_SORT_LABEL[memberSort]}</span>
+              <ChevronDown size={15} />
+            </button>
+            {showMemberSort && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowMemberSort(false)} />
+                <div className="absolute right-0 top-full mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 z-30">
+                  {(Object.keys(MEMBER_SORT_LABEL) as MemberSort[]).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setMemberSort(key)
+                        setShowMemberSort(false)
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                        memberSort === key
+                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                          : 'text-neutral-300 hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>{MEMBER_SORT_LABEL[key]}</span>
+                      {memberSort === key && <Check size={14} />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!readOnly && teamError && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{teamError}</span>
+        </div>
+      )}
+      {!readOnly && teamNotice && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+          <Check size={16} className="mt-0.5 shrink-0" />
+          <span>{teamNotice}</span>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
+              <th className="pb-3 font-normal">Member Name</th>
+              <th className={`pb-3 text-right font-normal ${readOnly ? '' : 'w-52'}`}>Role</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-800/60">
+            {filteredMembers.map((member) => {
+              const isSelf = member.id === profile?.id
+              const busy = roleBusyId === member.id
+              const info = teamRoles[member.id]
+              const effectiveRole: TeamRole = info?.role ?? member.role
+              return (
+                <tr key={member.id} className="group hover:bg-neutral-800/30 transition-colors">
+                  <td className="py-3.5 pr-4">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={member.name} src={member.avatar_url} size={36} />
+                      <div>
+                        <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">
+                          {member.name}
+                          {isSelf && (
+                            <span className="ml-2 rounded bg-neutral-700/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-300">
+                              Anda
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-neutral-400">{member.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3.5 pl-4 text-right whitespace-nowrap">
+                    {readOnly || isSelf ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-lg border border-neutral-700/70 bg-neutral-800/50 px-2.5 py-1 text-xs text-neutral-400"
+                        title={
+                          readOnly
+                            ? 'Peran hanya dapat diubah oleh Project Manager'
+                            : 'Peran Anda sendiri tidak dapat diubah dari sini'
+                        }
+                      >
+                        {effectiveRole === 'project_manager' ? 'Project Manager' : 'Member'}
+                      </span>
+                    ) : (
+                      <div className="inline-flex items-center gap-2">
+                        {busy && <Loader2 size={13} className="animate-spin text-blue-400" />}
+                        <select
+                          value={effectiveRole}
+                          disabled={busy}
+                          onChange={(e) => handleTeamRoleChange(member, e.target.value as TeamRole)}
+                          className="h-9 pl-2.5 pr-8 bg-[#1b1c20] border border-neutral-700 rounded-lg text-xs text-neutral-200 outline-none focus:border-blue-500 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                          aria-label={`Peran ${member.name}`}
+                        >
+                          <option value="member">Member</option>
+                          <option value="project_manager">Project Manager</option>
+                        </select>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+            {!loading && filteredMembers.length === 0 && (
+              <tr>
+                <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
+                  {profiles.length === 0
+                    ? 'Belum ada anggota yang bisa ditampilkan.'
+                    : `No members found matching "${searchMember}"`}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 
   return (
-    <div className="min-h-screen w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden w-full bg-[#141517] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header Bar */}
-      <header className="w-full h-16 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
+      <header className="w-full h-16 shrink-0 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <Link href="/" className="inline-flex items-center gap-2.5">
             <Image
@@ -228,15 +999,34 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setShowNotifications(true)}
-            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
-            aria-label="Notifications"
+            className="relative p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label={
+              invitationCount > 0
+                ? `Notifications (${invitationCount} undangan menunggu)`
+                : 'Notifications'
+            }
           >
             <Bell size={18} strokeWidth={1.8} />
+            {invitationCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-blue-600 text-[10px] font-bold text-white flex items-center justify-center">
+                {invitationCount}
+              </span>
+            )}
           </button>
-          <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Team group">
+          <button
+            type="button"
+            onClick={() => membersSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label="Team group"
+          >
             <Users size={18} strokeWidth={1.8} />
           </button>
-          <button type="button" className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer" aria-label="Search">
+          <button
+            type="button"
+            onClick={() => memberSearchRef.current?.focus()}
+            className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
+            aria-label="Search member"
+          >
             <Search size={18} strokeWidth={1.8} />
           </button>
           {/* User Profile Avatar & Dropdown Menu */}
@@ -247,23 +1037,23 @@ export default function DashboardPage() {
               className="w-8 h-8 rounded-full border border-neutral-600 hover:border-blue-400 overflow-hidden bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-200 transition cursor-pointer ml-1"
               aria-label="User menu"
             >
-              G
+              <Avatar name={displayName} src={profile?.avatar_url ?? null} />
             </button>
 
             {isUserMenuOpen && (
               <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsUserMenuOpen(false)}
-                />
+                <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
                 <div className="absolute right-0 top-11 w-52 bg-[#1b1c20] border border-neutral-800/90 rounded-2xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex flex-col items-center text-center p-2 pb-3 border-b border-neutral-800/80">
                     <div className="w-12 h-12 rounded-full border border-neutral-600 overflow-hidden bg-neutral-800 flex items-center justify-center mb-2">
-                      <span className="text-base font-bold text-neutral-300">G</span>
+                      <Avatar name={displayName} src={profile?.avatar_url ?? null} size={48} />
                     </div>
-                    <p className="text-sm font-semibold text-white tracking-tight">
-                      George Frederic
-                    </p>
+                    <p className="text-sm font-semibold text-white tracking-tight">{displayName}</p>
+                    {profile?.email && (
+                      <p className="text-xs text-neutral-400 mt-0.5 truncate max-w-[180px]">
+                        {profile.email}
+                      </p>
+                    )}
                   </div>
 
                   <div className="pt-2 space-y-1">
@@ -298,18 +1088,22 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Main Container: Sidebar + Content */}
-      <div className="flex-1 flex flex-col lg:flex-row">
-        {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:min-h-[calc(100vh-4rem)] flex flex-col justify-between shrink-0">
+      {/* Main Container: Sidebar + Content.
+          Di layar besar tinggi dikunci (h-screen) dan hanya <main> yang
+          menggulir, sehingga sidebar kiri tetap di tempat saat konten di-scroll. */}
+      <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
+        {/* Left Sidebar — menempel di bawah header dan punya scroll sendiri
+            (`lg:sticky` + tinggi tetap), sama seperti halaman board. */}
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:sticky lg:top-16 lg:h-[calc(100dvh-4rem)] lg:self-start lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-contain flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
                 type="button"
-                onClick={() => setActiveNav('Home')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
-                  activeNav === 'Home' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
-                }`}
+                onClick={() => {
+                  mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer bg-blue-600 text-white shadow-sm"
               >
                 <Home size={18} strokeWidth={1.8} />
                 <span>Home</span>
@@ -338,15 +1132,13 @@ export default function DashboardPage() {
                     favorites.map((f) => (
                       <Link
                         key={f.id}
-                        href={`/project/${f.scope.toLowerCase().replace(/\s+/g, '-')}/${f.name
-                          .toLowerCase()
-                          .replace(/\s+/g, '-')}`}
+                        href={`/project/${slugify(f.scope)}/${slugify(f.name)}`}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
                       >
                         <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
                         <span className="truncate">{f.name}</span>
                         <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
-                          {f.scope}
+                          {f.scope ?? ''}
                         </span>
                       </Link>
                     ))
@@ -358,14 +1150,16 @@ export default function DashboardPage() {
             <div className="pt-2">
               <div className="flex items-center justify-between text-neutral-400 px-2 mb-3">
                 <span className="text-sm font-medium text-neutral-300">Workspaces</span>
-                <div className="flex items-center gap-2">
-                  <button type="button" className="hover:text-white transition cursor-pointer p-1" aria-label="Search workspace">
-                    <Search size={15} />
-                  </button>
-                </div>
               </div>
 
-              <WorkspaceSelector />
+              <WorkspaceSelector
+                value={activeWorkspace?.name ?? ''}
+                onChange={(ws) => {
+                  setActiveWorkspace(ws)
+                  setSelectedScope(null)
+                }}
+                canManage={canCreate}
+              />
             </div>
 
             {/* History: project yang terakhir dibuka (localStorage). */}
@@ -383,7 +1177,7 @@ export default function DashboardPage() {
                   recentProjects.map((r) => (
                     <Link
                       key={`${r.scope}/${r.card}`}
-                      href={`/project/${r.scope}/${r.card}`}
+                      href={`/project/${slugify(r.scope)}/${slugify(r.card)}`}
                       className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-neutral-300 hover:text-white hover:bg-neutral-800/40 transition"
                     >
                       <Clock size={13} className="text-neutral-500 shrink-0" />
@@ -400,117 +1194,276 @@ export default function DashboardPage() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 p-6 sm:p-8 lg:p-10 xl:p-12 overflow-y-auto">
+        <main
+          ref={mainRef}
+          className="flex-1 lg:min-h-0 p-6 sm:p-8 lg:p-10 xl:p-12 overflow-y-auto"
+        >
           <div className="mb-8">
-            <p className="text-xs sm:text-sm text-neutral-400 font-normal">Thursday, February 19 2026</p>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">Hello, George</h1>
+            <p className="text-xs sm:text-sm text-neutral-400 font-normal">{today || '\u00a0'}</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">
+              Hello, {firstName}
+            </h1>
           </div>
+
+          {error && (
+            <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* Scope Of Work Section */}
           <section className="mb-12">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 gap-3">
               <h2 className="text-xl font-bold text-white tracking-tight">Scope Of Work</h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setNewScopeName('')
-                  setShowNewScopeModal(true)
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
-              >
-                <Plus size={16} strokeWidth={2.5} />
-                <span>New Scope</span>
-              </button>
-            </div>
-
-            {/* Grid of Scope Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {scopes.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => openScopeModal(item)}
-                  className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
-                >
-                  <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
-                    <Image
-                      src={item.image}
-                      alt={item.title}
-                      fill
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                      className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
-                    />
-                  </div>
-                  <div className="px-4 py-3 bg-[#191a1e]">
-                    <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition">{item.title}</h3>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* My Member Section */}
-          <section className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold text-white tracking-tight mb-4">My Member</h2>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3">
-                <div className="relative flex-1 max-w-md">
-                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchMember}
-                    onChange={(e) => setSearchMember(e.target.value)}
-                    placeholder="Search My Member"
-                    className="w-full h-10 pl-10 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-xl text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                  />
-                </div>
-                <div className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white cursor-pointer px-2 py-1.5 self-end sm:self-auto">
-                  <span>Sort by</span>
-                  <ChevronDown size={15} />
-                </div>
+              <div className="flex items-center gap-2">
+                {/* Membuat workspace/project/scope hanya untuk Project Manager. */}
+                {canCreate && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSeedDemo}
+                      disabled={seedingDemo}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {seedingDemo ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={15} />
+                      )}
+                      <span>{seedingDemo ? 'Memuat…' : 'Muat contoh'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewScopeName('')
+                        setNewScopeDesc('')
+                        setNewScopeStart('')
+                        setNewScopeDue('')
+                        setCreateError('')
+                        setShowNewScopeModal(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 cursor-pointer"
+                    >
+                      <Plus size={16} strokeWidth={2.5} />
+                      <span>New Scope</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-neutral-800/80 text-xs text-neutral-400 font-medium">
-                    <th className="pb-3 font-normal">Member Name</th>
-                    <th className="pb-3 text-right font-normal">Last Visited</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800/60">
-                  {filteredMembers.map((member) => (
-                    <tr key={member.id} className="group hover:bg-neutral-800/30 transition-colors">
-                      <td className="py-3.5 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-lg ${member.avatarColor} text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-xs`}>
-                            {member.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-white group-hover:text-blue-400 transition">{member.name}</p>
-                            <p className="text-xs text-neutral-400">{member.email}</p>
+            {demoNotice && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+                <Check size={16} className="mt-0.5 shrink-0" />
+                <span>{demoNotice}</span>
+              </div>
+            )}
+
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-10">
+                <Loader2 size={16} className="animate-spin" /> Memuat project…
+              </div>
+            ) : scopes.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
+                <p className="text-sm text-neutral-400">
+                  {canCreate
+                    ? 'Belum ada scope. Buat scope pertama, atau muat contoh project lengkap untuk melihat tampilan board yang sudah terisi.'
+                    : 'Belum ada project yang dibagikan kepada Anda. Project akan muncul di sini setelah Project Manager menambahkan Anda sebagai anggota.'}
+                </p>
+                {canCreate && (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewScopeName('')
+                        setNewScopeDesc('')
+                        setNewScopeStart('')
+                        setNewScopeDue('')
+                        setCreateError('')
+                        setShowNewScopeModal(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
+                    >
+                      <Plus size={16} strokeWidth={2.5} />
+                      <span>New Scope</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSeedDemo}
+                      disabled={seedingDemo}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-neutral-300 hover:text-white bg-[#1b1c20] hover:bg-neutral-800 border border-neutral-700/80 text-sm font-medium rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {seedingDemo ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={15} />
+                      )}
+                      <span>{seedingDemo ? 'Memuat…' : 'Muat contoh project'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {scopes.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => openScopeModal(item)}
+                    className="group bg-[#191a1e] border border-neutral-800/80 rounded-xl overflow-hidden shadow-sm hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                  >
+                    <div className="h-40 sm:h-44 w-full relative overflow-hidden bg-neutral-900">
+                      <Image
+                        src={item.image}
+                        alt={item.title}
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                        className="object-cover object-center grayscale contrast-105 brightness-90 group-hover:scale-105 group-hover:grayscale-0 group-hover:brightness-100 transition-all duration-500 ease-out"
+                      />
+                      {/* Gradasi bawah: menyatukan foto dengan latar kartu gelap
+                          supaya tepi gambar tidak terlihat sebagai potongan keras. */}
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#191a1e] via-[#191a1e]/25 to-transparent" />
+                      {/* Vignette tipis agar fokus ke tengah gambar. */}
+                      <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_60px_20px_rgba(0,0,0,0.35)]" />
+
+                      {/* Jumlah proyek aktif, dipindah ke atas gambar agar baris
+                          judul di bawah tetap lega. */}
+                      {(() => {
+                        const all = cardsFrom(item.title)
+                        const active = all.filter((c) => !c.archived).length
+                        const archived = all.length - active
+                        return (
+                          <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[10px] font-medium text-neutral-200 backdrop-blur-sm">
+                            {active} card
+                            {archived > 0 && (
+                              <span className="text-amber-300/90">· {archived} arsip</span>
+                            )}
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    <div className="px-4 py-3.5 bg-[#191a1e] flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition truncate">
+                        {item.title}
+                      </h3>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500 group-hover:text-blue-400 transition shrink-0">
+                        Buka
+                        <ArrowRight
+                          size={12}
+                          className="translate-x-0 group-hover:translate-x-0.5 transition-transform duration-200"
+                        />
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* POV Project Manager: My Member */}
+          {isManager === null ? (
+            <section className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm">
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-8">
+                <Loader2 size={16} className="animate-spin" /> Memuat…
+              </div>
+            </section>
+          ) : isManager ? (
+            renderMyMember(false)
+          ) : (
+          /* POV Member: tugas yang harus dikerjakan, diurutkan dari tenggat terdekat */
+          <section
+            ref={membersSectionRef}
+            className="border border-neutral-800/80 rounded-2xl bg-[#141517] p-5 sm:p-6 lg:p-7 shadow-sm"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white tracking-tight">Tugas Saya</h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Tugas yang ditugaskan kepada Anda, diurutkan dari tenggat terdekat.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-rose-300 font-semibold">
+                  {myTasks.filter((t) => (t.days_left ?? 99) < 0).length} terlambat
+                </span>
+                <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-300 font-semibold">
+                  {
+                    myTasks.filter((t) => t.days_left !== null && t.days_left >= 0 && t.days_left <= 3)
+                      .length
+                  }{' '}
+                  mepet deadline
+                </span>
+                <span className="rounded-md border border-neutral-700/70 px-2 py-1 text-neutral-400 font-semibold">
+                  {myTasks.length} total
+                </span>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-neutral-400 py-8">
+                <Loader2 size={16} className="animate-spin" /> Memuat tugas…
+              </div>
+            ) : myTasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-12 text-center">
+                <ListTodo size={22} className="text-neutral-600" />
+                <p className="text-sm text-neutral-400">Belum ada tugas yang ditugaskan kepada Anda.</p>
+                <p className="text-[11px] text-neutral-600">
+                  Tugas akan muncul di sini setelah Project Manager membagikannya.
+                </p>
+              </div>
+            ) : (
+              <>
+                {(() => {
+                  const urgent = myTasks.filter(
+                    (t) => t.days_left !== null && t.days_left <= 3,
+                  )
+                  const later = myTasks.filter((t) => t.days_left === null || t.days_left > 3)
+                  const openTask = (t: MyTaskItem) =>
+                    router.push(
+                      `/project/${slugify(t.project_scope)}/${slugify(t.project_name)}`,
+                    )
+                  return (
+                    <div className="space-y-6">
+                      {urgent.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-300/90 mb-2.5">
+                            Perlu segera dikerjakan
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {urgent.map((t) => (
+                              <MyTaskCard key={t.id} task={t} onOpen={() => openTask(t)} />
+                            ))}
                           </div>
                         </div>
-                      </td>
-                      <td className="py-3.5 pl-4 text-right text-xs sm:text-sm text-neutral-400 whitespace-nowrap">{member.lastVisited}</td>
-                    </tr>
-                  ))}
-                  {filteredMembers.length === 0 && (
-                    <tr>
-                      <td colSpan={2} className="py-8 text-center text-sm text-neutral-500">
-                        No members found matching &quot;{searchMember}&quot;
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      )}
+                      {later.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400 mb-2.5">
+                            Berikutnya
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {later.map((t) => (
+                              <MyTaskCard key={t.id} task={t} onOpen={() => openTask(t)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </>
+            )}
           </section>
+          )}
+
+          {/* POV Member: My Member (hanya lihat). F-02/UC-05 menyebut bagian ini
+              tampil untuk kedua aktor, sedangkan pengaturan peran tetap milik PM. */}
+          {isManager === false && <div className="mt-8">{renderMyMember(true)}</div>}
         </main>
       </div>
 
       {/* =================== CREATE NEW SCOPE MODAL =================== */}
-      {showNewScopeModal && (
+      {showNewScopeModal && canCreate && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -532,22 +1485,63 @@ export default function DashboardPage() {
               </button>
             </div>
 
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Nama Proyek
+            </label>
             <input
               type="text"
               autoFocus
               value={newScopeName}
               onChange={(e) => setNewScopeName(e.target.value)}
               placeholder="scope name"
-              className="w-full h-14 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+              className="w-full h-12 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
+
+            <label className="block text-xs font-medium text-neutral-400 mt-4 mb-1.5">
+              Deskripsi
+            </label>
+            <textarea
+              rows={3}
+              value={newScopeDesc}
+              onChange={(e) => setNewScopeDesc(e.target.value)}
+              placeholder="deskripsi proyek (opsional)"
+              className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
+            />
+
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Tanggal Mulai
+                </label>
+                <input
+                  type="date"
+                  value={newScopeStart}
+                  onChange={(e) => setNewScopeStart(e.target.value)}
+                  className="w-full h-11 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Tenggat
+                </label>
+                <input
+                  type="date"
+                  value={newScopeDue}
+                  onChange={(e) => setNewScopeDue(e.target.value)}
+                  className="w-full h-11 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}
 
             <div className="flex items-center justify-end pt-6">
               <button
                 type="submit"
-                disabled={!newScopeName.trim()}
+                disabled={creating}
                 className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>
@@ -555,7 +1549,7 @@ export default function DashboardPage() {
       )}
 
       {/* =================== CREATE NEW CARD MODAL =================== */}
-      {showNewCardModal && selectedScope && (
+      {showNewCardModal && selectedScope && canCreate && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -598,15 +1592,32 @@ export default function DashboardPage() {
                 placeholder="description (optional)"
                 className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
               />
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none rounded-lg border border-neutral-700/60 bg-[#191a1e] px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={newCardWithTemplate}
+                  onChange={(e) => setNewCardWithTemplate(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-neutral-600 bg-transparent accent-blue-600 cursor-pointer"
+                />
+                <span className="text-xs text-neutral-300 leading-relaxed">
+                  Sertakan contoh tugas
+                  <span className="block text-[11px] text-neutral-500 mt-0.5">
+                    Grup, tugas, subtask, dan isi tab Doc langsung terisi sebagai template kerja.
+                  </span>
+                </span>
+              </label>
             </div>
+
+            {createError && <p className="mt-3 text-xs text-red-400">{createError}</p>}
 
             <div className="flex items-center justify-end pt-6">
               <button
                 type="submit"
-                disabled={!newCardName.trim()}
+                disabled={!newCardName.trim() || creating}
                 className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>
@@ -622,10 +1633,7 @@ export default function DashboardPage() {
           aria-label={`Scope Of Work - ${selectedScope.title}`}
         >
           {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={closeScopeModal}
-          />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeScopeModal} />
 
           {/* Modal Panel */}
           <div className="relative w-[96vw] h-[94vh] bg-[#111214] border border-neutral-800/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -633,8 +1641,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between px-6 sm:px-8 pt-6 pb-4 border-b border-neutral-800/60 shrink-0">
               <div className="flex items-center gap-4">
                 <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Scope Of Work /{' '}
-                  <span className="font-extrabold">{selectedScope.title}</span>
+                  Scope Of Work / <span className="font-extrabold">{selectedScope.title}</span>
                 </h2>
               </div>
               <button
@@ -650,7 +1657,10 @@ export default function DashboardPage() {
             {/* Modal Toolbar */}
             <div className="flex items-center gap-3 px-6 sm:px-8 py-4 shrink-0">
               <div className="relative flex-1 max-w-xs">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+                />
                 <input
                   type="text"
                   value={modalSearch}
@@ -659,60 +1669,195 @@ export default function DashboardPage() {
                   className="w-full h-9 pl-9 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
                 />
               </div>
-              <button
-                type="button"
-                onClick={openNewCardModal}
-                className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
-              >
-                <Plus size={15} strokeWidth={2.5} />
-                <span>New Card</span>
-              </button>
+              <div className="flex items-center gap-2 ml-auto">
+                {/* Tombol arsip: menampilkan proyek yang sudah selesai */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowArchived((v) => !v)
+                    setModalSearch('')
+                  }}
+                  className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium transition cursor-pointer shrink-0 border ${
+                    showArchived
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                      : 'bg-[#1b1c20] text-neutral-300 border-neutral-700/70 hover:text-white hover:border-neutral-600'
+                  }`}
+                  aria-pressed={showArchived}
+                  title={
+                    showArchived
+                      ? 'Kembali ke daftar proyek aktif'
+                      : 'Lihat proyek yang sudah diarsipkan'
+                  }
+                >
+                  <Archive size={15} />
+                  <span>{showArchived ? 'Proyek Aktif' : 'Arsip'}</span>
+                  <span
+                    className={`rounded-full px-1.5 text-[10px] font-semibold ${
+                      showArchived ? 'bg-amber-500/25 text-amber-200' : 'bg-neutral-700/70 text-neutral-300'
+                    }`}
+                  >
+                    {showArchived ? modalArchivedCards.length : modalArchivedCards.length}
+                  </span>
+                </button>
+
+                {canCreate && !showArchived && (
+                  <button
+                    type="button"
+                    onClick={openNewCardModal}
+                    className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
+                  >
+                    <Plus size={15} strokeWidth={2.5} />
+                    <span>New Card</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Modal Cards Grid */}
             <div className="flex-1 overflow-y-auto px-6 sm:px-8 pb-6">
               {filteredModalCards.length === 0 ? (
-                <div className="flex items-center justify-center h-40 text-neutral-500 text-sm">
-                  No cards found matching &quot;{modalSearch}&quot;
+                <div className="flex flex-col items-center justify-center h-40 gap-3 text-neutral-500 text-sm">
+                  <span>
+                    {showArchived
+                      ? 'Belum ada proyek yang diarsipkan pada scope ini.'
+                      : modalActiveCards.length === 0
+                        ? 'Belum ada card di scope ini.'
+                        : `No cards found matching "${modalSearch}"`}
+                  </span>
+                  {!showArchived && modalActiveCards.length === 0 && canCreate && (
+                    <button
+                      type="button"
+                      onClick={openNewCardModal}
+                      className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition cursor-pointer"
+                    >
+                      <Plus size={15} strokeWidth={2.5} />
+                      <span>New Card</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
                   {filteredModalCards.map((card) => {
-                    const pct = Math.round((card.progress / card.total) * 100)
+                    const pct = card.total ? Math.round((card.done / card.total) * 100) : 0
                     const isStarred = favorites.some((f) => f.id === card.id)
+                    const canManage = canManageProject(card.id)
                     return (
                       <div
                         key={card.id}
-                        onClick={() => {
-                          const scopeSlug = selectedScope ? selectedScope.title.toLowerCase().replace(/\s+/g, '-') : 'client'
-                          const cardSlug = card.name.toLowerCase().replace(/\s+/g, '-')
-                          router.push(`/project/${scopeSlug}/${cardSlug}`)
-                        }}
-                        className="group bg-[#1b1c20] border border-neutral-800/70 rounded-xl p-4 hover:border-blue-500/40 hover:shadow-blue-500/5 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3"
+                        onClick={() =>
+                          router.push(
+                            `/project/${slugify(selectedScope.title)}/${slugify(card.name)}`,
+                          )
+                        }
+                        className={`group bg-[#1b1c20] border rounded-xl p-4 hover:border-blue-500/40 hover:shadow-blue-500/5 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3 ${
+                          card.archived
+                            ? 'border-amber-500/30 bg-[#1b1a17]'
+                            : 'border-neutral-800/70'
+                        }`}
                       >
                         {/* Card Top Row */}
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-semibold text-white leading-snug">{card.name}</span>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleStar(card, selectedScope?.title || '') }}
-                            className={`p-0.5 rounded transition cursor-pointer shrink-0 ${
-                              isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
-                            }`}
-                            aria-label={isStarred ? 'Unstar' : 'Star'}
-                          >
-                            <Star
-                              size={15}
-                              strokeWidth={1.8}
-                              fill={isStarred ? 'currentColor' : 'none'}
-                            />
-                          </button>
+                          <span className="text-sm font-semibold text-white leading-snug">
+                            {card.name}
+                          </span>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            {/* Ubah & hapus hanya untuk Project Manager */}
+                            {canManage && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openEditProject(card)
+                                  }}
+                                  className="p-1 rounded text-neutral-500 hover:text-white hover:bg-neutral-700/60 transition cursor-pointer"
+                                  aria-label={`Ubah project ${card.name}`}
+                                  title="Ubah project"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handleToggleArchive(card)
+                                  }}
+                                  disabled={archiveBusyId === card.id}
+                                  className="p-1 rounded text-neutral-500 hover:text-amber-400 hover:bg-amber-500/10 transition cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                                  aria-label={
+                                    card.archived
+                                      ? `Keluarkan ${card.name} dari arsip`
+                                      : `Arsipkan project ${card.name}`
+                                  }
+                                  title={card.archived ? 'Keluarkan dari arsip' : 'Arsipkan project'}
+                                >
+                                  {card.archived ? (
+                                    <ArchiveRestore size={13} />
+                                  ) : (
+                                    <Archive size={13} />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const project = projects.find((p) => p.id === card.id)
+                                    if (!project) return
+                                    setProjectActionError('')
+                                    setDeletingProject(project)
+                                  }}
+                                  className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                                  aria-label={`Hapus project ${card.name}`}
+                                  title="Hapus project"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleToggleFavorite(card, selectedScope.title)
+                              }}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isStarred ? 'text-yellow-400' : 'text-neutral-500 hover:text-yellow-400'
+                              }`}
+                              aria-label={isStarred ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                              title={isStarred ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                            >
+                              <Star
+                                size={14}
+                                strokeWidth={1.8}
+                                fill={isStarred ? 'currentColor' : 'none'}
+                              />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Description */}
                         <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3 flex-1">
-                          {card.description}
+                          {card.description || 'Belum ada deskripsi.'}
                         </p>
+
+                        {card.archived && (
+                          <span className="inline-flex w-fit items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                            <Archive size={10} />
+                            Diarsipkan
+                          </span>
+                        )}
+
+                        {/* Ikon orang: siapa saja yang mengerjakan project ini */}
+                        <div className="flex items-center justify-between gap-2">
+                          {(projectMembers[card.id]?.length ?? 0) > 0 ? (
+                            <MemberStack members={projectMembers[card.id]} max={5} size={22} />
+                          ) : (
+                            <span className="text-[10px] text-neutral-600">Belum ada anggota</span>
+                          )}
+                          <span className="text-[10px] text-neutral-500 shrink-0">
+                            {projectMembers[card.id]?.length ?? 0} orang
+                          </span>
+                        </div>
 
                         {/* Progress Bar */}
                         <div className="mt-auto space-y-1.5">
@@ -723,7 +1868,9 @@ export default function DashboardPage() {
                             />
                           </div>
                           <span className="text-xs text-neutral-500">
-                            {card.progress}/{card.total}
+                            {card.total === 0
+                              ? 'Belum ada tugas'
+                              : `${card.done}/${card.total} tugas selesai`}
                           </span>
                         </div>
                       </div>
@@ -731,6 +1878,170 @@ export default function DashboardPage() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================== EDIT PROJECT MODAL (F-03) =================== */}
+      {editingProject && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setEditingProject(null)}
+          />
+          <form
+            onSubmit={handleSaveProject}
+            className="relative w-full max-w-lg bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
+          >
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Ubah Project</h2>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Scope: <span className="text-neutral-200 font-medium">{editingProject.scope}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingProject(null)}
+                className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer -mt-1"
+                aria-label="Close"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Nama Project
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="nama project"
+                  className="w-full h-12 px-4 bg-transparent border border-neutral-700/80 rounded-lg text-base text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+                  Deskripsi
+                </label>
+                <textarea
+                  rows={3}
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="deskripsi (opsional)"
+                  className="w-full px-4 py-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-none"
+                />
+              </div>
+
+              {/* Jadwal proyek (F-03) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="project-start"
+                    className="block text-xs font-medium text-neutral-400 mb-1.5"
+                  >
+                    Tanggal Mulai
+                  </label>
+                  <input
+                    id="project-start"
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full h-11 px-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition [color-scheme:dark]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="project-due"
+                    className="block text-xs font-medium text-neutral-400 mb-1.5"
+                  >
+                    Tenggat Waktu
+                  </label>
+                  <input
+                    id="project-due"
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full h-11 px-3 bg-transparent border border-neutral-700/80 rounded-lg text-sm text-white outline-none focus:border-blue-500 transition [color-scheme:dark]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {projectActionError && (
+              <p className="mt-3 text-xs text-red-400">{projectActionError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-6">
+              <button
+                type="button"
+                onClick={() => setEditingProject(null)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!editName.trim() || projectActionBusy}
+                className="h-10 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                {projectActionBusy ? 'Menyimpan…' : 'Simpan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* =================== DELETE PROJECT CONFIRM (F-03) =================== */}
+      {deletingProject && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setDeletingProject(null)}
+          />
+          <div className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 size={17} className="text-red-400" />
+              </span>
+              <div>
+                <h2 className="text-base font-bold text-white">Hapus Project</h2>
+                <p className="text-xs text-neutral-400">
+                  <span className="font-semibold text-neutral-200">{deletingProject.name}</span>{' '}
+                  akan dihapus.
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-neutral-300">
+              Seluruh grup, tugas, subtask, komentar, dan dokumen di dalamnya ikut terhapus.
+              Tindakan ini tidak bisa dibatalkan.
+            </p>
+
+            {projectActionError && (
+              <p className="mt-3 text-xs text-red-400">{projectActionError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setDeletingProject(null)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteProject}
+                disabled={projectActionBusy}
+                className="h-8 px-4 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                {projectActionBusy ? 'Menghapus…' : 'Hapus'}
+              </button>
             </div>
           </div>
         </div>

@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Slug dipakai di URL (/project/<scope>/<card>). Nilai tersimpan di database
+// ("Studio Client", "Aqua") harus dibandingkan lewat slug agar cocok dengan URL.
+export function slugify(value: string | null | undefined): string {
+  return (value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 export interface RecentProject {
   scope: string // slug, dipakai di URL
   card: string // slug, dipakai di URL
@@ -29,3 +39,4 @@ export function recordRecentProject(entry: RecentProject): void {
   )
   localStorage.setItem(RECENT_KEY, JSON.stringify([entry, ...rest].slice(0, 8)))
 }
+

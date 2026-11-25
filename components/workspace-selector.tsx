@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, LayoutGrid, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import {
   createWorkspace,
   deleteWorkspace,
+  ensureDefaultWorkspace,
   listWorkspaces,
   renameWorkspace,
   type Workspace,
@@ -12,9 +14,27 @@ import {
 
 // Pemilih workspace dengan dropdown (search + recent) dan modal "Buat Workspace Baru".
 // Dipakai bersama oleh sidebar Home, Profile, dan halaman project.
-export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: string }) {
+//
+// Mendukung mode terkendali (`value` + `onChange`) supaya halaman bisa memakai
+// workspace aktif untuk menyaring daftar proyek (F-15).
+export function WorkspaceSelector({
+  initial = '',
+  value,
+  onChange,
+  canManage = true,
+}: {
+  initial?: string
+  value?: string
+  onChange?: (workspace: Workspace | null) => void
+  /**
+   * `false` = hanya boleh memilih workspace. Tombol Add / Rename / Delete
+   * disembunyikan (dipakai untuk Member; pengelolaan workspace hanya PM).
+   */
+  canManage?: boolean
+}) {
+  const controlled = value !== undefined
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  const [selected, setSelected] = useState(initial)
+  const [selected, setSelected] = useState(value ?? initial)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -23,17 +43,119 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
   const [dialog, setDialog] = useState<null | 'rename' | 'delete'>(null)
   const [editName, setEditName] = useState('')
   const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  // Dropdown & menu dirender lewat portal ke <body>. Kalau dirender di dalam
+  // sidebar, menu terpotong oleh `overflow-y-auto` milik sidebar (menu muncul
+  // hanya setinggi beberapa baris lalu terpangkas).
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const [mounted, setMounted] = useState(false)
+  const [anchor, setAnchor] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => setMounted(true), [])
+
+  const DROPDOWN_WIDTH = 286
+  const MENU_WIDTH = 176
+  const DROPDOWN_HEIGHT = 268
+
+  const placeDropdown = (el: HTMLElement | null) => {
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const width = Math.min(DROPDOWN_WIDTH, vw - 16)
+    const left = Math.max(8, Math.min(rect.left, vw - width - 8))
+    // Buka ke atas bila ruang di bawah tidak cukup.
+    const top =
+      rect.bottom + 6 + DROPDOWN_HEIGHT > vh && rect.top > DROPDOWN_HEIGHT
+        ? rect.top - DROPDOWN_HEIGHT - 6
+        : Math.min(rect.bottom + 6, vh - 16)
+    return { top, left, width }
+  }
+
+  const placeMenu = (el: HTMLElement | null) => {
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    return {
+      top: rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.right - MENU_WIDTH, vw - MENU_WIDTH - 8)),
+    }
+  }
+
+  const toggleOpen = () => {
+    if (open) {
+      setOpen(false)
+      setAnchor(null)
+      return
+    }
+    setAnchor(placeDropdown(triggerRef.current))
+    setOpen(true)
+  }
+
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false)
+      setMenuAnchor(null)
+      return
+    }
+    setError('')
+    setMenuAnchor(placeMenu(menuButtonRef.current))
+    setMenuOpen(true)
+  }
+
+  // Menu berposisi fixed; kalau halaman/sidebar di-scroll posisinya jadi tidak
+  // akurat, jadi menu ditutup saja.
+  useEffect(() => {
+    if (!open && !menuOpen) return
+    const close = () => {
+      setOpen(false)
+      setAnchor(null)
+      setMenuOpen(false)
+      setMenuAnchor(null)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open, menuOpen])
+
+  // Saat terkendali, tampilan mengikuti prop `value`.
+  useEffect(() => {
+    if (controlled) setSelected(value ?? '')
+  }, [controlled, value])
 
   useEffect(() => {
-    listWorkspaces()
+    // Pastikan akun punya minimal satu workspace, lalu tampilkan daftarnya.
+    ensureDefaultWorkspace()
+      .then(() => listWorkspaces())
       .then((rows) => {
         setWorkspaces(rows)
-        if (rows.length > 0 && !rows.some((w) => w.name === initial)) {
-          setSelected(rows[0].name)
+        if (rows.length === 0) {
+          if (!controlled) setSelected('')
+          onChange?.(null)
+          return
+        }
+        const current = controlled ? value : selected
+        if (!current || !rows.some((w) => w.name === current)) {
+          const fallback = rows[0]
+          if (!controlled) setSelected(fallback.name)
+          onChange?.(fallback)
         }
       })
       .catch(() => setWorkspaces([]))
-  }, [initial])
+    // onChange sengaja tidak jadi dependency agar tidak memicu loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial, controlled])
+
+  const selectWorkspace = (ws: Workspace) => {
+    if (!controlled) setSelected(ws.name)
+    onChange?.(ws)
+  }
 
   const filtered = workspaces.filter((ws) =>
     ws.name.toLowerCase().includes(query.toLowerCase())
@@ -41,24 +163,36 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canManage) return
     const trimmed = name.trim()
-    if (!trimmed) return
-    const created = await createWorkspace(trimmed)
-    setWorkspaces((prev) => [...prev, created])
-    setSelected(created.name)
-    setName('')
-    setShowModal(false)
+    if (!trimmed || creating) return
+    setCreating(true)
+    setError('')
+    try {
+      const created = await createWorkspace(trimmed)
+      setWorkspaces((prev) => [...prev, created])
+      if (!controlled) setSelected(created.name)
+      onChange?.(created)
+      setName('')
+      setShowModal(false)
+    } catch (err: any) {
+      setError(err?.message || 'Gagal membuat workspace.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const selectedWs = workspaces.find((w) => w.name === selected)
 
   const handleRename = async () => {
+    if (!canManage) return
     const trimmed = editName.trim()
     if (!selectedWs || !trimmed) return
     try {
       await renameWorkspace(selectedWs.id, trimmed)
       setWorkspaces((prev) => prev.map((w) => (w.id === selectedWs.id ? { ...w, name: trimmed } : w)))
-      setSelected(trimmed)
+      if (!controlled) setSelected(trimmed)
+      onChange?.({ ...selectedWs, name: trimmed })
       setDialog(null)
     } catch (err: any) {
       setError(err?.message || 'Gagal mengganti nama workspace.')
@@ -66,12 +200,14 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
   }
 
   const handleDelete = async () => {
+    if (!canManage) return
     if (!selectedWs) return
     try {
       await deleteWorkspace(selectedWs.id)
       const rest = workspaces.filter((w) => w.id !== selectedWs.id)
       setWorkspaces(rest)
-      setSelected(rest[0]?.name ?? '')
+      if (!controlled) setSelected(rest[0]?.name ?? '')
+      onChange?.(rest[0] ?? null)
       setDialog(null)
     } catch (err: any) {
       setError(err?.message || 'Gagal menghapus workspace.')
@@ -83,139 +219,192 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
       <div className="relative flex items-center gap-1.5">
         <div className="relative flex-1">
           <button
+            ref={triggerRef}
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={toggleOpen}
+            aria-expanded={open}
             className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
           >
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                I
-              </span>
-              <span className="text-xs font-semibold text-white truncate">{selected}</span>
+              {selected ? (
+                <>
+                  <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    {selected.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs font-semibold text-white truncate">{selected}</span>
+                </>
+              ) : (
+                <span className="text-xs text-neutral-500 truncate">Belum ada workspace</span>
+              )}
             </div>
             <ChevronDown size={15} className="text-neutral-400 shrink-0" />
           </button>
 
-          {open && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-              <div className="absolute left-0 top-full mt-1.5 z-30 w-[286px] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100">
-                <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
-                  <Search size={15} className="text-neutral-400 shrink-0" />
-                  <input
-                    type="text"
-                    autoFocus
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search for a workspace"
-                    className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
-                  />
-                </div>
+          {open &&
+            anchor &&
+            mounted &&
+            createPortal(
+              <>
+                <div
+                  className="fixed inset-0 z-[130]"
+                  onClick={() => {
+                    setOpen(false)
+                    setAnchor(null)
+                  }}
+                />
+                <div
+                  className="fixed z-[131] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100"
+                  style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
+                  role="listbox"
+                  aria-label="Daftar workspace"
+                >
+                  <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
+                    <Search size={15} className="text-neutral-400 shrink-0" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search for a workspace"
+                      className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
+                    />
+                  </div>
 
-                <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
-                  Recent workspace
-                </p>
-                <div className="space-y-0.5 max-h-56 overflow-y-auto">
-                  {filtered.map((ws) => (
+                  <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
+                    Recent workspace
+                  </p>
+                  <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                    {filtered.map((ws) => (
+                      <button
+                        key={ws.id}
+                        type="button"
+                        onClick={() => {
+                          selectWorkspace(ws)
+                          setOpen(false)
+                          setAnchor(null)
+                          setQuery('')
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
+                          ws.name === selected
+                            ? 'bg-blue-600 text-white font-semibold'
+                            : 'text-neutral-200 hover:bg-neutral-800'
+                        }`}
+                      >
+                        {ws.name}
+                      </button>
+                    ))}
+                    {filtered.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-neutral-500">
+                        Workspace tidak ditemukan.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Footer: satu baris, teks dipendekkan agar tidak terpotong */}
+                  <div className="flex items-center justify-between gap-1 mt-1.5 pt-2 border-t border-neutral-800">
+                    {canManage ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false)
+                          setAnchor(null)
+                          setName('')
+                          setShowModal(true)
+                        }}
+                        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
+                      >
+                        <Plus size={14} className="shrink-0" />
+                        <span>Add Workspace</span>
+                      </button>
+                    ) : (
+                      <span
+                        className="px-2 py-1.5 text-[11px] text-neutral-600 whitespace-nowrap"
+                        title="Hanya Project Manager yang dapat membuat atau mengubah workspace"
+                      >
+                        Hanya PM
+                      </span>
+                    )}
                     <button
-                      key={ws.id}
                       type="button"
                       onClick={() => {
-                        setSelected(ws.name)
                         setOpen(false)
-                        setQuery('')
+                        setAnchor(null)
                       }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
-                        ws.name === selected
-                          ? 'bg-blue-600 text-white font-semibold'
-                          : 'text-neutral-200 hover:bg-neutral-800'
-                      }`}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
                     >
-                      {ws.name}
+                      <LayoutGrid size={13} className="shrink-0" />
+                      <span>Browse All</span>
                     </button>
-                  ))}
-                  {filtered.length === 0 && (
-                    <p className="px-3 py-2 text-xs text-neutral-500">
-                      Workspace tidak ditemukan.
-                    </p>
-                  )}
+                  </div>
                 </div>
-
-                <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpen(false)
-                      setName('')
-                      setShowModal(true)
-                    }}
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>Add Workspace</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                  >
-                    <LayoutGrid size={13} />
-                    <span>Browse All</span>
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+              </>,
+              document.body,
+            )}
         </div>
 
         <button
+          ref={menuButtonRef}
           type="button"
-          disabled={!selectedWs}
-          onClick={() => {
-            setError('')
-            setMenuOpen((v) => !v)
-          }}
+          disabled={!selectedWs || !canManage}
+          onClick={toggleMenu}
           className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer shrink-0"
-          aria-label="Opsi workspace"
+          aria-label={canManage ? 'Opsi workspace' : 'Hanya Project Manager yang dapat mengubah workspace'}
+          title={canManage ? 'Opsi workspace' : 'Hanya Project Manager yang dapat mengubah workspace'}
         >
           <MoreHorizontal size={16} />
         </button>
 
-        {menuOpen && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-            <div className="absolute right-0 top-full mt-1.5 z-30 w-44 bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 animate-in fade-in zoom-in-95 duration-100">
-              <button
-                type="button"
+        {menuOpen &&
+          menuAnchor &&
+          canManage &&
+          mounted &&
+          createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[130]"
                 onClick={() => {
                   setMenuOpen(false)
-                  setError('')
-                  setEditName(selectedWs?.name ?? '')
-                  setDialog('rename')
+                  setMenuAnchor(null)
                 }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer text-left"
+              />
+              <div
+                className="fixed z-[131] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 animate-in fade-in zoom-in-95 duration-100"
+                style={{ top: menuAnchor.top, left: menuAnchor.left, width: MENU_WIDTH }}
               >
-                <Pencil size={13} />
-                Rename
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setError('')
-                  setDialog('delete')
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
-              >
-                <Trash2 size={13} />
-                Delete
-              </button>
-            </div>
-          </>
-        )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setMenuAnchor(null)
+                    setError('')
+                    setEditName(selectedWs?.name ?? '')
+                    setDialog('rename')
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer text-left"
+                >
+                  <Pencil size={13} />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setMenuAnchor(null)
+                    setError('')
+                    setDialog('delete')
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
+                >
+                  <Trash2 size={13} />
+                  Delete
+                </button>
+              </div>
+            </>,
+            document.body,
+          )}
       </div>
 
-      {showModal && (
+      {showModal && canManage && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -248,6 +437,8 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
               className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
             />
 
+            {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+
             <div className="flex items-center justify-end gap-3 pt-5">
               <button
                 type="button"
@@ -258,17 +449,17 @@ export function WorkspaceSelector({ initial = '2026 INVISUAL' }: { initial?: str
               </button>
               <button
                 type="submit"
-                disabled={!name.trim()}
+                disabled={!name.trim() || creating}
                 className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {dialog && (
+      {dialog && canManage && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"

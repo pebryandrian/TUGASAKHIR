@@ -10,7 +10,7 @@ interface AuthPageProps {
   initialMode?: 'signup' | 'login' | 'forgot'
 }
 
-export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
+export default function AuthPage({ initialMode = 'login' }: AuthPageProps) {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [mode, setMode] = useState<'signup' | 'login' | 'forgot'>(initialMode)
@@ -27,8 +27,12 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   // Login form state
-  const [rememberMe, setRememberMe] = useState(false)
+  const [rememberMe, setRememberMe] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
+
+  // Set when the recovery link already opened a session: the email field is then
+  // not needed, we only have to set the new password.
+  const [hasRecoverySession, setHasRecoverySession] = useState(false)
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -39,6 +43,17 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (mode !== 'forgot') return
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setHasRecoverySession(!!data.session)
+    })
+    return () => {
+      active = false
+    }
+  }, [mode, supabase])
 
   // Password validation checks
   const isMin8 = password.length >= 8
@@ -61,13 +76,13 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
     setNotice('')
     setNoticeIsError(false)
 
-    if ((mode === 'signup' || mode === 'forgot') && password !== confirmPassword) {
+    if ((mode === 'signup' || (mode === 'forgot' && hasRecoverySession)) && password !== confirmPassword) {
       setNoticeIsError(true)
       setNotice('Passwords do not match!')
       return
     }
 
-    if ((mode === 'signup' || mode === 'forgot') && password.length < 8) {
+    if ((mode === 'signup' || (mode === 'forgot' && hasRecoverySession)) && password.length < 8) {
       setNoticeIsError(true)
       setNotice('Password must be at least 8 characters.')
       return
@@ -92,8 +107,15 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
         router.push('/home')
         router.refresh()
       } else if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
+        // Sesuai Gambar 4.13: kredensial dikirim ke server, divalidasi di sana,
+        // lalu diverifikasi oleh Supabase Auth. Cookie sesi ditulis oleh server.
+        const res = await fetch('/api/auth/signin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, remember: rememberMe }),
+        })
+        const result = await res.json().catch(() => ({}))
+        if (!res.ok || !result.ok) throw new Error(result.error || 'Gagal masuk.')
         router.push('/home')
         router.refresh()
       } else {
@@ -102,8 +124,9 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
         if (session) {
           const { error } = await supabase.auth.updateUser({ password })
           if (error) throw error
-          setNotice('Password updated. You can now log in.')
-          setMode('login')
+          setNotice('Password berhasil diperbarui. Mengarahkan ke dashboard…')
+          router.push('/home')
+          router.refresh()
         } else {
           const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: `${window.location.origin}/auth/confirm?next=/forgot-password`,
@@ -199,7 +222,8 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
           <h2 className="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight mb-7 sm:mb-8">
             {mode === 'signup' && 'Create Your Account'}
             {mode === 'login' && 'Hi, Welcome Back!'}
-            {mode === 'forgot' && 'Set Your New Password'}
+            {mode === 'forgot' &&
+              (hasRecoverySession ? 'Set Your New Password' : 'Reset Your Password')}
           </h2>
 
           {/* Form */}
@@ -218,43 +242,47 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               </div>
             )}
 
-            <div>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email"
-                required
-                className="w-full h-11 px-4 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
-              />
-            </div>
+            {!(mode === 'forgot' && hasRecoverySession) && (
+              <div>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email"
+                  required
+                  className="w-full h-11 px-4 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
+                />
+              </div>
+            )}
 
-            <div className="relative">
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                required
-                className="w-full h-11 pl-4 pr-11 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 transition"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={18} strokeWidth={1.8} /> : <Eye size={18} strokeWidth={1.8} />}
-              </button>
-            </div>
+            {(mode !== 'forgot' || hasRecoverySession) && (
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === 'forgot' ? 'New Password' : 'Password'}
+                  required
+                  className="w-full h-11 pl-4 pr-11 rounded-lg border border-neutral-300 text-neutral-900 placeholder:text-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 transition"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={18} strokeWidth={1.8} /> : <Eye size={18} strokeWidth={1.8} />}
+                </button>
+              </div>
+            )}
 
-            {/* Password Requirements in Sign Up & Forgot Password Modes */}
-            {(mode === 'signup' || mode === 'forgot') && (
+            {/* Password Requirements in Sign Up & Set-New-Password Modes */}
+            {(mode === 'signup' || (mode === 'forgot' && hasRecoverySession)) && (
               <div className="pt-1 pb-1 space-y-1.5 text-xs">
                 <p className="font-semibold text-neutral-800">
-                  Passowrd must contains :
+                  Password must contain:
                 </p>
                 <div className="flex items-center gap-2">
                   {isMin8 ? (
@@ -279,7 +307,7 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
               </div>
             )}
 
-            {(mode === 'signup' || mode === 'forgot') && (
+            {(mode === 'signup' || (mode === 'forgot' && hasRecoverySession)) && (
               <div className="relative">
                 <input
                   id="confirmPassword"
@@ -348,7 +376,9 @@ export default function AuthPage({ initialMode = 'signup' }: AuthPageProps) {
                   ? 'Create Account'
                   : mode === 'login'
                   ? 'Login'
-                  : 'Create New Password'}
+                  : hasRecoverySession
+                  ? 'Create New Password'
+                  : 'Send Reset Link'}
               </button>
             </div>
           </form>

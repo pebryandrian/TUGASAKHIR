@@ -54,15 +54,19 @@ docs         (id, project_id, blocks JSONB, updated_at)         -- isi tab "Doc"
 > pelengkap, tapi baku default = 4 kolom skripsi.
 
 > **Migrasi yang perlu dijalankan manual** (di Supabase → SQL Editor) supaya assignee/status/due
-> date/priority pada baris subtask bisa disimpan. Sebelum ini dijalankan, kolomnya kosong & edit
-> subtask tidak tersimpan (UI tetap jalan, tidak error).
->
+> date/priority pada baris subtask bisa disimpan: `supabase/migrations/20261113000000_subtask_meta.sql`.
+> Sebelum migrasi dijalankan, kolomnya kosong & edit subtask tidak tersimpan; UI menampilkan
+> peringatan di Main Table dan menolak perubahan (bukan error mentah). Deteksi kolom ada di
+> `getSubtaskColumns()` (`lib/db.ts`).
+> Isi file migrasinya:
 > ```sql
 > alter table public.subtasks
->   add column if not exists assignee_id uuid,
->   add column if not exists status_id   uuid,
+>   add column if not exists assignee_id uuid references public.profiles (id) on delete set null,
+>   add column if not exists status_id   uuid references public.statuses (id) on delete set null,
 >   add column if not exists due_date    date,
 >   add column if not exists priority    text;
+>
+> notify pgrst, 'reload schema';
 > ```
 
 **Implementasi nyata (Supabase, sudah jalan):** `profiles` (ekstensi `auth.users`), `workspaces`,
@@ -80,25 +84,37 @@ Berdasarkan audit kode `app/`.
 
 | Fitur | Skripsi minta | Kode sekarang | Status |
 |-------|---------------|---------------|--------|
-| F1 Autentikasi | Supabase Auth, proteksi rute | `signup`/`login`/`reset` via Supabase Auth, logout, `proxy.ts` menjaga `/home`, `/project`, `/profile` | ✅ Nyata |
-| F2 Dashboard | Statistik proyek/tugas/deadline | Halaman `/home`: daftar scope + card dari tabel `projects` (fallback data contoh bila DB kosong) | ⚠️ Sebagian (belum ada ringkasan tugas/deadline) |
-| F3 Kanban + drag&drop | Papan 4 kolom, drag-drop | View **Kanban** 4 kolom To Do/In Progress/Review/Done + drag & drop; perpindahan tersimpan ke `tasks.status_id` | ✅ Nyata |
-| F4 Task management | CRUD tugas lengkap | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata (lampiran masih lokal) |
-| F5 Project management | Kelola proyek + timeline | Project & workspace tersimpan di Supabase; Main Table/Calendar/Doc/Gantt/Chart; isi tab Doc autosave ke `docs` | ✅ Nyata |
-| F6 Member management | Daftar + penugasan + peran | Anggota dari `project_members`+`profiles`, assignee tersimpan ke `tasks.assignee_id`, invite by email | ✅ Nyata |
-| F7 Peran PM/Member | Beda hak akses | `profiles.role` + `project_members.role`; RLS: PM boleh ubah/menghapus, Member hanya tugasnya | ✅ Nyata (UI belum menyembunyikan tombol PM) |
-| — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; klien `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
-| — Doc editor | (tidak diminta khusus) | Ada editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
+| F1 Autentikasi | Landing, registrasi, login, logout, reset, proteksi rute | `app/page.tsx` (landing), `app/signin` (signup/login/reset + Google); **login lewat server action** (`app/signin/actions.ts`) sesuai Gambar 4.13; `proxy.ts`; **Remember me** mengatur masa berlaku cookie | ✅ Nyata |
+| F2 Dashboard monitoring | Home = Scope of Work + progres tugas + My Member | Sapaan, grid Scope of Work dengan progres `selesai/total` dari `tasks`, tabel My Member dari `profiles` | ✅ Nyata |
+| F3 Pengelolaan proyek | Buat, ubah, hapus, favorit, jadwal | `createProject`, `updateProject` (nama, deskripsi, `start_date`, `due_date`), `deleteProject`, favorit di `project_members.favorite` | ✅ Nyata |
+| F4 Pengelolaan anggota | Tambah anggota + peran | **Halaman Anggota Proyek** `/project/<scope>/<card>/members`: undang via email + pilih peran, ubah peran, keluarkan anggota | ✅ Nyata |
+| F5 Pengelolaan tugas | CRUD tugas + atribut | Create/rename/deskripsi/prioritas/tanggal/assignee + subtask + komentar tersimpan di Supabase | ✅ Nyata |
+| F6 Pengelolaan subtask | Subtask bertingkat dengan meta | Subtask bertingkat + assignee/status/tenggat/prioritas (`subtasks` 10 kolom) | ✅ Nyata |
+| F7 Alur kerja | 4 status baku + ubah status + atur kolom status | Main Table + **Kanban** drag & drop → `tasks.status_id`; ikon gear di header kolom Status (khusus PM) membuka **Manage Status Labels** | ✅ Nyata |
+| F8 Pengelompokan tugas | Grup + warna | `task_groups` dengan color & position | ✅ Nyata |
+| F9 Kalender proyek | Bulanan + agenda | Tab Calendar dengan mode Month/Agenda, filter, sort, legenda status | ✅ Nyata |
+| F10 Gantt & Chart | Timeline + distribusi status | Tab tambahan Gantt & Chart (tombol `+`) | ✅ Nyata |
+| F11 Dokumen proyek | Editor + gambar/berkas + autosave | Editor blok; gambar & berkas diunggah ke bucket `project-docs`, autosave ke `docs.blocks` | ✅ Nyata |
+| F12 Komentar & lampiran | Komentar bertingkat + unggah lampiran | Komentar bertingkat + like; lampiran ke bucket `task-attachments`, dibuka via signed URL | ✅ Nyata |
+| F13 Hak akses | PM vs Member | `lib/permissions.ts` (`project_members.role`, owner = PM); badge peran; gating tombol; RLS diperketat | ✅ Nyata |
+| F14 Profil | Nama, foto, kata sandi | `/profile`: ubah nama, foto ke bucket `avatars`, ganti kata sandi | ✅ Nyata |
+| F15 Pengelolaan workspace | Buat, ubah nama, hapus, pilih aktif | `WorkspaceSelector` (create/rename/delete) + mode terkendali; workspace aktif menyaring `listProjects(workspaceId)` | ✅ Nyata |
+| — Backend | Supabase/PostgreSQL | 12 tabel + RLS + trigger; `@supabase/ssr`; lapisan data `lib/db.ts` | ✅ Nyata |
+| — Doc editor | (tidak diminta khusus) | Editor kaya (bold, list, image, file, undo/redo), isi tersimpan sebagai JSONB | ✅ ekstra, di luar skripsi |
 
 **Bonus di luar skripsi (jangan diangkat sebagai fitur inti kecuali diminta):** editor Doc, color picker label ala Monday, export CSV, sort/filter lanjutan.
 
 ---
 
 ## 4. Status dokumen skripsi
+**Acuan aktif: `LaporanTA-PebryAndrian-revisi15.docx`** (14 Nov 2026, 4,91 MB) — berada di
+folder induk `TUGASAKHIR/`, bukan di `invisual/docs/`. Salinan `revisi2.docx` & `revisi3.docx`
+di `invisual/docs/` adalah versi lama (0,6–0,8 MB) dan **tidak dipakai lagi**. `revisi13` juga
+sudah digantikan `revisi15`.
 
-**Draft aktif: `docs/LaporanTA-PebryAndrian-revisi3.docx`** (turunan `revisi2.docx`, 14 Okt 2026).
-`revisi2.docx` = revisi yang sudah memakai pendekatan WSF dan Gambar 1.1 baru. `revisi.docx`
-(di luar repo, `D:\KULIAH\Skipsi-TA\TugasAkhir\`) adalah draft lama dan sudah tidak dipakai.
+**Audit konsistensi laporan ↔ kode: `docs/audit-konsistensi-laporan.md`** (14 Nov 2026).
+Dokumen itu memetakan F-01…F-15, NF-01…NF-06, UC-01…UC-07, 12 tabel basis data, dan 16
+skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 | Bagian | Kondisi | Perlu |
 |--------|---------|-------|
@@ -136,6 +152,503 @@ Berdasarkan audit kode `app/`.
 ---
 
 ## 7. Riwayat perubahan
+
+- **2026-11-25** – **9 contoh project typeface di scope Font**. Mengikuti katalog font acuan
+  (inviline.co), scope Font kini berisi 10 contoh project: Grotesk (sudah ada) ditambah *Come the
+  Hour*, *Bright Charms*, *Dawn Style*, *Sugar Zesty*, *Gather Friends*, *Voyage Haven*, *Coast
+  Royale*, *Muffin Crush*, dan *Felty Drops*. Setiap project memakai dua grup tugas (**Riset &
+  Konsep**, **Produksi & Rilis**) dengan 4 tugas yang berisi deskripsi, status, prioritas, tenggat,
+  dan subtask — sehingga board langsung terisi dan progres kartu tidak nol. Semua ditambahkan lewat
+  `lib/project-template.json` (`demoProjects`), jadi ikut terbuat oleh tombol **Muat contoh** dan
+  ikut dipakai `pickTemplate()` bila project baru diberi nama yang sama.
+  Verifikasi: `tsc --noEmit` bersih; setelah **Muat contoh** kartu scope Font berubah dari
+  `1 card` menjadi `10 card`, modal scope menampilkan kesepuluh project, dan board *Come the Hour*
+  berisi 2 grup / 4 tugas dengan status, tenggat, dan penanggung jawab.
+
+- **2026-11-25** – **Gambar Scope of Work bertema studio desain** + **kartu scope dirapikan**.
+  (a) Kelima gambar kartu scope (`public/images/scope/*.jpg`) diganti agar sesuai tema INVISUAL
+  Studio — studio identitas visual, ilustrasi, dan desain kemasan: *Client* (eksplorasi palet warna
+  & identitas merek), *Font* (buku specimen tipografi + sketsa huruf), *Mockup* (mockup perangkat
+  dengan pencahayaan dramatis), *Marketplace* (rak retail fashion), *Studio Project* (meja kerja
+  desain). Semua dipotong 16:10 (1400×875), JPEG kualitas 82, sumber Unsplash.
+  (b) Kartu scope: gradasi bawah + vignette tipis agar foto menyatu dengan latar gelap, gambar
+  diredupkan (`brightness-90`) dan tampil penuh warna saat disorot (transisi 500ms), jumlah proyek
+  dipindah menjadi badge kaca di atas gambar, dan baris judul menampilkan tautan **"Buka →"**.
+  Verifikasi: kelima gambar termuat (`naturalWidth` 1400), `tsc --noEmit` bersih.
+
+- **2026-11-25** – **Progres proyek menghitung tugas berstatus Done** + **arsip proyek selesai**.
+  (a) **Bug progres**: seluruh tugas Aqua sudah berstatus *Done* tetapi kartu di Home tetap
+  menampilkan "0/8 tugas selesai", karena progres hanya menghitung `tasks.checked` sementara
+  perubahan status hanya menulis `status_id`. Sekarang `listProjectTaskStats()` menghitung tugas
+  selesai bila **`checked` ATAU statusnya "Done"**; `setTaskStatus()` dan bulk-set-status
+  menyamakan `checked` dengan status Done; `loadBoard()` menandai tugas Done sebagai selesai; dan
+  `listMyTasks()` tidak lagi menampilkan tugas Done di daftar tugas aktif. Hasil: Aqua terbaca
+  **8/8**.
+  (b) **Arsip proyek**: tombol *Arsip* pada kartu proyek (khusus PM) dan tombol **Arsip** pada
+  toolbar modal scope untuk menampilkan/mengembalikan proyek yang sudah selesai. Kartu scope
+  menampilkan jumlah proyek aktif dan jumlah arsip; kartu yang diarsipkan diberi badge
+  "Diarsipkan" dan warna berbeda; tombol *New Card* disembunyikan saat melihat arsip.
+  (c) **Migrasi baru** `supabase/migrations/20261128000000_project_archive.sql` (kolom
+  `projects.archived` + `archived_at`). Sebelum migrasi dijalankan, penanda arsip disimpan di
+  `localStorage` (dideteksi lewat `hasProjectArchiveSupport()`), jadi fitur tetap berfungsi.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji UI di Edge headless: kartu Aqua
+  menampilkan **8/8 tugas selesai**; setelah diarsipkan Aqua hilang dari daftar aktif dan muncul di
+  tab Arsip dengan badge "Diarsipkan"; setelah dikeluarkan, Aqua kembali ke daftar aktif.
+
+- **2026-11-25** – **Gantt dan Chart digabung menjadi satu tab timeline** (mengikuti foto acuan
+  pemilik aplikasi dan Tabel 3.5 #12 yang menyebut satu tab "Gantt dan Chart").
+  (a) Tab `Gantt & Chart` berisi **ringkasan distribusi status** (bar bertumpuk per status, jumlah,
+  persentase, progres keseluruhan) di bagian atas.
+  (b) Di bawahnya **Gantt bergaya tabel proyek**: kolom kiri tetap (`#`, Task Name, WBS, Start,
+  Finish) dan timeline yang bisa digulir horizontal. Baris grup ditebalkan beserta persentase
+  progres; baris tugas memakai penanda warna status.
+  (c) Header dua tingkat: nama bulan (`Nov 2026`, `Dec 2026`) dan tanggal harian; latar akhir pekan
+  dibedakan, ada **garis hari ini**, serta label persentase + penanggung jawab di ujung kanan
+  setiap batang.
+  (d) Tombol `+` (Add View) dihapus karena kedua tampilan sudah menjadi tab tetap. Komponen
+  `GanttView`/`ChartView` lama digantikan `GanttChartView`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji UI di Edge headless: tab hanya
+  `Gantt & Chart` (tidak ada Gantt/Chart terpisah), kolom Task Name/WBS/Start/Finish ada, 11 bar
+  tergambar, garis hari ini tampil, dan timeline bisa digulir horizontal (scrollWidth 1280 >
+  clientWidth 749) tanpa menggeser kolom kiri.
+
+- **2026-11-25** – Penyesuaian dengan **`LaporanTA-PebryAndrian-revisi22.pdf`** (23 Nov 2026,
+  76 halaman; acuan terbaru). Lima ketidaksesuaian diperbaiki:
+  (a) **Gantt & Chart menjadi tab tetap** (`customViews` awal berisi keduanya) — Tabel 3.5 #12
+  menyebut "membuka tab Gantt dan Chart", sebelumnya harus ditambah manual lewat `+`.
+  (b) **Warna grup dipilih PM**: modal Tambah Grup Tugas mendapat 20 pilihan warna + pratinjau;
+  sebelumnya warna diambil otomatis dari daftar tetap — Tabel 3.5 #11.
+  (c) **Form proyek baru memuat deskripsi & jadwal**: `createProject` menerima `start_date` dan
+  `due_date`, modal Create New Scope mendapat kolom Deskripsi, Tanggal Mulai, dan Tenggat, plus
+  validasi nama kosong dan tenggat < tanggal mulai — UC-01 langkah 4.
+  (d) **Daftar proyek mengikuti workspace aktif**: `listProjects()` kembali menyaring ketat; agar
+  konsisten, kelima proyek contoh disatukan pada satu workspace "INVISUAL STUDIO" dan akun Member
+  didaftarkan sebagai anggotanya — Tabel 3.5 #16.
+  (e) **Pembuatan tugas hanya untuk PM**: `ProjectPermissions.createTasks`; tombol New item,
+  `+` per grup, dan Add task Kanban hanya untuk PM; `openNewItemModal` menolak lebih dulu —
+  UC-03 (aktor Project Manager).
+  (f) **My Member untuk kedua aktor**: F-02 & UC-05 menyebut My Member untuk PM dan Member,
+  sedangkan UC-06 menyebut Member membuka daftar tugas. Markup diekstrak menjadi
+  `renderMyMember(readOnly)`; Member kini melihat **Tugas Saya lalu My Member (hanya lihat)**.
+  (g) **Dokumen audit** `docs/audit-konsistensi-laporan.md` ditulis ulang dengan acuan revisi22
+  (15 F, 6 NF, 6 UC, 12 tabel, 16 skenario, 10 wireframe) beserta daftar migrasi yang belum
+  dijalankan. Fitur di luar laporan (alur undangan, kolom Files/Notes, dropdown peran di Home,
+  menu History, tombol Muat contoh) dipertahankan atas permintaan pemilik.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji UI di Edge headless — PM melihat
+  5 scope, form proyek berisi 4 kolom, tab Gantt/Chart ada, form grup menampilkan 20 warna;
+  Member tidak melihat New Scope/New item/Add task, tetapi melihat Tugas Saya + My Member.
+  Catatan: revisi22 berhenti di BAB 4 (BAB 5 dan 6 belum berisi).
+
+- **2026-11-24** – Kolom **Files** dan **Notes** di Main Table kini bisa diisi.
+  (a) **Kolom tampil default**: `extraColumns` awal `['Priority', 'Files', 'Notes']`, sehingga kedua
+  kolom langsung tersedia tanpa harus menambah manual. Pilihan kolom tetap disimpan per project
+  (`localStorage` kunci `invisual.table-columns.<projectId>`), jadi kolom yang pernah ditambahkan
+  tidak hilang setelah halaman dimuat ulang.
+  (b) **Files**: sel menampilkan jumlah lampiran; klik membuka popover `TablePopover` berisi daftar
+  berkas/tautan (buka & hapus per item), tombol **Unggah berkas** (Supabase Storage bucket
+  `task-attachments`), dan form **Tautan (Google Drive)** — nama opsional + URL. Tautan
+  dinormalisasi (`normalizeLink`, `https://` ditambahkan bila belum ada) dan divalidasi.
+  (c) **Notes**: klik sel membuka popover berisi textarea; tersimpan pada kolom
+  `tasks.description` (sama dengan bagian Description pada panel detail tugas) lewat `updateTaskRow`.
+  (d) **Lampiran berupa tautan**: `addAttachmentLink()` menyimpan ke kolom baru `attachments.url`
+  bila migrasi dijalankan; sebelum itu memakai mode kompatibilitas `storage_path = 'link:<url>'`
+  (`isLinkPath`, `linkUrlFromPath`), sehingga fitur tetap bisa dipakai. `loadBoard` membaca kolom
+  `url` hanya bila tersedia, dan `deleteAttachmentWithFile` tidak menghapus objek Storage untuk
+  lampiran bertipe tautan.
+  (e) **Migrasi baru** `supabase/migrations/20261127000000_attachment_links.sql`: kolom
+  `attachments.url`, `storage_path` boleh kosong, constraint "berkas atau tautan", dan pemindahan
+  data `link:` lama ke kolom `url`.
+  (f) **Kegagalan simpan tidak lagi diam**: `updateTask` memakai `.select('id')` dan melempar
+  `NOT_ALLOWED_TASK_UPDATE_MESSAGE` bila 0 baris (RLS membatasi Member pada tugas yang ditugaskan
+  kepadanya). Pesan tampil di popover Notes, bukan gagal senyap.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses. Uji langsung ke Supabase: lampiran tautan
+  tersimpan & terbaca untuk akun PM maupun Member (kolom `url` belum ada → mode `link:`), lalu
+  dihapus kembali. Uji UI di Edge headless: kolom Files & Notes tampil, popover Files menampilkan
+  input tautan + tombol unggah, "Dokumen Drive Uji" berhasil tersimpan dan muncul di daftar, popover
+  Notes memuat isi deskripsi tugas dan bisa disimpan; hanya satu popover terbuka pada satu waktu.
+
+- **2026-11-24** – Popover sel di Main Table (Status, Tanggal, Person, subtask) tertimpa & terpotong.
+  (a) **Masalah**: popover sel masih memakai `position: absolute` di dalam sel tabel. Akibatnya
+  (1) **tertimpa** kolom/sel lain karena setiap `<td>` punya `position: relative` sendiri,
+  (2) **terpotong** container tabel ber-`overflow-x-auto`, (3) bisa **keluar layar** pada baris
+  paling bawah.
+  (b) **Perbaikan**: komponen baru `TablePopover` — popover dirender lewat `createPortal` ke
+  `<body>` dengan posisi `fixed` (z-index 141), dihitung dari posisi elemen pemicu, otomatis
+  membuka **ke atas** bila ruang bawah kurang, dan selalu di dalam batas layar. Dipakai oleh
+  Status, Tanggal, dan sel meta subtask (assignee/status/tanggal). `AssigneeMenu` disamakan
+  (menerima anchor berupa kotak elemen, bukan titik) agar bisa membuka ke atas.
+  (c) **Satu popover saja**: `closeAllCellPickers()` dijalankan sebelum membuka popover baru,
+  sehingga Status/Tanggal/Person/Subtask tidak bisa terbuka bersamaan lalu saling menutupi.
+  (d) **Mengikuti scroll**: popover tidak ditutup saat tabel digulir (karena `scroll-behavior:
+  smooth` memicu event scroll tepat saat dibuka) tetapi posisinya dihitung ulang mengikuti elemen
+  pemicu lewat `requestAnimationFrame`.
+  Verifikasi langsung di Edge headless (CDP): jumlah popover terbuka selalu 1; titik sampel di
+  dalam popover benar-benar mengenai popover (`elementFromPoint`); posisi selalu di dalam layar;
+  setelah `main` digulir 200px popover tetap 6px di bawah sel; popover Person tidak keluar layar.
+
+- **2026-11-24** – Sidebar kiri dipastikan punya scroll sendiri (Home & board).
+  (a) **Pengukuran langsung**: halaman diuji di Edge headless (CDP) pada lebar 1920, 1600, 1440,
+  1366, 1280, dan 1100 px. Hasilnya: tinggi dokumen = tinggi layar (tidak ada scroll halaman),
+  `<main>` yang menggulir (`scrollHeight` 1299 > `clientHeight` 744), dan posisi `<aside>` tetap
+  (top 64 → 64) baik saat `<main>` digulir maupun saat `window` digulir.
+  (b) **Penguatan**: sidebar diberi `lg:sticky lg:top-16` + `lg:h-[calc(100dvh-4rem)]
+  lg:self-start lg:overscroll-contain` (Home dan board). Efeknya dua lapis: pada kondisi normal
+  (hanya `<main>` menggulir) sticky tidak berpengaruh; bila halaman yang menggulir — mis. CSS lama
+  masih ter-cache atau tinggi jendela tidak terduga — sidebar tetap menempel di bawah header.
+  (c) **Bukti**: uji "fallback" (memaksa tinggi dokumen menjadi auto sehingga halaman menggulir
+  628 px) menunjukkan posisi sidebar tetap di 64 px; saat isi sidebar lebih tinggi dari layar
+  (jendela 380 px) sidebar memiliki scroll sendiri (`scrollHeight` 532 > `clientHeight` 224) dan
+  posisinya tidak berubah.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/home` dan `/project/client/aqua`
+  (PM dan Member) balas 200.
+
+- **2026-11-24** – Halaman board (Main Table): sidebar tidak ikut ter-scroll.
+  (a) **Perubahan layout**: sama seperti Home — akar halaman memakai
+  `min-h-screen lg:h-screen lg:overflow-hidden`, baris konten `lg:min-h-0`, sidebar
+  `lg:h-full lg:overflow-y-auto lg:overflow-x-hidden`, dan `<main>` `lg:min-h-0`. Dengan
+  demikian hanya area konten (Main Table, Kanban, Gantt, Chart, Doc) yang menggulir,
+  sementara sidebar kiri dan header atas tetap di tempat. Di layar kecil (HP) tata letak
+  bertumpuk seperti sebelumnya.
+  (b) **Dropdown workspace di sidebar board**: karena sidebar kini punya scroll sendiri,
+  dropdown yang tadinya `position: absolute` di dalamnya akan terpotong. Dropdown dipindah
+  ke `createPortal` ke `<body>` dengan posisi `fixed` yang dihitung dari tombol pemicu
+  (selalu di dalam layar), ditutup otomatis saat di-scroll/resize, dan footer-nya dirapikan
+  (label "Hanya PM" + tooltip) agar tidak terpotong.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/project/client/aqua` (PM dan
+  Member) serta halaman Anggota Proyek balas 200.
+
+- **2026-11-24** – Dropdown workspace terpotong di sidebar.
+  (a) **Penyebab**: agar sidebar tidak ikut ter-scroll, sidebar diberi `overflow-y-auto`. Dropdown
+  dan menu `⋯` pada `WorkspaceSelector` masih memakai `position: absolute` di dalam sidebar,
+  sehingga **terpangkas** oleh container ber-overflow itu (hanya terlihat beberapa baris), dan
+  sidebar ikut tergeser ke samping karena isi dropdown (286px) lebih lebar daripada sidebar (224px).
+  (b) **Perbaikan**: kedua popup dirender lewat `createPortal` ke `<body>` dengan posisi `fixed`
+  yang dihitung dari posisi tombol pemicu (otomatis membuka ke atas bila ruang bawah kurang, dan
+  tetap di dalam layar). Popup ditutup saat halaman/sidebar di-scroll atau ukuran jendela berubah,
+  supaya posisinya tidak melenceng.
+  (c) Footer dropdown dirapikan: tombol tidak lagi terpotong, label untuk Member dipendekkan menjadi
+  "Hanya PM" (dengan tooltip penjelasan), dan sidebar diberi `lg:overflow-x-hidden` agar tidak ada
+  geser horizontal.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; `/home` dan `/profile` balas 200 untuk
+  akun PM maupun Member.
+
+- **2026-11-24** – Workspace dan pembuatan project/scope hanya untuk Project Manager.
+  (a) **Masalah**: Member masih melihat dan memakai tombol *Add Workspace*, menu `⋯`
+  (rename/delete workspace), *New Scope*, *Muat contoh*, dan *New Card*.
+  (b) **Aturan** (`canCreateProject()` di `lib/db.ts`): boleh bila pengguna Project Manager pada
+  minimal satu project, **atau** belum tergabung di project mana pun (pendaftar baru, supaya tidak
+  terkunci di Home kosong). Member yang sudah tergabung di project tidak boleh.
+  (c) **UI**: `WorkspaceSelector` menerima prop `canManage` (Home & Profil) — tombol Add Workspace
+  dan menu `⋯` disembunyikan, diganti keterangan "Hanya Project Manager". Home menyembunyikan
+  *Muat contoh*, *New Scope*, dan *New Card* (termasuk pada keadaan kosong); board menyembunyikan
+  tombol `+` Add Workspace di header. Semua handler (`handleSeedDemo`, `handleCreateScope`,
+  `openNewCardModal`, `handleCreateCard`, serta create/rename/delete workspace) menolak lebih dulu
+  dengan pesan jelas.
+  (d) **Pengaman database**: migrasi baru
+  `supabase/migrations/20261126000000_workspace_scope_manager_only.sql` —
+  `invisual_can_manage_projects()` + policy tulis `workspaces` (insert/update/delete) dan
+  `projects` insert hanya untuk PM; policy tulis lama yang longgar dibuang.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase —
+  `canCreate` = true untuk PM, **false** untuk Member, true untuk akun baru; setelah migrasi
+  dijalankan, Member ditolak RLS saat membuat project/workspace. `/home`, `/profile`, dan board
+  balas 200 untuk kedua akun; PM dan Member tetap melihat **5 scope**.
+
+- **2026-11-24** – Ikon orang pada kartu project di Scope Of Work dikembalikan.
+  (a) **Penyebab hilang**: permintaan sebelumnya ("hilangkan ikon orang pada Scope Of Work di
+  Home") diterapkan pada **dua** tempat sekaligus — kartu *scope* dan kartu *project* di dalam modal
+  Scope Of Work — beserta penghapusan `MemberStack`, `listProjectMemberChips`, dan state
+  `projectMembers`.
+  (b) **Perbaikan**: ikon orang dikembalikan **hanya pada kartu project** (tumpukan avatar maksimal
+  5 + "+N", beserta jumlah orang, dan label "Belum ada anggota" bila kosong). Kartu *scope* di
+  halaman utama tetap ringkas tanpa ikon, sesuai permintaan sebelumnya.
+  `listProjectMemberChips()` kembali di `lib/db.ts` dan hanya menghitung anggota `status = 'active'`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; data per project terbaca (Aqua, Glowup,
+  Nusantara, Grotesk, Arunika = 2 orang; Unheir = 1 orang) untuk akun PM maupun Member;
+  `/home` dan board balas 200.
+
+- **2026-11-24** – My Member: Project Manager dapat mengubah peran anggota.
+  (a) **Daftar**: semua pengguna yang mendaftar otomatis masuk **My Member** dengan peran default
+  **Member** (kolom `profiles.role` default `'member'`, baris dibuat oleh trigger saat sign up).
+  (b) **Ubah peran**: kolom *Role* pada tabel My Member menjadi dropdown dengan **dua pilihan saja**
+  — `Member` dan `Project Manager`. Baris milik sendiri tidak bisa diubah (ditandai "Anda").
+  Pilihan tervalidasi lagi di `updateTeamMemberRole` (menolak peran lain dan menolak mengubah
+  peran sendiri).
+  (c) **Peran efektif**: yang ditampilkan adalah peran yang benar-benar berlaku pada project yang
+  dikelola PM (`listTeamRoles`), dengan `profiles.role` sebagai cadangan. Perubahan diterapkan ke
+  baris `project_members` di project yang dikelola PM (langsung berpengaruh pada hak akses) dan
+  `profiles.role` sebagai peran default. PM tidak bisa menurunkan peran pada project milik orang
+  tersebut.
+  (d) **Migrasi baru** `supabase/migrations/20261125000000_team_member_roles.sql`: kolom
+  `profiles.role` + check constraint dua nilai, policy `profiles_update_manager` (PM boleh mengubah
+  peran anggota), dan trigger `trg_profiles_guard_role_update` yang membatasi PM hanya pada kolom
+  `role` serta melarang siapa pun mengubah perannya sendiri. Sebelum migrasi dijalankan, perubahan
+  tetap berhasil untuk anggota yang sudah tergabung di project PM; untuk pengguna tanpa project
+  muncul pesan agar migrasi dijalankan.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase — promosi dan
+  pengembalian peran anggota pada 2 project PM berhasil (2 baris berubah, lalu dikembalikan);
+  `/home` dan halaman Anggota Proyek balas 200.
+
+- **2026-11-24** – Penanggung jawab tugas hanya bisa diubah Project Manager (F-13).
+  (a) **Masalah**: kolom *Person* (Main Table), panel detail tugas, dan pemilih penanggung jawab
+  subtask bisa diubah siapa pun, termasuk Member. Pembagian tugas adalah wewenang PM.
+  (b) **Perbaikan izin**: `ProjectPermissions` menambah `assignTasks` (PM `true`, Member `false`).
+  `toggleTaskAssignee` dan `clearTaskAssignee` menolak lebih dulu dan menampilkan pesan
+  "Hanya Project Manager yang dapat mengubah penanggung jawab tugas."
+  (c) **Perbaikan tampilan**: untuk Member, kolom *Person* di Main Table, baris *Person* pada panel
+  detail, dan avatar penanggung jawab subtask dirender **tanpa tombol/menu** (hanya teks + avatar);
+  modal New Item menampilkan "Ditetapkan oleh Project Manager" alih-alih pemilih anggota, sehingga
+  tugas yang dibuat Member tersimpan tanpa penanggung jawab.
+  (d) **Pengaman database**: migrasi baru
+  `supabase/migrations/20261124000000_assignee_manager_only.sql` menambah trigger
+  `trg_tasks_guard_assignee` dan `trg_subtasks_guard_assignee` yang menolak perubahan kolom
+  `assignee_id` bila pelakunya bukan PM/pemilik project. Perubahan lain (status, centang selesai,
+  deskripsi, komentar, lampiran) tetap boleh dilakukan Member.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, board PM dan Member balas 200.
+
+- **2026-11-24** – Scope Of Work hanya menampilkan 3 dari 5 scope, dan sidebar ikut ter-scroll.
+  (a) **Penyebab 3 scope**: `listProjects(workspaceId)` memakai `.eq('workspace_id', …)`, sedangkan
+  project contoh tersebar di **dua workspace** (project PM di workspace PM, project Member di
+  workspace Member). Workspace yang tidak terlihat oleh pengguna membuat project di dalamnya ikut
+  hilang, sehingga Member hanya melihat Mockup, Studio Project, dan Font. Perbaikan: filter
+  workspace kini hanya diterapkan pada project yang workspace-nya **terlihat** oleh pengguna;
+  project di workspace yang tidak terjangkau (dan project tanpa workspace) tetap ditampilkan.
+  Hasil: akun PM melihat 6 project dan akun Member 5 project, keduanya **5 scope**
+  (Client, Font, Marketplace, Studio Project, Mockup).
+  (b) **History** (localStorage) menyimpan entri lama yang menunjuk project yang sudah berganti
+  nama/scope (`Studio Client` → `Studio Project`) atau sudah dihapus. Setelah project dimuat,
+  entri dibersihkan dan judulnya diselaraskan dengan database, sehingga tautannya tidak mati.
+  (c) **Sidebar tidak ikut ter-scroll**: layout Home diubah menjadi tinggi tetap di layar besar
+  (`lg:h-screen lg:overflow-hidden`) sehingga hanya `<main>` yang menggulir; sidebar punya
+  `lg:overflow-y-auto` sendiri. Tombol *Home* di sidebar menggulir `main`, bukan hanya `window`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  PM dan Member sama-sama memperoleh 5 scope; `/home` dan board balas 200.
+
+- **2026-11-24** – Scope Of Work: ikon orang dihapus, template jadi 5 scope tetap.
+  (a) **Ikon orang dihapus**: tumpukan avatar anggota (`MemberStack`, `listProjectMemberChips`,
+  state `projectMembers`) dibuang dari kartu scope maupun kartu project di modal Scope Of Work.
+  Kartu kembali ringkas: gambar, nama scope/project, jumlah card, dan progress. Pemeriksaan peran
+  (`listProjectRoles`) tetap dipakai untuk menyembunyikan tombol Ubah/Hapus dari Member.
+  (b) **Template 5 scope**: `demoProjects` di `lib/project-template.json` diubah dari
+  "Studio Client" menjadi **"Studio Project"**, sehingga template tepat berisi lima scope:
+  **Client, Font, Marketplace, Studio Project, Mockup**. Home juga mengurutkan kartu scope sesuai
+  urutan itu (`SCOPE_ORDER`), dan gambar kartu dipetakan **per nama scope** (`SCOPE_IMAGES`)
+  sehingga tidak lagi bergantung urutan kemunculan project.
+  (c) Data lama dimigrasikan: project dengan scope "Studio Client" (Arunika) diubah menjadi
+  "Studio Project" lewat akun PM.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; scope unik di database untuk akun PM
+  maupun Member = Client, Font, Marketplace, Mockup, Studio Project; `/home` dan
+  `/project/studio-project/arunika` membalas 200.
+
+- **2026-11-24** – Ikon anggota pada Scope Of Work + tombol Ubah/Hapus project khusus Project Manager.
+  (a) **Ikon orang**: `listProjectMemberChips()` mengumpulkan anggota **aktif** per project
+  (`project_members` + `profiles`, undangan `status = 'invited'` tidak dihitung). Home
+  menampilkannya sebagai tumpukan avatar (maks. 4 + "+N") pada setiap kartu project di modal
+  Scope Of Work, dan gabungan anggota per scope pada kartu scope di halaman utama beserta jumlah
+  orang.
+  (b) **Hak ubah/hapus**: Home kini memuat `listProjectRoles()` (pemilik project = Project Manager,
+  selain itu `project_members.role`). Tombol *Ubah* dan *Hapus* hanya tampil bila peran pada
+  **project itu** adalah Project Manager; Member hanya melihat tombol favorit. Pengaman tambahan:
+  `openEditProject`, `handleSaveProject`, `handleDeleteProject` menolak, dan `updateProject`/
+  `deleteProject` di `lib/db.ts` memeriksa peran lewat `assertProjectManager` sehingga menampilkan
+  pesan jelas "Hanya Project Manager yang dapat mengubah atau menghapus project ini."
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; data peran diuji langsung — akun PM
+  mendapat `project_manager` pada 6 project, akun Member mendapat `member` pada 5 project;
+  `/home` dan board membalas 200 untuk kedua akun.
+
+- **2026-11-24** – Perbaikan penanggung jawab tugas ("Person") tidak bisa diubah.
+  (a) **Penyebab tampak**: semua akun demo belum punya `avatar_url`, dan pemetaan board memakai
+  satu gambar placeholder yang sama (`/images/clients/SUNDDAE.jpg`) untuk semua anggota. Kolom
+  *Person* di Main Table hanya menampilkan avatar, sehingga mengganti penanggung jawab **tidak
+  terlihat berubah sama sekali**.
+  (b) **Penyebab nyata kedua**: `toggleTaskAssignee` selalu menambahkan anggota kembali
+  (`newNames.length > 0 ? newNames : [member.name]`), jadi penugasan tidak pernah bisa dilepas,
+  dan penghapusan avatar memakai `filter` berdasarkan nilai sehingga menghapus avatar anggota lain
+  yang kebetulan sama.
+  (c) **Perbaikan**: komponen `PersonAvatar` (foto bila ada, selain itu inisial + warna tetap per
+  nama) dipakai di Main Table, Kanban, detail tugas, pemilih anggota, dan daftar mention. Kolom
+  *Person* kini menampilkan avatar **dan nama** (atau tombol "Tugaskan" bila kosong).
+  `toggleTaskAssignee` disamakan dengan skema database (satu `tasks.assignee_id` per tugas):
+  memilih anggota lain menggantikan, memilih anggota yang sama melepas; ditambah aksi
+  "Tanpa penanggung jawab" (`clearTaskAssignee`).
+  (d) Menu pemilihan penanggung jawab dipindah ke `AssigneeMenu` yang dirender lewat
+  `createPortal` ke `<body>`, jadi tidak lagi terpotong oleh container `overflow-x-auto`
+  (tabel Main Table) atau area scroll modal detail, serta selalu di atas modal.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, halaman board PM/Member,
+  Anggota Proyek, dan `/home` balas 200.
+
+- **2026-11-24** – Perbaikan "Gagal memuat board".
+  (a) **Penyebab**: kolom `invited_by` (FK ke `profiles`) yang ditambahkan untuk fitur undangan
+  membuat `project_members` punya **dua** relasi ke `profiles` (`user_id` dan `invited_by`).
+  PostgREST menolak embed tanpa nama constraint ("more than one relationship was found"), dan
+  query itu dipakai `loadBoard()` sehingga seluruh board gagal dimuat.
+  (b) **Perbaikan**: embed memakai nama constraint eksplisit
+  `profiles!project_members_user_id_fkey(...)` di `loadBoard()` dan `listProjectMembers()`.
+  Nama constraint `user_id` sudah ada sejak awal, jadi perbaikan berlaku sebelum maupun sesudah
+  migrasi undangan.
+  Verifikasi: seluruh query board (project, statuses, task_groups, tasks, members, docs,
+  subtasks, attachments, comments) berhasil untuk akun PM dan Member;
+  `/project/client/aqua`, `/project/client/aqua/members`, dan `/home` balas 200.
+
+- **2026-11-24** – Perbaikan login tidak bisa dipakai.
+  (a) **Penyebab**: login dipindah ke server action (`app/signin/actions.ts`) tetapi cookie sesi
+  Supabase (≈2.9 KB) tidak ikut terkirim ke browser, sehingga sesi tidak pernah terbentuk dan
+  `/home` selalu berbalik ke halaman login.
+  (b) **Perbaikan**: login ditangani route handler `POST /api/auth/signin`
+  (`app/api/auth/signin/route.ts`). Kredensial divalidasi di server, diverifikasi Supabase Auth
+  (dengan 3× percobaan ulang bila jaringan gagal sesaat), lalu cookie sesi ditulis **eksplisit**
+  ke `NextResponse` (`response.cookies.set`), bukan hanya ke `cookies().set`. Form login
+  memanggil endpoint ini. `app/signin/actions.ts` dihapus.
+  (c) `/signin` menampilkan form login (default `initialMode` = `login`), `/signup` form daftar.
+  (d) Home: `isManager` awalnya `null` (menampilkan "Memuat…") agar Member tidak sempat melihat
+  bagian "My Member" sebelum peran diketahui.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses (13 rute + `/api/auth/signin`), login
+  kedua akun demo mengembalikan 200 dengan 1 cookie sesi dan `/home` balas 200.
+
+- **2026-11-23** – Alur undangan anggota + Home versi Member.
+  (a) **Undangan**: `project_members` mendapat `status` (`invited`/`active`), `invited_by`,
+  `invited_at` lewat migrasi `20261123000000_project_invitations.sql`. PM mengundang lewat
+  halaman Anggota Proyek; anggota baru berstatus `invited` sampai menerima.
+  (b) **Notifikasi**: panel Notification punya tab **Undangan** dengan tombol Terima/Tolak, dan
+  ikon lonceng di Home menampilkan badge jumlah undangan yang menunggu. Menerima → `active`
+  (project muncul di Home), menolak → baris keanggotaan dihapus.
+  (c) **Home versi Member**: bagian **My Member** diganti **Tugas Saya** — kartu tugas yang
+  ditugaskan kepadanya, diurutkan dari tenggat terdekat, dipisah menjadi "Perlu segera
+  dikerjakan" (≤3 hari / terlambat) dan "Berikutnya", lengkap dengan prioritas, status,
+  tenggat, dan progres subtask. `hasManagerRole()` memilih tampilan: PM → My Member,
+  Member → Tugas Saya.
+  (d) **RLS**: helper `is_project_member` hanya menghitung anggota berstatus `active`; anggota
+  boleh menerima/menolak undangannya sendiri tetapi tidak boleh mengubah peran.
+  (e) `listProjects()` menyembunyikan project yang undangannya belum diterima.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  PM `isManager=true` dan Member `isManager=false` dengan 9 tugas (4 mepet deadline/terlambat).
+  Data demo dirapikan: 3 project contoh yang sempat dimiliki akun Member dipindahkan ke akun PM.
+  **Catatan:** alur undangan baru aktif setelah migrasi `20261123000000_project_invitations.sql`
+  dijalankan; sebelum itu `addMemberByEmail` menambah anggota langsung seperti sebelumnya.
+
+- **2026-11-23** – Akun contoh untuk membandingkan POV Project Manager vs Member.
+  `scripts/seed-demo-accounts.mjs` membuat:
+  **PM** `pm.demo@invisual.test` / `Manager2026!` (Rani Project Manager) dan
+  **Member** `member.demo@invisual.test` / `Member2026!` (Bagas Anggota Tim).
+  Keduanya anggota pada dua project contoh (Client/Aqua, Marketplace/Glowup); tugas yang punya
+  penanggung jawab ditugaskan ke akun Member sehingga POV member langsung berisi.
+  Verifikasi: PM memiliki kedua project sebagai owner, Member berperan `member` di keduanya dan
+  melihat 13 tugas (6 ditugaskan kepadanya).
+  Catatan: **migrasi `20261114000000_rls_roles.sql` belum dijalankan** — uji langsung menunjukkan
+  member masih bisa menghapus/membuat grup dan menambah label status di database, walaupun
+  tombolnya sudah disembunyikan di UI.
+
+- **2026-11-23** – Perbaikan halaman login: `/signin` sebelumnya memakai `initialMode = 'signup'`
+  sehingga menampilkan form daftar (pengguna mengira tidak bisa login). Default diubah ke
+  `'login'` dan `/signup` kini eksplisit meminta mode signup.
+  Verifikasi: `/signin` memuat "Hi, Welcome Back!", `/signup` memuat "Create Your Account",
+  `/forgot-password` memuat "Reset Your Password" (ketiganya 200).
+
+- **2026-11-14** – Menyesuaikan aplikasi dengan **`LaporanTA-PebryAndrian-revisi15.docx`**
+  (laporan terbaru; revisi13 sudah digantikan).
+  (a) **UC-01 / Gambar 4.13**: login dipindah ke **server action** (`app/signin/actions.ts`) —
+  kredensial divalidasi di server lalu diverifikasi Supabase Auth, bukan lagi dipanggil langsung
+  dari browser.
+  (b) **UC-03**: dibuat **halaman Anggota Proyek** `/project/<scope>/<card>/members`
+  (`components/project-members.tsx`) — undang via email + pilih peran, ubah peran, keluarkan
+  anggota. Modal anggota & modal undang di board dihapus agar tidak ada dua implementasi.
+  (c) **UC-05**: ikon gear pada header kolom **Status** (khusus PM) membuka **Manage Status
+  Labels**, sehingga "mengatur kolom status pekerjaan" benar-benar dapat diakses.
+  (d) **F-02**: kartu statistik + panel Deadline/Aktivitas di Home **dihapus** karena revisi15
+  mendefinisikan Home hanya sebagai Scope of Work + My Member. Kode mati
+  (`getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity`) ikut dibuang.
+  (e) Migrasi baru `20261114000003_workspace_members_role.sql` (kolom `role` pada
+  `workspace_members`, sesuai Tabel 4.6).
+  Verifikasi: `tsc --noEmit` bersih; `next build` sukses dengan rute baru
+  `/project/[scope]/[card]/members`; `/` dan `/signin` balas 200; `/home` dan halaman anggota
+  balas 307 (proteksi rute) saat belum login.
+
+- **2026-11-13** – Menyelaraskan aplikasi dengan **`LaporanTA-PebryAndrian-revisi13.docx`**
+  (laporan terbaru, ada di folder induk `TUGASAKHIR/`). Audit sebelumnya memakai `revisi3.docx`
+  di `invisual/docs/` yang sudah usang, sehingga sebagian temuan tidak relevan.
+  (a) **F-15 Workspace aktif**: `WorkspaceSelector` menerima `value`/`onChange`; workspace aktif
+  menyaring `listProjects(workspaceId)` dan dipakai saat membuat scope/card.
+  (b) **F-03 Jadwal proyek**: modal Ubah Project menambah `start_date` dan `due_date`.
+  (c) **F-01 Remember me**: checkbox dikembalikan dan benar-benar berfungsi lewat
+  `cookieOptions.maxAge` (30 hari bila dicentang, cookie sesi bila tidak).
+  (d) **F-14 Foto profil**: `uploadAvatar()` mengunggah ke bucket `avatars` lalu menyimpan URL
+  publik; tidak lagi menyimpan base64 di kolom tabel.
+  (e) **F-11 Berkas Doc**: `uploadDocFile()` mengunggah gambar & berkas ke bucket `project-docs`,
+  blok menyimpan path dan ditampilkan lewat signed URL; blok "file" kini bisa memilih berkas
+  sungguhan (sebelumnya hanya membuat blob teks contoh).
+  (f) Migrasi baru `supabase/migrations/20261114000002_storage_avatars_docs.sql`.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses, jadwal proyek & filter workspace
+  terbukti jalan lewat uji langsung ke Supabase. **Bucket Storage belum dibuat** — unggah
+  ke `task-attachments`, `avatars`, dan `project-docs` masih gagal sampai ketiga migrasi
+  dijalankan.
+
+- **2026-11-13** – Menyelaraskan aplikasi dengan klaim `LaporanTA-...-revisi3.docx`:
+  (a) **F-02 Dashboard monitoring** di `/home`: kartu jumlah proyek / total tugas / tugas selesai /
+  anggota tim, panel **Deadline Terdekat**, dan **Aktivitas Terbaru** (tugas + komentar);
+  fungsi `getDashboardStats`, `listUpcomingDeadlines`, `listRecentActivity` di `lib/db.ts`.
+  (b) **F-03 Pengelolaan proyek**: `updateProject`, `deleteProject`, tombol ubah/hapus pada kartu
+  project di modal Scope Of Work (hapus memakai dialog konfirmasi).
+  (c) **F-13 Hak akses**: `lib/permissions.ts` (`useProjectPermissions`) membaca
+  `project_members.role` dengan fallback owner = Project Manager; badge peran di breadcrumb board;
+  tombol Add New Group / Add Column / hapus tugas / undang anggota hanya untuk PM; migrasi
+  `supabase/migrations/20261114000000_rls_roles.sql` menutup lubang RLS dan menambah policy PM
+  untuk ubah/hapus project serta ubah peran anggota.
+  (d) **UC-03**: pilihan peran saat mengundang + modal **Anggota Project** untuk mengubah peran
+  dan mengeluarkan anggota (`updateMemberRole`, `removeMember`).
+  (e) **F-12 Lampiran**: `uploadAttachment` mengunggah berkas ke bucket `task-attachments`
+  (Supabase Storage), metadata `storage_path` dicatat, dibuka lewat signed URL, dihapus beserta
+  berkasnya; migrasi `20261114000001_attachments_storage.sql` membuat bucket + policy.
+  (f) **Favorit** pindah dari `localStorage` ke kolom `project_members.favorite` sesuai kamus data
+  Tabel 4.7 (`listFavoriteProjects`, `setProjectFavorite`).
+  Verifikasi: `npx tsc --noEmit` bersih, `next build` sukses, `/` dan `/signin` balas 200;
+  uji langsung ke Supabase membuktikan join `assignee`, query aktivitas, statistik, favorit
+  (update baris owner), ubah project, ubah peran, dan hapus project berjalan; unggah berkas
+  masih menunggu migrasi bucket (pesan error jelas bila belum dijalankan).
+
+- **2026-11-13** – Perbaikan "Gagal menyimpan perubahan subtask" (`Could not find the 'status_id'
+  column of 'subtasks' in the schema cache`). Penyebab: kolom meta subtask memang belum ada di DB.
+  (a) Migrasi SQL disimpan di repo: `supabase/migrations/20261113000000_subtask_meta.sql`
+  (assignee_id/status_id/due_date/priority + index + `notify pgrst`).
+  (b) `getSubtaskColumns()` mendeteksi kolom yang benar-benar ada sekali per sesi; `updateSubtask`
+  menyaring patch sehingga kolom yang belum ada tidak dikirim.
+  (c) UI menampilkan banner kuning di Main Table + menolak perubahan sel yang belum didukung
+  (tidak ada lagi perubahan yang tampak tersimpan lalu hilang setelah refresh).
+  (d) Sidebar "Belum ada workspace" diperbaiki: `ensureDefaultWorkspace()` membuat workspace default
+  (beserta baris `workspace_members`) bila akun belum punya, dipakai WorkspaceSelector, halaman
+  project, dan `createProject` sehingga project baru selalu punya workspace.
+  Verifikasi: `tsc --noEmit` bersih, `next build` sukses; uji langsung ke Supabase menunjukkan
+  keempat kolom belum ada, penyaringan patch menghasilkan pesan migrasi (bukan error mentah),
+  dan insert `workspace_members` oleh pemilik diizinkan RLS.
+
+- **2026-11-13** – Template contoh project. Sumber data tunggal `lib/project-template.json`:
+  (a) `template` generik (3 grup + 8 tugas + subtask + komentar + 6 blok Doc) dipakai saat
+  project baru dibuat lewat `createProject(..., { template: true })`; (b) `demoProjects` berisi
+  14 project siap pakai: 5 project inti (Client/Aqua, Font/Grotesk, Marketplace/Glowup, Studio
+  Project/Arunika, Mockup/Nusantara) ditambah **9 contoh typeface di scope Font** (Come the Hour,
+  Bright Charms, Dawn Style, Sugar Zesty, Gather Friends, Voyage Haven, Coast Royale, Muffin Crush,
+  Felty Drops) yang dimuat lewat tombol **Muat contoh** di Home — dijalankan dari browser sebagai
+  user yang login sehingga tetap tunduk pada RLS. Tanggal tugas memakai offset hari dari hari ini,
+  jadi isi contoh selalu terlihat sedang berjalan. Board kosong menampilkan tombol
+  **Isi contoh tugas**; modal Create New Card punya opsi "Sertakan contoh tugas".
+  Verifikasi: `tsc --noEmit` bersih; uji insert ke Supabase (akun sementara) menghasilkan
+  8 tugas / 7 subtask / 2 komentar / 6 blok Doc lalu data uji dihapus kembali.
+
+- **2026-11-12** – Perbaikan konsistensi frontend (data contoh dihapus, semua kontrol aktif):
+  (a) `findProject` mencocokkan **slug** URL dengan `scope`/`name` di database, sehingga kartu
+  project benar-benar membuka board-nya (sebelumnya selalu gagal dan jatuh ke data contoh);
+  (b) hapus fallback demo di board (`initialGroups`/`initialMembers`/`initialDocBlocks`,
+  workspace `seed-*`, `CURRENT_USER`) dan di Home (scope/kartu/member contoh);
+  (c) tab **Kanban** dipulihkan: 4 kolom + drag & drop native, tersimpan ke `tasks.status_id`;
+  (d) autosave tab Doc tidak lagi jalan sebelum dokumen selesai dimuat (tidak menimpa isi DB
+  dengan dokumen kosong);
+  (e) Home: profil & tanggal nyata, favorit tersimpan di `localStorage`, **My Member** dibaca dari
+  `profiles` dengan search + sort berfungsi, progress kartu dihitung dari `tasks`;
+  (f) Profile: email & role read-only, **ubah password** berfungsi, kegagalan simpan ditampilkan;
+  (g) `prompt()`/`confirm()`/`alert()` diganti modal (tambah grup, hapus massal, undang anggota);
+  (h) kegagalan simpan tidak lagi ditelan `.catch(() => {})` — muncul notifikasi alasan gagal;
+  (i) signin: checkbox "Remember me" yang tidak berefek dihapus; alur reset password dibedakan
+  antara **kirim link** dan **set password baru**.
+  Verifikasi: `npx tsc --noEmit` bersih, `next build` sukses; `/` dan `/signin` balas 200,
+  `/home` dan `/project` balas 307 (redirect ke signin) saat belum login.
 
 - **2026-10-14** – Dokumen skripsi: dibuat `docs/LaporanTA-PebryAndrian-revisi3.docx` dari
   `revisi2.docx`. Perbaikan konsistensi Bab 1–4: (a) Tabel 3.1 disamakan jadi **6 tahap** sesuai

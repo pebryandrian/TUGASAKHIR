@@ -7,3 +7,38 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Alur Git (wajib diikuti)
+
+- **Satu perubahan = satu commit.** Jangan menggabungkan beberapa perbaikan yang tidak berkaitan
+  dalam satu commit.
+- **Push setiap commit satu per satu**, bukan menumpuk beberapa commit lalu push sekaligus.
+  Urutannya: `git add` → `git commit` → `git push` untuk commit itu, baru lanjut ke perubahan
+  berikutnya.
+- Setelah push, **buat pull request `development` → `main` secara otomatis** (jangan hanya
+  menyerahkan tautan compare ke pengguna):
+
+  ```powershell
+  node scripts/open-pr.mjs
+  ```
+
+  Skrip ini memakai GitHub REST API dengan token dari Git Credential Manager (tidak butuh `gh`
+  CLI), menampilkan PR yang sudah terbuka, dan hanya membuat PR baru bila belum ada. Bila PR sudah
+  ada dan isinya perlu disegarkan setelah menambah commit, jalankan
+  `node scripts/open-pr.mjs --update`. Selalu laporkan nomor dan tautan PR di jawaban akhir.
+- Jangan pernah mencetak token GitHub ke output, ke berkas, atau ke dalam commit.
+- Jangan commit skrip uji sementara (`scripts/_tmp-*.mjs`) maupun hasil build (`.next/`).
+- Jangan mengubah berkas laporan (`*.docx`, `*.pdf`) di folder induk.
+
+## Konteks & pemadatan (compaction)
+
+- **Auto-compact pada 500k token.** Begitu konteks percakapan mendekati ~500 ribu token, ringkas
+  (compact) konteks secara otomatis lalu lanjutkan pekerjaan tanpa menunggu perintah pengguna.
+- Saat memadatkan, hal yang **wajib dipertahankan**: tujuan yang sedang dikerjakan, keputusan
+  teknis beserta alasannya, daftar berkas yang diubah, status commit/PR, migrasi Supabase yang
+  belum dijalankan, dan langkah berikutnya.
+- Hal yang boleh dibuang: isi keluaran perintah yang panjang (log build, dump JSON, hasil query
+  mentah), potongan kode yang sudah tidak relevan, dan percobaan yang sudah gagal.
+- Sebelum memadatkan, pastikan tidak ada perubahan yang belum di-commit; kalau ada, selesaikan
+  commit + push + PR lebih dulu.
+

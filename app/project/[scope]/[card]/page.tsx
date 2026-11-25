@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
+  canCreateProject,
   findProject,
   loadBoard,
   listWorkspaces,
+  ensureDefaultWorkspace,
   createWorkspace,
   createTask,
   updateTask as updateTaskRow,
@@ -22,13 +25,27 @@ import {
   updateSubtask as updateSubtaskRow,
   addComment as addCommentRow,
   likeComment,
+  uploadAttachment,
+  addAttachmentLink,
+  linkUrlFromPath,
+  normalizeLink,
+  getAttachmentUrl,
+  deleteAttachmentWithFile,
+  uploadDocFile,
+  getDocFileUrl,
   saveDoc,
-  addMemberByEmail,
   getSessionProfile,
+  listFavoriteProjects,
+  setProjectFavorite,
   type Workspace,
   type Priority,
 } from '@/lib/db'
-import { recordRecentProject } from '@/lib/utils'
+import { recordRecentProject, slugify } from '@/lib/utils'
+import { getSubtaskColumns, MISSING_SUBTASK_COLUMNS_MESSAGE, MISSING_BUCKET_MESSAGE } from '@/lib/db'
+import { roleLabel, useProjectPermissions } from '@/lib/permissions'
+import { applyProjectTemplate, pickTemplate } from '@/lib/template'
+import { NotificationPanel } from '@/components/notification-panel'
+import { signOut } from '@/lib/auth'
 import {
   Bell,
   ThumbsUp,
@@ -79,6 +96,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Mail,
+  Settings,
   Folder,
   Tag,
   Circle,
@@ -88,6 +106,13 @@ import {
   ChevronsRight,
   LayoutGrid,
   Flag,
+  LogOut,
+  Loader2,
+  AlertCircle,
+  ShieldCheck,
+  Link2,
+  Upload,
+  Star,
 } from 'lucide-react'
 
 // ======================== STATUS CONFIGURATION ========================
@@ -133,13 +158,6 @@ export const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ]
-
-// Pengguna yang sedang login — dipakai untuk komentar & uploader lampiran.
-export const CURRENT_USER = {
-  name: 'George Frederik',
-  avatar:
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-}
 
 // ======================== TASK & GROUP INTERFACES ========================
 // Helper: get a light text colour for very dark/light bg
@@ -255,7 +273,15 @@ export interface TaskItem {
     date?: string | null
     priority?: string | null
   }[]
-  attachments?: { id: string; name: string; owner?: string; avatar?: string }[]
+  attachments?: {
+    id: string
+    name: string
+    owner?: string
+    avatar?: string
+    storagePath?: string | null
+    /** Tautan (mis. Google Drive) bila lampiran bukan berkas unggahan. */
+    url?: string | null
+  }[]
   comments?: {
     id: string
     author: string
@@ -276,114 +302,6 @@ export interface TaskGroup {
   dateRange: string
   items: TaskItem[]
 }
-
-const initialGroups: TaskGroup[] = [
-  {
-    id: 'group-1',
-    title: 'Tugas Pertama',
-    color: 'text-[#6c7ff5]',
-    collapsed: false,
-    dateRange: 'Mar 28 - 29',
-    items: [
-      {
-        id: 't-1-1',
-        title: 'buat logo aqua',
-        hasChevron: true,
-        description: 'Desain ulang logo Aqua dalam resolusi tinggi dengan variasi warna.',
-        personAvatars: ['/images/clients/SUNDDAE.jpg'],
-        personNames: ['George'],
-        status: 'To Do',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-        subtasks: [
-          { id: 'sub-1', text: 'Kumpulkan referensi logo', done: true },
-          { id: 'sub-2', text: 'Sketsa 3 alternatif', done: false },
-        ],
-        attachments: [
-          { id: 'att-1', name: 'Revisi dari client.pdf', owner: 'George', avatar: '/images/clients/SUNDDAE.jpg' },
-          { id: 'att-2', name: 'Revisi dari client.pdf', owner: 'Puput', avatar: '/images/clients/ASIAN-MOOD.webp' },
-        ],
-        comments: [
-          {
-            id: 'cm-1',
-            author: 'George Frederik',
-            text: 'Perbaiki ini',
-            time: 'Yesterday at 4:10 AM',
-            avatar: CURRENT_USER.avatar,
-            likes: 0,
-          },
-        ],
-      },
-      {
-        id: 't-1-2',
-        title: 'apadah',
-        hasChevron: true,
-        description: 'Eksplorasi konsep dan moodboard visual untuk media sosial.',
-        personAvatars: ['/images/clients/CONTROVERSIAL.webp', '/images/clients/KONA.webp'],
-        personNames: ['Jordan Fufu', 'Puput Atira'],
-        status: 'In Progress',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-  {
-    id: 'group-2',
-    title: 'Tugas Kedua',
-    color: 'text-[#ea384c]',
-    collapsed: false,
-    dateRange: 'Mar 28 - 29',
-    items: [
-      {
-        id: 't-2-1',
-        title: 'apadah',
-        hasChevron: false,
-        description: 'Persiapan materi publikasi dan aset packaging.',
-        personAvatars: ['/images/clients/ASIAN-MOOD.webp'],
-        personNames: ['Puput Atira'],
-        status: 'To Do',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-      {
-        id: 't-2-2',
-        title: 'logo',
-        hasChevron: false,
-        description: 'Finishing logo vector SVG dan guideline brand.',
-        personAvatars: ['/images/clients/SOAR.webp'],
-        personNames: ['Rahmat Sudianto'],
-        status: 'In Progress',
-        date: 'Mar 28, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-  {
-    id: 'group-3',
-    title: 'Tugas Ketiga',
-    color: 'text-[#22c55e]',
-    collapsed: true,
-    dateRange: 'Mar 29 - 30',
-    items: [
-      {
-        id: 't-3-1',
-        title: 'Review Brand Assets',
-        hasChevron: false,
-        description: 'Meeting review akhir bersama tim lead.',
-        personAvatars: ['/images/clients/GRIZZLE.webp'],
-        personNames: ['George'],
-        status: 'Review',
-        date: 'Mar 29, 2025',
-        checked: false,
-        expanded: false,
-      },
-    ],
-  },
-]
 
 // ======================== DOC BLOCK INTERFACES ========================
 export type TextStyleType = 'normal' | 'h1' | 'h2' | 'h3' | 'quote'
@@ -415,6 +333,8 @@ export interface DocBlock {
     name: string
     size: string
     icon: string
+    /** Path berkas di Supabase Storage (bucket project-docs). */
+    path?: string
   }
   imageUrl?: string
   align?: 'left' | 'center' | 'right' | 'justify'
@@ -428,34 +348,6 @@ export interface DocBlock {
   }
 }
 
-const initialDocBlocks: DocBlock[] = [
-  {
-    id: 'block-1',
-    type: 'paragraph',
-    content:
-      'Platform ini dirancang untuk membantu mengelola pekerjaan secara lebih terstruktur dan efisien. Dengan fitur yang intuitif, pengguna dapat mengatur tugas, berkolaborasi dengan tim, serta memantau perkembangan proyek dalam satu tempat yang terintegrasi.',
-    align: 'left',
-    styles: {},
-  },
-  {
-    id: 'block-2',
-    type: 'file',
-    content: '',
-    fileData: {
-      name: 'harga Makanan terbaru.docx',
-      size: '245 KB',
-      icon: 'W',
-    },
-  },
-  {
-    id: 'block-3',
-    type: 'image',
-    content: 'Referensi visual produk',
-    imageUrl:
-      'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=600&auto=format&fit=crop&q=80',
-  },
-]
-
 export interface Member {
   id: string
   name: string
@@ -463,83 +355,753 @@ export interface Member {
   avatar: string
 }
 
-const initialMembers: Member[] = [
-  { id: 'm-0', name: 'Balok Farmer', role: 'Product Manager', avatar: '/images/clients/SUNDDAE.jpg' },
-  { id: 'm-01', name: 'Afira cendera', role: 'Design Lead', avatar: '/images/clients/ASIAN-MOOD.webp' },
-  { id: 'm-1', name: 'George', role: 'Product Lead', avatar: '/images/clients/SUNDDAE.jpg' },
-  { id: 'm-2', name: 'Jordan Fufu', role: 'Senior Designer', avatar: '/images/clients/CONTROVERSIAL.webp' },
-  { id: 'm-3', name: 'Puput Atira', role: 'UI/UX Designer', avatar: '/images/clients/ASIAN-MOOD.webp' },
-  { id: 'm-4', name: 'Rahmat Sudianto', role: 'Illustrator', avatar: '/images/clients/SOAR.webp' },
+// ======================== AVATAR & PENUGASAN ANGGOTA ========================
+// Sebelumnya semua anggota yang belum mengunggah foto memakai satu gambar
+// placeholder yang sama, sehingga mengganti penanggung jawab tugas tidak
+// terlihat berubah sama sekali. Sekarang setiap anggota tanpa foto ditampilkan
+// dengan inisial + warna tetap yang berbeda per nama.
+
+const AVATAR_PALETTE = [
+  'bg-blue-600',
+  'bg-emerald-600',
+  'bg-amber-600',
+  'bg-rose-600',
+  'bg-violet-600',
+  'bg-cyan-600',
+  'bg-orange-600',
+  'bg-teal-600',
 ]
 
-// ======================== CUSTOM VIEWS (Gantt / Chart) ========================
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+function colorOf(name: string): string {
+  let sum = 0
+  for (let i = 0; i < name.length; i++) sum = (sum + name.charCodeAt(i)) % 9973
+  return AVATAR_PALETTE[sum % AVATAR_PALETTE.length]
+}
+
+export function PersonAvatar({
+  name,
+  avatar,
+  size = 24,
+  className = '',
+}: {
+  name: string
+  avatar?: string | null
+  size?: number
+  className?: string
+}) {
+  if (avatar) {
+    return (
+      <Image
+        src={avatar}
+        alt={name}
+        width={size}
+        height={size}
+        title={name}
+        className={`rounded-full object-cover shrink-0 ${className}`}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+  return (
+    <span
+      aria-label={name}
+      title={name}
+      className={`rounded-full inline-flex items-center justify-center shrink-0 font-semibold text-white leading-none ${colorOf(
+        name,
+      )} ${className}`}
+      style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.42)) }}
+    >
+      {initialsOf(name)}
+    </span>
+  )
+}
+
+// Menu pemilihan penanggung jawab. Dirender lewat portal ke <body> supaya tidak
+// terpotong oleh container ber-overflow (tabel Main Table) atau modal detail.
+function AssigneeMenu({
+  members,
+  assignedNames,
+  onPick,
+  onClear,
+  anchor,
+  onClose,
+}: {
+  members: Member[]
+  assignedNames: string[]
+  onPick: (member: Member) => void
+  onClear: () => void
+  /** Posisi & ukuran elemen pemicu (bukan titik), agar menu bisa dibuka ke atas. */
+  anchor: { top: number; left: number; width: number; height: number }
+  onClose: () => void
+}) {
+  const width = 250
+  const estimatedHeight = 72 + members.length * 34
+
+  const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+  const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - width / 2, viewportWidth - width - 8))
+
+  const spaceBelow = viewportHeight - (anchor.top + anchor.height) - 8
+  const spaceAbove = anchor.top - 8
+  const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow
+  const available = Math.max(140, openUp ? spaceAbove : spaceBelow)
+  const maxHeight = Math.min(available, estimatedHeight + 8, viewportHeight - 16)
+  const top = openUp
+    ? Math.max(8, anchor.top - 6 - Math.min(estimatedHeight, maxHeight))
+    : anchor.top + anchor.height + 6
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[140]" onClick={onClose} />
+      <div
+        className="fixed z-[141] bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100 text-left"
+        style={{ width, left, top, maxHeight }}
+        role="menu"
+        aria-label="Pilih penanggung jawab"
+      >
+        <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+          Penanggung Jawab
+        </div>
+        <div className="space-y-1 overflow-y-auto" style={{ maxHeight: maxHeight - 44 }}>
+          <button
+            type="button"
+            onClick={() => {
+              onClear()
+              onClose()
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+          >
+            <span className="w-5 h-5 rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
+              <X size={10} />
+            </span>
+            Tanpa penanggung jawab
+          </button>
+          {members.map((m) => {
+            const isAssigned = assignedNames.includes(m.name)
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  onPick(m)
+                  onClose()
+                }}
+                className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-xs transition cursor-pointer text-left ${
+                  isAssigned ? 'bg-blue-600/15' : 'hover:bg-neutral-800'
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                  <span className="text-neutral-200 text-xs truncate">{m.name}</span>
+                </span>
+                {isAssigned ? (
+                  <Check size={12} className="text-blue-400 shrink-0" />
+                ) : (
+                  <span className="text-[10px] text-neutral-500 shrink-0">
+                    {m.role === 'project_manager' ? 'PM' : 'Member'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          {members.length === 0 && (
+            <p className="px-2 py-2 text-[11px] text-neutral-500">
+              Belum ada anggota. Tambahkan anggota lewat halaman Anggota Proyek.
+            </p>
+          )}
+        </div>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+// ======================== POPOVER SEL TABEL ========================
+// Popover untuk sel Main Table (status, tanggal, dsb). Dirender lewat portal ke
+// <body> supaya:
+//   1. tidak terpotong oleh container tabel ber-`overflow-x-auto`,
+//   2. tidak tertimpa teks sel lain (sel bertetangga punya `position: relative`
+//      sendiri, jadi popover biasa bisa tertimbun),
+//   3. selalu berada di dalam batas layar dan membuka ke atas bila ruang bawah
+//      tidak cukup.
+function TablePopover({
+  anchor,
+  width = 208,
+  estimatedHeight = 260,
+  onClose,
+  children,
+  ariaLabel,
+}: {
+  anchor: { top: number; left: number; width: number; height: number }
+  width?: number
+  /** Perkiraan tinggi isi, dipakai untuk memutuskan membuka ke atas/bawah. */
+  estimatedHeight?: number
+  onClose: () => void
+  children: React.ReactNode
+  ariaLabel?: string
+}) {
+  const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+  const w = Math.min(width, viewportWidth - 16)
+  const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - w / 2, viewportWidth - w - 8))
+
+  const spaceBelow = viewportHeight - (anchor.top + anchor.height) - 8
+  const spaceAbove = anchor.top - 8
+
+  // Buka ke bawah bila cukup; kalau tidak, ke atas; kalau dua-duanya sempit,
+  // pakai sisi yang lebih luas dan batasi tingginya.
+  const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow
+  const available = Math.max(140, openUp ? spaceAbove : spaceBelow)
+  const maxHeight = Math.min(available, estimatedHeight + 8, viewportHeight - 16)
+  const top = openUp
+    ? Math.max(8, anchor.top - 6 - Math.min(estimatedHeight, maxHeight))
+    : anchor.top + anchor.height + 6
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[140]" onClick={onClose} />
+      <div
+        className="fixed z-[141] bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100 text-left overflow-y-auto"
+        style={{ top, left, width: w, maxHeight }}
+        role="menu"
+        aria-label={ariaLabel}
+      >
+        {children}
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+// ======================== CUSTOM VIEW: GANTT & CHART ========================
+// Satu tab berisi ringkasan distribusi status (Chart) dan timeline pengerjaan
+// (Gantt) dengan daftar tugas di sisi kiri, mengikuti tata letak pada laporan:
+// kolom nomor, Task Name, WBS, Planned Start, Planned Finish, lalu batang waktu.
 interface CustomView {
   id: string
   name: string
-  type: 'gantt' | 'chart'
+  type: 'timeline'
 }
 
-function GanttView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
-  const tasks = groups.flatMap((g) => g.items.map((t) => ({ task: t, group: g })))
-  const dates = tasks
-    .map((t) => new Date(t.task.date).getTime())
-    .filter((n) => !Number.isNaN(n))
-  if (tasks.length === 0) {
-    return <p className="text-sm text-neutral-500 py-10 text-center">Belum ada tugas untuk ditampilkan.</p>
+const DAY_MS = 86_400_000
+const DAY_WIDTH = 32
+
+function startOfDay(value: string | null | undefined): number | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function hexOf(color: string | null | undefined, fallback = '#6c7ff5'): string {
+  return color?.match(/#[0-9a-fA-F]{6}/)?.[0] ?? fallback
+}
+
+function shortDate(ts: number | null): string {
+  if (ts === null) return '—'
+  return new Date(ts).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: '2-digit',
+  })
+}
+
+function GanttChartView({
+  groups,
+  statusList,
+}: {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+}) {
+  type Row = {
+    kind: 'group' | 'task'
+    id: string
+    title: string
+    wbs: string
+    color: string
+    start: number | null
+    end: number | null
+    status?: string
+    assignee?: string | null
+    progress: number
+    done: number
+    total: number
   }
-  const min = Math.min(...dates)
-  const max = Math.max(...dates)
-  const span = Math.max(max - min, 86400000) // minimal 1 hari
+
+  const rows: Row[] = []
+  let grandDone = 0
+  let grandTotal = 0
+
+  groups.forEach((group, gi) => {
+    const groupColor = hexOf(group.color)
+    const taskRows: Row[] = group.items.map((task, ti) => {
+      const start = startOfDay(task.date)
+      // Tanpa tanggal selesai terpisah, tugas dianggap berlangsung satu hari.
+      const end = start
+      const subs = task.subtasks ?? []
+      const done = subs.length
+        ? subs.filter((s) => s.done).length
+        : task.checked
+          ? 1
+          : 0
+      const total = subs.length || 1
+      const statusDef = statusList.find((s) => s.label === task.status)
+      return {
+        kind: 'task',
+        id: task.id,
+        title: task.title,
+        wbs: `${gi + 1}.${ti + 1}`,
+        color: statusDef?.colorCode ?? '#64748b',
+        start,
+        end,
+        status: task.status,
+        assignee: task.personNames?.[0] ?? null,
+        progress: total ? done / total : 0,
+        done,
+        total,
+      }
+    })
+
+    const starts = taskRows.map((t) => t.start).filter((v): v is number => v !== null)
+    const ends = taskRows.map((t) => t.end).filter((v): v is number => v !== null)
+    const gDone = taskRows.reduce((a, t) => a + t.done, 0)
+    const gTotal = taskRows.reduce((a, t) => a + t.total, 0)
+    grandDone += gDone
+    grandTotal += gTotal
+
+    rows.push({
+      kind: 'group',
+      id: group.id,
+      title: group.title,
+      wbs: String(gi + 1),
+      color: groupColor,
+      start: starts.length ? Math.min(...starts) : null,
+      end: ends.length ? Math.max(...ends) : null,
+      progress: gTotal ? gDone / gTotal : 0,
+      done: gDone,
+      total: gTotal,
+    })
+    rows.push(...taskRows)
+  })
+
+  const allTasks = groups.flatMap((g) => g.items)
+  if (allTasks.length === 0) {
+    return (
+      <p className="text-sm text-neutral-500 py-10 text-center">
+        Belum ada tugas untuk ditampilkan.
+      </p>
+    )
+  }
+
+  // Rentang tanggal: dari tanggal paling awal sampai paling akhir, lalu diberi
+  // ruang sebelum dan sesudah agar batang tidak menempel di tepi.
+  const stamps = rows
+    .flatMap((r) => [r.start, r.end])
+    .filter((v): v is number => v !== null)
+  const today = startOfDay(new Date().toISOString().slice(0, 10)) as number
+
+  const rawMin = stamps.length ? Math.min(...stamps, today) : today
+  const rawMax = stamps.length ? Math.max(...stamps, today) : today
+  const first = new Date(rawMin)
+  // Mulai dari hari Senin agar kolom mingguan rapi.
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7) - 2)
+  const last = new Date(rawMax)
+  last.setDate(last.getDate() + 9)
+
+  const totalDays = Math.round((last.getTime() - first.getTime()) / DAY_MS) + 1
+  const days = Array.from(
+    { length: totalDays },
+    (_, i) => new Date(first.getTime() + i * DAY_MS),
+  )
+
+  // Header bulan: setiap bulan menjadi satu sel selebar jumlah harinya.
+  const months: { label: string; span: number }[] = []
+  for (const d of days) {
+    const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    const prev = months[months.length - 1]
+    if (prev && prev.label === label) prev.span += 1
+    else months.push({ label, span: 1 })
+  }
+
+  const offsetOf = (ts: number) => Math.round((ts - first.getTime()) / DAY_MS) * DAY_WIDTH
+  const widthOf = (start: number, end: number) =>
+    Math.max(1, Math.round((end - start) / DAY_MS) + 1) * DAY_WIDTH
+  const todayLeft = offsetOf(today) + DAY_WIDTH / 2
+
+  const total = allTasks.length
+  const overallPct = grandTotal ? Math.round((grandDone / grandTotal) * 100) : 0
+
   return (
-    <div className="space-y-2">
-      {tasks.map(({ task, group }) => {
-        const d = new Date(task.date).getTime()
-        const left = Number.isNaN(d) ? 0 : ((d - min) / span) * 100
-        const sd = statusList.find((s) => s.label === task.status)
-        return (
-          <div key={task.id} className="flex items-center gap-3">
-            <div className="w-52 shrink-0 min-w-0">
-              <p className="text-xs font-medium text-white truncate">{task.title}</p>
-              <p className="text-[10px] text-neutral-500 truncate">{group.title}</p>
-            </div>
-            <div className="relative flex-1 h-7 bg-[#191a1e] rounded-md border border-neutral-800/70">
+    <div className="flex-1 min-h-0 flex flex-col gap-5">
+      {/* ---------- Chart: distribusi jumlah tugas per status ---------- */}
+      <section className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-white">
+            Distribusi Status
+            <span className="ml-2 text-xs font-normal text-neutral-500">
+              {total} tugas
+            </span>
+          </h3>
+          <span className="text-xs text-neutral-400">
+            Progres keseluruhan <span className="font-semibold text-white">{overallPct}%</span>
+          </span>
+        </div>
+
+        <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-800">
+          {statusList.map((s) => {
+            const count = allTasks.filter((t) => t.status === s.label).length
+            const pct = total ? (count / total) * 100 : 0
+            if (count === 0) return null
+            return (
               <div
-                className="absolute top-1/2 -translate-y-1/2 h-4 rounded-full min-w-[42px] flex items-center px-2 text-[10px] font-semibold text-white truncate"
-                style={{ left: `calc(${left}% - 0px)`, backgroundColor: sd?.colorCode || '#3b82f6' }}
-                title={task.date}
+                key={s.id}
+                style={{ width: `${pct}%`, backgroundColor: s.colorCode }}
+                title={`${s.label}: ${count} tugas (${Math.round(pct)}%)`}
+              />
+            )
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {statusList.map((s) => {
+            const count = allTasks.filter((t) => t.status === s.label).length
+            const pct = total ? Math.round((count / total) * 100) : 0
+            return (
+              <span key={s.id} className="inline-flex items-center gap-1.5 text-[11px] text-neutral-300">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
+                  style={{ backgroundColor: s.colorCode }}
+                />
+                {s.label}
+                <span className="text-neutral-500">
+                  {count} ({pct}%)
+                </span>
+              </span>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ---------- Gantt: daftar tugas + batang waktu ---------- */}
+      <section className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-neutral-800/80 bg-[#141517]">
+        {/* Kiri: kolom informasi tugas (tidak ikut digulir horizontal) */}
+        <div className="w-[440px] shrink-0 border-r border-neutral-800/80">
+          <div className="flex h-14 items-end border-b border-neutral-800/80 bg-[#191a1e] text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+            <div className="w-10 shrink-0 px-2 pb-2 text-center">#</div>
+            <div className="min-w-0 flex-1 px-3 pb-2">Task Name</div>
+            <div className="w-14 shrink-0 px-2 pb-2 text-center">WBS</div>
+            <div className="w-[84px] shrink-0 px-2 pb-2 text-center">Start</div>
+            <div className="w-[84px] shrink-0 px-2 pb-2 text-center">Finish</div>
+          </div>
+          <div>
+            {rows.map((r) => (
+              <div
+                key={`l-${r.kind}-${r.id}`}
+                className={`flex h-9 items-center border-b border-neutral-800/60 text-xs ${
+                  r.kind === 'group' ? 'bg-[#1b1c20] font-semibold' : 'hover:bg-white/[0.02]'
+                }`}
               >
-                {task.date}
+                <div className="w-10 shrink-0 px-2 text-center text-[10px] text-neutral-600">
+                  {r.kind === 'group' ? '' : r.wbs}
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+                  {r.kind === 'group' ? (
+                    <>
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: r.color }}
+                      />
+                      <span className="truncate text-neutral-100">{r.title}</span>
+                      <span className="shrink-0 text-[10px] font-normal text-neutral-500">
+                        {Math.round(r.progress * 100)}%
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: r.color }}
+                      />
+                      <span className="truncate text-neutral-300" title={r.title}>
+                        {r.title}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="w-14 shrink-0 px-2 text-center text-[10px] text-neutral-500">
+                  {r.wbs}
+                </div>
+                <div className="w-[84px] shrink-0 px-2 text-center text-[10px] text-neutral-400">
+                  {shortDate(r.start)}
+                </div>
+                <div className="w-[84px] shrink-0 px-2 text-center text-[10px] text-neutral-400">
+                  {shortDate(r.end)}
+                </div>
               </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Kanan: timeline (dapat digulir horizontal) */}
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div style={{ width: totalDays * DAY_WIDTH }}>
+            {/* Header: bulan + hari */}
+            <div className="flex h-7 border-b border-neutral-800/80 bg-[#191a1e]">
+              {months.map((m) => (
+                <div
+                  key={`${m.label}-${m.span}`}
+                  className="shrink-0 border-r border-neutral-800/60 px-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400 flex items-center"
+                  style={{ width: m.span * DAY_WIDTH }}
+                >
+                  <span className="truncate">{m.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex h-7 border-b border-neutral-800/80 bg-[#191a1e]">
+              {days.map((d) => {
+                const weekend = d.getDay() === 0 || d.getDay() === 6
+                const isToday = d.getTime() === today
+                return (
+                  <div
+                    key={d.toISOString()}
+                    className={`shrink-0 border-r border-neutral-800/40 text-center leading-tight ${
+                      weekend ? 'bg-neutral-900/60' : ''
+                    }`}
+                    style={{ width: DAY_WIDTH }}
+                  >
+                    <div className="text-[9px] text-neutral-500">
+                      {d.toLocaleDateString('en-US', { weekday: 'narrow' })}
+                    </div>
+                    <div
+                      className={`text-[10px] ${
+                        isToday ? 'font-bold text-blue-400' : 'text-neutral-400'
+                      }`}
+                    >
+                      {d.getDate()}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Baris timeline */}
+            <div className="relative">
+              {/* Latar kolom (garis hari & akhir pekan) */}
+              <div className="pointer-events-none absolute inset-0 flex">
+                {days.map((d) => {
+                  const weekend = d.getDay() === 0 || d.getDay() === 6
+                  return (
+                    <div
+                      key={`bg-${d.toISOString()}`}
+                      className={`h-full shrink-0 border-r border-neutral-800/30 ${
+                        weekend ? 'bg-neutral-900/40' : ''
+                      }`}
+                      style={{ width: DAY_WIDTH }}
+                    />
+                  )
+                })}
+              </div>
+
+              {/* Garis "hari ini" */}
+              <div
+                className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-blue-500/60"
+                style={{ left: todayLeft }}
+              />
+
+              {rows.map((r) => (
+                <div
+                  key={`t-${r.kind}-${r.id}`}
+                  className={`relative h-9 border-b border-neutral-800/60 ${
+                    r.kind === 'group' ? 'bg-[#1b1c20]/70' : ''
+                  }`}
+                >
+                  {r.start !== null && r.end !== null && (
+                    <>
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 overflow-hidden rounded"
+                        style={{
+                          left: offsetOf(r.start),
+                          width: widthOf(r.start, r.end),
+                          height: r.kind === 'group' ? 8 : 20,
+                          backgroundColor: `${r.color}33`,
+                          border: `1px solid ${r.color}80`,
+                        }}
+                        title={`${r.title} • ${Math.round(r.progress * 100)}%`}
+                      >
+                        <div
+                          className="h-full"
+                          style={{
+                            width: `${Math.round(r.progress * 100)}%`,
+                            backgroundColor: r.color,
+                          }}
+                        />
+                      </div>
+
+                      {/* Label di kanan batang */}
+                      <div
+                        className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap pl-2 text-[10px] text-neutral-300"
+                        style={{
+                          left: offsetOf(r.start) + widthOf(r.start, r.end),
+                        }}
+                      >
+                        {r.kind === 'group' ? (
+                          <>
+                            {r.title}{' '}
+                            <span className="text-neutral-500">
+                              {Math.round(r.progress * 100)}%
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {Math.round(r.progress * 100)}%{' '}
+                            {r.assignee && <span className="text-neutral-500">{r.assignee}</span>}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
-        )
-      })}
+        </div>
+      </section>
     </div>
   )
 }
 
-function ChartView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
-  const allTasks = groups.flatMap((g) => g.items)
-  const total = allTasks.length || 1
+// ======================== KANBAN VIEW ========================
+// Papan Kanban 4 kolom (To Do / In Progress / Review / Done) dengan drag & drop
+// native HTML5. Perpindahan kolom langsung disimpan lewat `onMove` (status_id).
+function KanbanView({
+  groups,
+  statusList,
+  onMove,
+  onOpen,
+  onAdd,
+  canAdd = true,
+}: {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+  onMove: (groupId: string, taskId: string, statusLabel: string) => void
+  onOpen: (groupId: string, taskId: string) => void
+  onAdd: (statusLabel: string) => void
+  /** Hanya Project Manager yang boleh menambah tugas (UC-03). */
+  canAdd?: boolean
+}) {
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [overColumn, setOverColumn] = useState<string | null>(null)
+
+  const tasks = groups.flatMap((g) =>
+    g.items.map((task) => ({ task, groupId: g.id, groupTitle: g.title })),
+  )
+
   return (
-    <div className="space-y-4 max-w-xl">
-      <p className="text-xs text-neutral-400">Distribusi status ({allTasks.length} tugas)</p>
-      {statusList.map((s) => {
-        const count = allTasks.filter((t) => t.status === s.label).length
-        const pct = (count / total) * 100
+    <div className="flex gap-4 overflow-x-auto pb-2">
+      {statusList.map((status) => {
+        const items = tasks.filter((t) => t.task.status === status.label)
+        const isOver = overColumn === status.label
         return (
-          <div key={s.id} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-300">{s.label}</span>
-              <span className="text-neutral-500">
-                {count} ({Math.round(pct)}%)
-              </span>
-            </div>
-            <div className="h-6 bg-[#191a1e] rounded-md overflow-hidden border border-neutral-800/70">
-              <div
-                className="h-full transition-all duration-300"
-                style={{ width: `${pct}%`, backgroundColor: s.colorCode }}
+          <div
+            key={status.id}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setOverColumn(status.label)
+            }}
+            onDragLeave={() => setOverColumn((c) => (c === status.label ? null : c))}
+            onDrop={(e) => {
+              e.preventDefault()
+              const id = e.dataTransfer.getData('text/plain') || draggingId
+              const found = tasks.find((t) => t.task.id === id)
+              if (found) onMove(found.groupId, found.task.id, status.label)
+              setDraggingId(null)
+              setOverColumn(null)
+            }}
+            className={`w-72 shrink-0 rounded-xl border bg-[#191a1e] flex flex-col transition-colors ${
+              isOver ? 'border-blue-500/70 bg-[#1c2130]' : 'border-neutral-800/80'
+            }`}
+          >
+            <header className="flex items-center gap-2 px-3 py-2.5 border-b border-neutral-800/80">
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: status.colorCode }}
               />
+              <span className="text-xs font-semibold text-neutral-200">{status.label}</span>
+              <span className="ml-auto text-[11px] text-neutral-500">{items.length}</span>
+            </header>
+
+            <div className="flex-1 p-2 space-y-2 min-h-[140px]">
+              {items.map(({ task, groupId, groupTitle }) => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', task.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDraggingId(task.id)
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null)
+                    setOverColumn(null)
+                  }}
+                  onClick={() => onOpen(groupId, task.id)}
+                  className={`rounded-lg border border-neutral-800 bg-[#141517] p-3 cursor-grab active:cursor-grabbing hover:border-blue-500/40 transition ${
+                    draggingId === task.id ? 'opacity-50' : ''
+                  }`}
+                >
+                  <p className="text-xs font-medium text-white leading-snug break-words">
+                    {task.title}
+                  </p>
+                  <p className="mt-1 text-[10px] text-neutral-500 truncate">{groupTitle}</p>
+                  <div className="mt-2 flex items-center gap-2 text-[10px] text-neutral-400">
+                    {task.priority && (
+                      <Flag
+                        size={11}
+                        fill="currentColor"
+                        className={PRIORITY_FLAG[task.priority] ?? 'text-neutral-600'}
+                      />
+                    )}
+                    {task.date && (
+                      <span className="flex items-center gap-1">
+                        <CalendarDays size={11} />
+                        {task.date}
+                      </span>
+                    )}
+                    {task.personNames?.[0] && (
+                      <PersonAvatar
+                        name={task.personNames[0]}
+                        avatar={task.personAvatars?.[0]}
+                        size={20}
+                        className="ml-auto border border-neutral-700"
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {canAdd && (
+                <button
+                  type="button"
+                  onClick={() => onAdd(status.label)}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700/80 py-2 text-[11px] text-neutral-500 hover:text-white hover:border-neutral-600 transition cursor-pointer"
+                >
+                  <Plus size={12} strokeWidth={2.5} />
+                  Add task
+                </button>
+              )}
             </div>
           </div>
         )
@@ -559,7 +1121,9 @@ interface CalendarViewProps {
 
 function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTask }: CalendarViewProps) {
   const today = new Date()
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 2, 1)) // March 2026
+  const [currentMonth, setCurrentMonth] = useState(
+    () => new Date(today.getFullYear(), today.getMonth(), 1),
+  )
   const [hoveredEvent, setHoveredEvent] = useState<{ task: TaskItem; groupTitle: string; rect?: DOMRect } | null>(null)
   const [clickedDay, setClickedDay] = useState<number | null>(null)
 
@@ -622,11 +1186,10 @@ function CalendarView({ groups, statusList, members, getContrastTextFn, onAddTas
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1))
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1))
-  const goToday = () => setCurrentMonth(new Date(2026, 2, 1))
+  const goToday = () => setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1))
 
   const isToday = (day: number) =>
-    (day === today.getDate() && month === today.getMonth() && year === today.getFullYear()) ||
-    (year === 2026 && month === 2 && day === 17)
+    day === today.getDate() && month === today.getMonth() && year === today.getFullYear()
 
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -1163,21 +1726,50 @@ export default function ProjectDetailPage() {
   const cardTitle = rawCard.charAt(0).toUpperCase() + rawCard.slice(1).replace(/-/g, ' ')
 
   const [activeTab, setActiveTab] = useState<string>('Main Table')
-  const [groups, setGroups] = useState<TaskGroup[]>(initialGroups)
+  const [groups, setGroups] = useState<TaskGroup[]>([])
   const [activeNav, setActiveNav] = useState('Home')
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([
-    { id: 'seed-1', name: '2026 INVISUAL', owner_id: null },
-    { id: 'seed-2', name: '2025 INVISUAL', owner_id: null },
-    { id: 'seed-3', name: '2024 INVISUAL', owner_id: null },
-  ])
-  const [selectedWorkspace, setSelectedWorkspace] = useState('2026 INVISUAL')
+  // Favorit: daftar project yang dibintangi pengguna. Sebelumnya tombol
+  // "Favorites" di sidebar board langsung berpindah ke Home, sehingga terasa
+  // seperti salah navigasi. Sekarang daftarnya dibuka di tempat (collapsible),
+  // sama seperti di Home.
+  const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
+  const [showFavorites, setShowFavorites] = useState(true)
+  const [favoriteBusy, setFavoriteBusy] = useState(false)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [selectedWorkspace, setSelectedWorkspace] = useState('')
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false)
   const [workspaceSearch, setWorkspaceSearch] = useState('')
   const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false)
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
-  const [members, setMembers] = useState<Member[]>(initialMembers)
-  const [customViews, setCustomViews] = useState<CustomView[]>([])
-  const [showAddViewMenu, setShowAddViewMenu] = useState(false)
+  // Pengelolaan workspace (buat baru) hanya untuk Project Manager.
+  const [canManageWorkspace, setCanManageWorkspace] = useState(false)
+  // Dropdown workspace di sidebar dirender lewat portal agar tidak terpotong
+  // oleh `overflow-y-auto` milik sidebar (sidebar punya scroll sendiri).
+  const workspaceTriggerRef = useRef<HTMLButtonElement>(null)
+  const [workspaceAnchor, setWorkspaceAnchor] = useState<{ top: number; left: number } | null>(null)
+
+  // Dropdown berposisi fixed; tutup saat sidebar/halaman di-scroll agar tidak
+  // melayang di posisi yang salah.
+  useEffect(() => {
+    if (!showWorkspaceMenu) return
+    const close = () => {
+      setShowWorkspaceMenu(false)
+      setWorkspaceAnchor(null)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [showWorkspaceMenu])
+  const [members, setMembers] = useState<Member[]>([])
+  // Gantt dan Chart digabung menjadi satu tab, sesuai Tabel 3.5 skenario 12
+  // ("Pengguna membuka tab Gantt dan Chart"). Tab ini tetap, tidak perlu
+  // ditambahkan manual.
+  const [customViews] = useState<CustomView[]>([
+    { id: 'view-timeline', name: 'Gantt & Chart', type: 'timeline' },
+  ])
 
   // ======================== DYNAMIC STATUS LIST ========================
   const [statusList, setStatusList] = useState<StatusDef[]>(initialStatusList)
@@ -1185,14 +1777,41 @@ export default function ProjectDetailPage() {
   // ======================== SUPABASE LOAD ========================
   const [projectId, setProjectId] = useState<string | null>(null)
   // Pengguna yang sedang login, dipakai untuk komentar & lampiran.
-  const [me, setMe] = useState(CURRENT_USER)
+  const [me, setMe] = useState({ name: '', avatar: '' })
+  const [loadingBoard, setLoadingBoard] = useState(true)
+  const [boardError, setBoardError] = useState('')
+  // Doc baru boleh diautopsave setelah isi aslinya selesai dimuat.
+  const [docLoaded, setDocLoaded] = useState(false)
+  // Nama & scope asli project (URL memakai slug, jadi perlu disimpan terpisah).
+  const [projectMeta, setProjectMeta] = useState<{ name: string; scope: string | null } | null>(
+    null,
+  )
+  // Naikkan untuk memuat ulang board setelah template diterapkan.
+  const [reloadTick, setReloadTick] = useState(0)
+  const [fillingTemplate, setFillingTemplate] = useState(false)
+  // Kolom meta subtask (assignee/status/tenggat/prioritas) ada atau belum di DB.
+  const [subtaskColumns, setSubtaskColumns] = useState<Set<string> | null>(null)
 
-  // Muat board dari Supabase. Kalau project belum ada di DB, data contoh tetap tampil.
+  // Peran pengguna pada project ini (F-13). Menentukan tombol mana yang tampil.
+  const permissions = useProjectPermissions(projectId)
+  const can = permissions
+
+  // Muat board dari Supabase. Kalau project tidak ditemukan, tampilkan pesan —
+  // bukan data contoh, supaya tidak ada informasi palsu di layar.
   useEffect(() => {
     let alive = true
+    setLoadingBoard(true)
+    setBoardError('')
+    setDocLoaded(false)
     ;(async () => {
       const project = await findProject(rawScope, rawCard)
-      if (!project) return
+      if (!alive) return
+      if (!project) {
+        setBoardError('Project tidak ditemukan. Mungkin sudah dihapus atau tautannya salah.')
+        setLoadingBoard(false)
+        return
+      }
+      setProjectMeta({ name: project.name, scope: project.scope })
       recordRecentProject({
         scope: rawScope,
         card: rawCard,
@@ -1202,15 +1821,29 @@ export default function ProjectDetailPage() {
       const board = await loadBoard(project.id)
       if (!alive) return
 
-      listWorkspaces()
+      ensureDefaultWorkspace()
+        .then(() => listWorkspaces())
         .then((rows) => {
-          if (alive && rows.length) setWorkspaces(rows)
+          if (!alive) return
+          setWorkspaces(rows)
+          setSelectedWorkspace((current) =>
+            current && rows.some((w) => w.name === current) ? current : (rows[0]?.name ?? ''),
+          )
         })
         .catch(() => {})
-
       getSessionProfile()
         .then((p) => {
-          if (alive && p) setMe({ name: p.name, avatar: p.avatar_url || CURRENT_USER.avatar })
+          if (alive && p) setMe({ name: p.name, avatar: p.avatar_url ?? '' })
+        })
+        .catch(() => {})
+      canCreateProject()
+        .then((allowed) => {
+          if (alive) setCanManageWorkspace(allowed)
+        })
+        .catch(() => {})
+      listFavoriteProjects()
+        .then((rows) => {
+          if (alive) setFavorites(rows)
         })
         .catch(() => {})
 
@@ -1226,7 +1859,8 @@ export default function ProjectDetailPage() {
             id: m.id,
             name: m.name,
             role: m.role,
-            avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+            // String kosong = belum punya foto -> PersonAvatar menampilkan inisial.
+            avatar: m.avatar_url || '',
           })),
         )
       }
@@ -1242,6 +1876,8 @@ export default function ProjectDetailPage() {
               .filter((t) => t.group_id === g.id)
               .map((t) => {
                 const assignee = board.members.find((m) => m.id === t.assignee_id)
+                const statusLabel =
+                  board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do'
                 return {
                   id: t.id,
                   title: t.title,
@@ -1249,9 +1885,12 @@ export default function ProjectDetailPage() {
                   description: t.description ?? undefined,
                   personAvatars: assignee?.avatar_url ? [assignee.avatar_url] : [],
                   personNames: assignee ? [assignee.name] : [],
-                  status: board.statuses.find((s) => s.id === t.status_id)?.label ?? 'To Do',
+                  status: statusLabel,
                   date: fromISODate(t.due_date),
-                  checked: t.checked,
+                  // Status "Done" berarti tugas selesai, walau kotak centangnya
+                  // belum ditandai (data lama). Progres di Home memakai aturan
+                  // yang sama sehingga angkanya konsisten.
+                  checked: t.checked || statusLabel.trim().toLowerCase() === 'done',
                   priority: t.priority ?? null,
                   expanded: false,
                   subtasks: board.subtasks
@@ -1268,7 +1907,16 @@ export default function ProjectDetailPage() {
                     })),
                   attachments: board.attachments
                     .filter((a) => a.task_id === t.id)
-                    .map((a) => ({ id: a.id, name: a.name })),
+                    .map((a) => {
+                      const link = a.url ?? linkUrlFromPath(a.storage_path)
+                      return {
+                        id: a.id,
+                        name: a.name,
+                        // Tautan tidak punya berkas di Storage, jadi storagePath dikosongkan.
+                        storagePath: link ? null : (a.storage_path ?? null),
+                        url: link,
+                      }
+                    }),
                   comments: board.comments
                     .filter((c) => c.task_id === t.id && !c.parent_id)
                     .map((c) => ({
@@ -1293,27 +1941,83 @@ export default function ProjectDetailPage() {
           })),
         )
       }
-      if (board.docBlocks.length) {
-        // Pastikan tiap blok punya id unik (data lama/seed bisa tanpa id).
-        const seen = new Set<string>()
-        const loaded = (board.docBlocks as DocBlock[]).map((b, i) => {
-          const id = b.id && !seen.has(b.id) ? b.id : `block-${Date.now()}-${i}`
-          seen.add(id)
-          return { ...b, id }
-        })
-        setDocBlocks(loaded)
-        setHistory([loaded])
-        setHistoryIndex(0)
-        setActiveBlockIndex(0)
-      }
-    })().catch(() => {})
+      // Pastikan tiap blok punya id unik (data lama/seed bisa tanpa id).
+      const seen = new Set<string>()
+      const loaded = (board.docBlocks as DocBlock[]).map((b, i) => {
+        const id = b.id && !seen.has(b.id) ? b.id : `block-${Date.now()}-${i}`
+        seen.add(id)
+        return { ...b, id }
+      })
+      setDocBlocks(loaded)
+      setHistory([loaded])
+      setHistoryIndex(0)
+      setActiveBlockIndex(0)
+      setDocLoaded(true)
+    })()
+      .catch((err) => {
+        if (alive) setBoardError(err instanceof Error ? err.message : 'Gagal memuat board.')
+      })
+      .finally(() => {
+        if (alive) setLoadingBoard(false)
+      })
     return () => {
       alive = false
     }
-  }, [rawScope, rawCard])
+  }, [rawScope, rawCard, reloadTick])
+
+  // Deteksi sekali apakah kolom meta subtask sudah dimigrasi di Supabase.
+  useEffect(() => {
+    let alive = true
+    getSubtaskColumns().then((cols) => {
+      if (alive) setSubtaskColumns(cols)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // Terjemahkan label status UI -> id kolom `statuses` di DB.
-  const statusIdByLabel = (label: string) => statusList.find((s) => s.label === label)?.id ?? null
+  // Id fallback ('todo', 'in-progress', ...) bukan UUID, jadi tidak boleh dikirim
+  // ke database — kembalikan null supaya update tetap valid.
+  const statusIdByLabel = (label: string) => {
+    const id = statusList.find((s) => s.label === label)?.id ?? null
+    return id && /^[0-9a-f]{8}-/i.test(id) ? id : null
+  }
+
+  // Kegagalan simpan tidak boleh ditelan diam-diam: tampilkan alasannya.
+  const notifySaveError = (err: unknown) => {
+    setNotice(
+      `Gagal menyimpan perubahan: ${
+        err instanceof Error ? err.message : 'penyimpanan tidak tersedia'
+      }`,
+    )
+  }
+  // Bintangi / lepas bintang project yang sedang dibuka. Perubahan disimpan ke
+  // `project_members.favorite` sehingga ikut terlihat di Home dan sidebar.
+  const isFavorite = favorites.some((f) => f.id === projectId)
+  const handleToggleFavorite = async () => {
+    if (!projectId || favoriteBusy) return
+    const next = !isFavorite
+    const snapshot = favorites
+    setFavoriteBusy(true)
+    // Optimistis: ubah tampilan dulu, kembalikan bila gagal.
+    setFavorites((prev) =>
+      next
+        ? [...prev, { id: projectId, name: projectMeta?.name ?? cardTitle, scope: projectMeta?.scope ?? scopeTitle }]
+        : prev.filter((f) => f.id !== projectId),
+    )
+    try {
+      await setProjectFavorite(projectId, next)
+    } catch (err) {
+      setFavorites(snapshot)
+      setNotice(
+        `Gagal menyimpan favorit: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setFavoriteBusy(false)
+    }
+  }
+
   const refreshMembers = async () => {
     if (!projectId) return
     const board = await loadBoard(projectId)
@@ -1322,9 +2026,27 @@ export default function ProjectDetailPage() {
         id: m.id,
         name: m.name,
         role: m.role,
-        avatar: m.avatar_url || '/images/clients/SUNDDAE.jpg',
+        avatar: m.avatar_url || '',
       })),
     )
+  }
+
+  // Isi board yang masih kosong dengan template contoh (grup, tugas, subtask,
+  // komentar, dan isi tab Doc) supaya terlihat seperti project yang sedang jalan.
+  const handleFillTemplate = async () => {
+    if (!projectId || fillingTemplate) return
+    setFillingTemplate(true)
+    setBoardError('')
+    try {
+      await applyProjectTemplate(projectId, pickTemplate(projectMeta?.name, projectMeta?.scope))
+      setReloadTick((t) => t + 1)
+    } catch (err) {
+      setNotice(
+        `Gagal mengisi template: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setFillingTemplate(false)
+    }
   }
 
   // Manage Labels Modal
@@ -1344,51 +2066,295 @@ export default function ProjectDetailPage() {
   const [showSortMenu, setShowSortMenu] = useState(false)
   const [showMoreTableMenu, setShowMoreTableMenu] = useState(false)
 
-  // Floating Status Picker state (Which row opened it)
-  const [activeStatusPicker, setActiveStatusPicker] = useState<{
-    groupId: string
-    taskId: string
-  } | null>(null)
+  // Anchor popover sel: posisi + ukuran elemen pemicu, plus elemennya sendiri
+  // supaya posisi bisa dihitung ulang saat tabel digulir.
+  type CellAnchor = {
+    top: number
+    left: number
+    width: number
+    height: number
+    el: HTMLElement | null
+  }
+  const rectToAnchor = (el: HTMLElement): CellAnchor => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, left: r.left, width: r.width, height: r.height, el }
+  }
 
-  // Row Assignee Picker state
-  const [activeAssigneePicker, setActiveAssigneePicker] = useState<{
-    groupId: string
-    taskId: string
-  } | null>(null)
+  // Floating Status Picker state (anchor = posisi sel, untuk popover portal)
+  const [activeStatusPicker, setActiveStatusPicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
 
-  // Row Date Picker state
-  const [activeDatePicker, setActiveDatePicker] = useState<{
-    groupId: string
-    taskId: string
-  } | null>(null)
+  // Row Assignee Picker state (anchor = posisi tombol, untuk menu portal)
+  const [activeAssigneePicker, setActiveAssigneePicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
+
+  // Row Date Picker state (anchor = posisi tombol tanggal)
+  const [activeDatePicker, setActiveDatePicker] = useState<
+    ({ groupId: string; taskId: string } & CellAnchor) | null
+  >(null)
 
   // Inline "add subtask" di Main Table (key: `${groupId}:${taskId}`)
   const [openSubtaskFor, setOpenSubtaskFor] = useState<string | null>(null)
   const [subtaskDrafts, setSubtaskDrafts] = useState<Record<string, string>>({})
   // Subtask yang sedang dibuka (menampilkan sub-subtask-nya).
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
-  // Popover sel subtask (assignee/status/date/priority), key: `${subId}:${field}`.
-  const [subCellMenu, setSubCellMenu] = useState<string | null>(null)
+  // Popover sel subtask (assignee/status/date), dengan posisi sel sebagai anchor.
+  const [subCellMenu, setSubCellMenu] = useState<
+    ({ key: string } & CellAnchor) | null
+  >(null)
+
+  // Popover kolom Files & Notes di Main Table (klik sel = kelola isinya).
+  const [cellPanel, setCellPanel] = useState<
+    ({ groupId: string; taskId: string; kind: 'files' | 'notes' } & CellAnchor) | null
+  >(null)
+  // Form tambah tautan (Drive) pada popover Files.
+  const [linkName, setLinkName] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  // Unggah berkas dari popover Files.
+  const quickFileRef = useRef<HTMLInputElement>(null)
+  const [filePickTask, setFilePickTask] = useState<{ groupId: string; taskId: string } | null>(null)
+  const [fileBusy, setFileBusy] = useState(false)
+  // Draf catatan pada popover Notes.
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteBusy, setNoteBusy] = useState(false)
+  const [noteError, setNoteError] = useState('')
   // Notifikasi ringkas kalau penyimpanan ke Supabase gagal.
   const [notice, setNotice] = useState<string | null>(null)
+
+  // Hanya satu popover sel yang boleh terbuka.
+  const closeAllCellPickers = () => {
+    setActiveStatusPicker(null)
+    setActiveDatePicker(null)
+    setSubCellMenu(null)
+    setActiveAssigneePicker(null)
+    setCellPanel(null)
+  }
+
+  // Popover sel berposisi `fixed`. Saat tabel digulir, posisinya dihitung ulang
+  // mengikuti elemen pemicu — bukan langsung ditutup, karena `scroll-behavior:
+  // smooth` bisa memicu event scroll tepat setelah popover dibuka.
+  useEffect(() => {
+    const anyOpen =
+      activeStatusPicker || activeDatePicker || subCellMenu || activeAssigneePicker || cellPanel
+    if (!anyOpen) return
+
+    let raf = 0
+    const sync = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const resync = <T extends CellAnchor>(cur: T | null, set: (v: T | null) => void) => {
+          if (!cur) return
+          if (!cur.el || !document.body.contains(cur.el)) {
+            set(null)
+            return
+          }
+          const r = cur.el.getBoundingClientRect()
+          if (r.top === cur.top && r.left === cur.left && r.width === cur.width) return
+          set({ ...cur, top: r.top, left: r.left, width: r.width, height: r.height })
+        }
+        resync(activeStatusPicker, setActiveStatusPicker)
+        resync(activeDatePicker, setActiveDatePicker)
+        resync(subCellMenu, setSubCellMenu)
+        resync(activeAssigneePicker, setActiveAssigneePicker)
+        resync(cellPanel, setCellPanel)
+      })
+    }
+
+    window.addEventListener('scroll', sync, true)
+    window.addEventListener('resize', sync)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', sync, true)
+      window.removeEventListener('resize', sync)
+    }
+  }, [activeStatusPicker, activeDatePicker, subCellMenu, activeAssigneePicker, cellPanel])
+
+  // ======================== KOLOM FILES & NOTES (Main Table) ========================
+
+  // Membuka popover sel Files / Notes (posisi mengikuti sel).
+  const openCellPanel = (
+    groupId: string,
+    taskId: string,
+    kind: 'files' | 'notes',
+    el: HTMLElement,
+  ) => {
+    // Klik pada sel yang sama = tutup.
+    if (cellPanel && cellPanel.taskId === taskId && cellPanel.kind === kind) {
+      setCellPanel(null)
+      return
+    }
+    closeAllCellPickers()
+    setLinkError('')
+    setLinkName('')
+    setLinkUrl('')
+    if (kind === 'notes') {
+      const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+      setNoteDraft(task?.description ?? '')
+    }
+    setNoteError('')
+    setCellPanel({ groupId, taskId, kind, ...rectToAnchor(el) })
+  }
+
+  const currentAttachments = (groupId: string, taskId: string) =>
+    groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)?.attachments ?? []
+
+  // Tambah lampiran berupa tautan (Google Drive dan sejenisnya).
+  const handleAddLink = async () => {
+    if (!cellPanel || cellPanel.kind !== 'files' || linkBusy) return
+    const raw = linkUrl.trim()
+    if (!raw) {
+      setLinkError('Tempel tautan terlebih dahulu.')
+      return
+    }
+    if (!normalizeLink(raw)) {
+      setLinkError('Tautan tidak valid. Contoh: https://drive.google.com/file/d/...')
+      return
+    }
+    const { groupId, taskId } = cellPanel
+    const before = currentAttachments(groupId, taskId)
+    setLinkBusy(true)
+    setLinkError('')
+    try {
+      const row = await addAttachmentLink(taskId, linkName, raw)
+      updateTask(groupId, taskId, {
+        attachments: [
+          ...before,
+          {
+            id: row.id,
+            name: row.name,
+            storagePath: row.storage_path ?? null,
+            url: row.url ?? normalizeLink(raw),
+            owner: me.name,
+            avatar: me.avatar,
+          },
+        ],
+      })
+      setLinkName('')
+      setLinkUrl('')
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal menambahkan tautan.')
+    } finally {
+      setLinkBusy(false)
+    }
+  }
+
+  // Unggah berkas dari popover Files (input file tersembunyi).
+  const handleQuickFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const target = filePickTask
+    setFilePickTask(null)
+    if (!file || !target) return
+    const before = currentAttachments(target.groupId, target.taskId)
+    setFileBusy(true)
+    setLinkError('')
+    try {
+      const row = await uploadAttachment(target.taskId, file)
+      updateTask(target.groupId, target.taskId, {
+        attachments: [
+          ...before,
+          {
+            id: row.id,
+            name: row.name,
+            storagePath: row.storage_path ?? null,
+            url: null,
+            owner: me.name,
+            avatar: me.avatar,
+          },
+        ],
+      })
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal mengunggah berkas.')
+    } finally {
+      setFileBusy(false)
+    }
+  }
+
+  // Buka lampiran: tautan langsung dibuka, berkas memakai signed URL.
+  const handleOpenAttachment = async (att: NonNullable<TaskItem['attachments']>[number]) => {
+    if (att.url) {
+      window.open(att.url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (!att.storagePath) {
+      setLinkError('Lampiran ini tidak punya berkas maupun tautan.')
+      return
+    }
+    const url = await getAttachmentUrl(att.storagePath)
+    if (!url) {
+      setLinkError(MISSING_BUCKET_MESSAGE)
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleRemoveAttachment = async (
+    groupId: string,
+    taskId: string,
+    att: NonNullable<TaskItem['attachments']>[number],
+  ) => {
+    const before = currentAttachments(groupId, taskId)
+    try {
+      await deleteAttachmentWithFile(att.id, att.storagePath ?? null)
+      updateTask(groupId, taskId, {
+        attachments: before.filter((a) => a.id !== att.id),
+      })
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Gagal menghapus lampiran.')
+    }
+  }
+
+  // Simpan catatan tugas (disimpan di kolom `tasks.description`, sama dengan
+  // isi kolom Description pada panel detail tugas).
+  const handleSaveNote = async () => {
+    if (!cellPanel || cellPanel.kind !== 'notes' || noteBusy) return
+    const { groupId, taskId } = cellPanel
+    const text = noteDraft.trim()
+    setNoteBusy(true)
+    setNoteError('')
+    try {
+      await updateTaskRow(taskId, { description: text || null })
+      updateTask(groupId, taskId, { description: text || undefined })
+      setCellPanel(null)
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : 'Gagal menyimpan catatan.')
+    } finally {
+      setNoteBusy(false)
+    }
+  }
 
   // New Item Dialog modal
   const [showNewItemModal, setShowNewItemModal] = useState(false)
   const [newTaskTitle, setNewTaskTitle] = useState('New Item')
-  const [newTaskGroup, setNewTaskGroup] = useState<string>('group-1')
+  const [newTaskGroup, setNewTaskGroup] = useState<string>('')
   const [newTaskAssignee, setNewTaskAssignee] = useState<string>('')
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>('')
-  const [newTaskDate, setNewTaskDate] = useState<string>('Feb 4, 12:00 AM')
+  const [newTaskDate, setNewTaskDate] = useState<string>('')
   const [newTaskPriority, setNewTaskPriority] = useState<string>('medium')
+
+  // Header (notifikasi & menu pengguna)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+
+  // Modal pengganti prompt()/confirm() bawaan browser agar konsisten dengan UI.
+  const [showAddGroupModal, setShowAddGroupModal] = useState(false)
+  // Warna grup dipilih Project Manager (Tabel 3.5 skenario 11), bukan otomatis.
+  const [newGroupColor, setNewGroupColor] = useState('#6c7ff5')
+  const [newGroupName, setNewGroupName] = useState('')
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
 
   // Modal Popover dropdown states (matching slides)
   const [showGroupDropdown, setShowGroupDropdown] = useState(false)
   const [showPersonDropdown, setShowPersonDropdown] = useState(false)
   const [showStatusDropdown, setShowStatusDropdown] = useState(false)
   const [showDateDropdown, setShowDateDropdown] = useState(false)
-  const [datePickerMonth, setDatePickerMonth] = useState(2) // March
-  const [datePickerYear, setDatePickerYear] = useState(2026)
-  const [datePickerDay, setDatePickerDay] = useState(17)
+  const [datePickerMonth, setDatePickerMonth] = useState(() => new Date().getMonth())
+  const [datePickerYear, setDatePickerYear] = useState(() => new Date().getFullYear())
+  const [datePickerDay, setDatePickerDay] = useState(() => new Date().getDate())
   const [datePickerTime, setDatePickerTime] = useState('12:00 AM')
   const [searchGroupQuery, setSearchGroupQuery] = useState('')
   const [searchPersonQuery, setSearchPersonQuery] = useState('')
@@ -1398,13 +2364,34 @@ export default function ProjectDetailPage() {
 
   // Add column modal
   const [showAddColumnMenu, setShowAddColumnMenu] = useState(false)
-  // Kolom tambahan. "Priority" tampil default (sesuai desain) dan bisa diubah per baris.
-  const [extraColumns, setExtraColumns] = useState<string[]>(['Priority'])
+  // Kolom tambahan di Main Table. Files & Notes tampil default supaya berkas/
+  // tautan dan catatan bisa langsung diisi dari tabel.
+  const [extraColumns, setExtraColumns] = useState<string[]>(['Priority', 'Files', 'Notes'])
 
+  // Kolom yang pernah ditambahkan (Files, Notes, dst) dipulihkan per project.
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      const raw = localStorage.getItem(`invisual.table-columns.${projectId}`)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((c): c is string => typeof c === 'string')
+        if (valid.length) setExtraColumns(valid)
+      }
+    } catch {
+      // Data lokal rusak / tidak tersedia: pakai kolom bawaan.
+    }
+  }, [projectId])
   // ======================== TASK DETAIL MODAL (klik task) ========================
   const [detailTask, setDetailTask] = useState<{ groupId: string; taskId: string } | null>(null)
   const [detailStatusOpen, setDetailStatusOpen] = useState(false)
-  const [detailPersonOpen, setDetailPersonOpen] = useState(false)
+  const [detailPersonAnchor, setDetailPersonAnchor] = useState<{
+    top: number
+    left: number
+    width: number
+    height: number
+  } | null>(null)
   const [detailDateOpen, setDetailDateOpen] = useState(false)
   const [detailMaximized, setDetailMaximized] = useState(false)
   const [detailSubtaskInput, setDetailSubtaskInput] = useState('')
@@ -1413,13 +2400,14 @@ export default function ProjectDetailPage() {
   const [detailShowAttach, setDetailShowAttach] = useState(true)
   const [detailReplyTo, setDetailReplyTo] = useState<string | null>(null)
   const [detailReplyText, setDetailReplyText] = useState('')
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [commentSearch, setCommentSearch] = useState('')
   const [showCommentSearch, setShowCommentSearch] = useState(false)
 
   const openTaskDetail = (groupId: string, taskId: string) => {
     setDetailTask({ groupId, taskId })
     setDetailStatusOpen(false)
-    setDetailPersonOpen(false)
+    setDetailPersonAnchor(null)
     setDetailDateOpen(false)
     setDetailMaximized(false)
     setDetailSubtaskInput('')
@@ -1429,27 +2417,41 @@ export default function ProjectDetailPage() {
   const closeTaskDetail = () => {
     setDetailTask(null)
     setDetailStatusOpen(false)
-    setDetailPersonOpen(false)
+    setDetailPersonAnchor(null)
     setDetailDateOpen(false)
   }
 
   // ======================== DOC TAB STATE & HISTORY ========================
-  const [docBlocks, setDocBlocks] = useState<DocBlock[]>(initialDocBlocks)
-  const [history, setHistory] = useState<DocBlock[][]>([initialDocBlocks])
+  const [docBlocks, setDocBlocks] = useState<DocBlock[]>([])
+  const [history, setHistory] = useState<DocBlock[][]>([[]])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [activeBlockIndex, setActiveBlockIndex] = useState(0)
+  // Input file tersembunyi untuk blok gambar & berkas pada tab Doc.
+  const docImageInputRef = useRef<HTMLInputElement>(null)
+  const docFileInputRef = useRef<HTMLInputElement>(null)
+  const [imageTargetBlock, setImageTargetBlock] = useState<string | null>(null)
+  const [docFileTarget, setDocFileTarget] = useState<string | null>(null)
+  const [docUploading, setDocUploading] = useState(false)
+  // Cache URL bertanda tangan untuk berkas Doc (path Storage -> URL).
+  const [docFileUrls, setDocFileUrls] = useState<Record<string, string>>({})
   // Seleksi teks di dalam blok (untuk mengubah HANYA teks yang di-blok).
   const selectionRef = useRef<{ index: number; start: number; end: number } | null>(null)
-  const [lastUpdated, setLastUpdated] = useState('Apr 13, 2026, 22:43')
+  const [lastUpdated, setLastUpdated] = useState('')
 
   // Simpan isi tab Doc ke Supabase (debounce 800ms).
+  // Jangan jalan sebelum dokumen asli selesai dimuat, kalau tidak isi kosong
+  // akan menimpa dokumen yang sudah tersimpan.
   useEffect(() => {
-    if (!projectId) return
+    if (!projectId || !docLoaded) return
     const t = setTimeout(() => {
-      saveDoc(projectId, docBlocks).catch(() => {})
+      saveDoc(projectId, docBlocks).catch((err) => {
+        setNotice(
+          `Gagal menyimpan dokumen: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+      })
     }, 800)
     return () => clearTimeout(t)
-  }, [projectId, docBlocks])
+  }, [projectId, docBlocks, docLoaded])
 
   // Doc toolbars dropdown states
   const [showAddMenu, setShowAddMenu] = useState(false)
@@ -1482,12 +2484,12 @@ export default function ProjectDetailPage() {
   }
 
   const handleDeleteLabel = (id: string) => {
-    if (projectId) deleteStatus(id).catch(() => {})
+    if (projectId) deleteStatus(id).catch(notifySaveError)
     setStatusList((prev) => prev.filter((s) => s.id !== id))
   }
 
   const handleUpdateLabelColor = (id: string, colorCode: string) => {
-    if (projectId) updateStatusColor(id, colorCode).catch(() => {})
+    if (projectId) updateStatusColor(id, colorCode).catch(notifySaveError)
     setStatusList((prev) => prev.map((s) => (s.id === id ? { ...s, colorCode } : s)))
   }
 
@@ -1495,15 +2497,24 @@ export default function ProjectDetailPage() {
 
   // Select a status from the ordered dropdown list
   const setTaskStatus = (groupId: string, taskId: string, newStatus: TaskStatus) => {
+    // Status "Done" sekaligus menandai tugas selesai, dan sebaliknya. Tanpa ini
+    // `checked` dan status bisa berbeda sehingga progres project tidak berubah
+    // walaupun semua tugas sudah dipindahkan ke Done.
+    const isDone = newStatus.trim().toLowerCase() === 'done'
     if (projectId) {
-      updateTaskRow(taskId, { status_id: statusIdByLabel(newStatus) }).catch(() => {})
+      updateTaskRow(taskId, {
+        status_id: statusIdByLabel(newStatus),
+        checked: isDone,
+      }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
         return {
           ...g,
-          items: g.items.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
+          items: g.items.map((t) =>
+            t.id === taskId ? { ...t, status: newStatus, checked: isDone } : t,
+          ),
         }
       })
     )
@@ -1512,46 +2523,67 @@ export default function ProjectDetailPage() {
 
   // ======================== TASK LIST HANDLERS ========================
 
-  // Toggle assignee membership on a task
+  // Menetapkan penanggung jawab tugas.
+  // Tabel `tasks` hanya punya satu kolom `assignee_id`, jadi penugasan bersifat
+  // tunggal: memilih anggota lain MENGGANTIKAN yang lama, dan memilih anggota
+  // yang sama akan melepas penugasan. Sebelumnya klik anggota yang sudah
+  // ditugaskan tidak mengubah apa pun (anggota selalu ditambahkan kembali).
+  //
+  // Hanya Project Manager yang boleh menetapkan penanggung jawab (F-13):
+  // pembagian tugas adalah wewenang PM, Member hanya melihat.
   const toggleTaskAssignee = (groupId: string, taskId: string, member: (typeof members)[0]) => {
+    if (!can.assignTasks) {
+      setNotice('Hanya Project Manager yang dapat mengubah penanggung jawab tugas.')
+      return
+    }
+    const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
+    const alreadyAssigned = (current?.personNames || [])[0] === member.name
+    const next = alreadyAssigned ? null : member
     if (projectId) {
-      const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
-      const exists = (current?.personNames || []).includes(member.name)
-      updateTaskRow(taskId, { assignee_id: exists ? null : member.id }).catch(() => {})
+      updateTaskRow(taskId, { assignee_id: next ? next.id : null }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
         return {
           ...g,
-          items: g.items.map((t) => {
-            if (t.id !== taskId) return t
-            const names = t.personNames || []
-            const avatars = t.personAvatars || []
-            const exists = names.includes(member.name)
-            let newNames: string[]
-            let newAvatars: string[]
-            if (exists) {
-              newNames = names.filter((n) => n !== member.name)
-              newAvatars = avatars.filter((a) => a !== member.avatar)
-            } else {
-              newNames = [...names, member.name]
-              newAvatars = [...avatars, member.avatar]
-            }
-            return {
-              ...t,
-              personNames: newNames.length > 0 ? newNames : [member.name],
-              personAvatars: newAvatars.length > 0 ? newAvatars : [member.avatar],
-            }
-          }),
+          items: g.items.map((t) =>
+            t.id !== taskId
+              ? t
+              : {
+                  ...t,
+                  personNames: next ? [next.name] : [],
+                  personAvatars: next ? [next.avatar] : [],
+                },
+          ),
         }
-      })
+      }),
+    )
+  }
+
+  // Melepas penanggung jawab tugas (assignee_id -> null).
+  const clearTaskAssignee = (groupId: string, taskId: string) => {
+    if (!can.assignTasks) {
+      setNotice('Hanya Project Manager yang dapat mengubah penanggung jawab tugas.')
+      return
+    }
+    if (projectId) updateTaskRow(taskId, { assignee_id: null }).catch(notifySaveError)
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        return {
+          ...g,
+          items: g.items.map((t) =>
+            t.id !== taskId ? t : { ...t, personNames: [], personAvatars: [] },
+          ),
+        }
+      }),
     )
   }
 
   // Set prioritas task (dipakai kolom Priority di Main Table & panel detail)
   const setTaskPriority = (groupId: string, taskId: string, priority: string) => {
-    if (projectId) updateTaskRow(taskId, { priority: priority as Priority }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { priority: priority as Priority }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) =>
         g.id !== groupId
@@ -1564,7 +2596,7 @@ export default function ProjectDetailPage() {
   // Set task date
   const setTaskDate = (groupId: string, taskId: string, newDate: string) => {
     if (projectId) {
-      updateTaskRow(taskId, { due_date: toISODate(newDate) }).catch(() => {})
+      updateTaskRow(taskId, { due_date: toISODate(newDate) }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1582,7 +2614,7 @@ export default function ProjectDetailPage() {
   const toggleTaskCheck = (groupId: string, taskId: string) => {
     if (projectId) {
       const current = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
-      if (current) updateTaskRow(taskId, { checked: !current.checked }).catch(() => {})
+      if (current) updateTaskRow(taskId, { checked: !current.checked }).catch(notifySaveError)
     }
     setGroups((prev) =>
       prev.map((g) => {
@@ -1597,13 +2629,25 @@ export default function ProjectDetailPage() {
 
   // Toggle all checkboxes in a group
   const toggleAllGroupTasks = (groupId: string) => {
+    const group = groups.find((g) => g.id === groupId)
+    if (!group) return
+    const nextChecked = !group.items.every((t) => t.checked)
+    if (projectId) {
+      group.items.forEach((t) => {
+        if (t.checked === nextChecked) return
+        updateTaskRow(t.id, { checked: nextChecked }).catch((err) => {
+          setNotice(
+            `Gagal menyimpan centang: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+          )
+        })
+      })
+    }
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
-        const allChecked = g.items.every((t) => t.checked)
         return {
           ...g,
-          items: g.items.map((t) => ({ ...t, checked: !allChecked })),
+          items: g.items.map((t) => ({ ...t, checked: nextChecked })),
         }
       })
     )
@@ -1631,13 +2675,33 @@ export default function ProjectDetailPage() {
     )
   }
 
+  // Buka modal New Item dengan nilai awal dari data nyata.
+  const openNewItemModal = (date?: string, status?: string) => {
+    // Hanya Project Manager yang boleh membuat tugas (UC-03).
+    if (!can.createTasks) {
+      setNotice('Hanya Project Manager yang dapat membuat tugas baru.')
+      return
+    }
+    setNewTaskTitle('New Item')
+    setNewTaskGroup(groups[0]?.id ?? '')
+    setNewTaskAssignee('')
+    setNewTaskStatus(status ?? statusList[0]?.label ?? '')
+    setNewTaskDate(date ?? '')
+    setNewTaskPriority('medium')
+    setShowGroupDropdown(false)
+    setShowPersonDropdown(false)
+    setShowStatusDropdown(false)
+    setShowDateDropdown(false)
+    setShowNewItemModal(true)
+  }
+
   // Submit new task from modal
   const handleCreateNewTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTaskTitle.trim()) return
 
     const selectedMember = members.find((m) => m.name === newTaskAssignee)
-    const statusLabel = newTaskStatus || 'To Do'
+    const statusLabel = newTaskStatus || statusList[0]?.label || 'To Do'
     const groupId = groups.some((g) => g.id === newTaskGroup) ? newTaskGroup : groups[0]?.id ?? null
     let id = `task-${Date.now()}`
 
@@ -1647,11 +2711,15 @@ export default function ProjectDetailPage() {
         group_id: groupId,
         status_id: statusIdByLabel(statusLabel),
         title: newTaskTitle.trim(),
-        description: 'Tugas baru dibuat via toolbar New Item.',
         due_date: toISODate(newTaskDate),
         assignee_id: selectedMember?.id ?? null,
         priority: newTaskPriority as Priority,
-      }).catch(() => null)
+      }).catch((err) => {
+        setNotice(
+          `Gagal membuat tugas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+        return null
+      })
       if (row) id = row.id
     }
 
@@ -1659,7 +2727,7 @@ export default function ProjectDetailPage() {
       id,
       title: newTaskTitle.trim(),
       hasChevron: true,
-      description: 'Tugas baru dibuat via toolbar New Item.',
+      description: undefined,
       personAvatars: selectedMember ? [selectedMember.avatar] : [],
       personNames: selectedMember ? [selectedMember.name] : [],
       status: statusLabel,
@@ -1686,7 +2754,7 @@ export default function ProjectDetailPage() {
 
   // Inline rename task
   const updateTaskTitle = (groupId: string, taskId: string, newTitle: string) => {
-    if (projectId) updateTaskRow(taskId, { title: newTitle }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { title: newTitle }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -1700,7 +2768,7 @@ export default function ProjectDetailPage() {
 
   // Update task description from the detail modal
   const updateTaskDescription = (groupId: string, taskId: string, description: string) => {
-    if (projectId) updateTaskRow(taskId, { description }).catch(() => {})
+    if (projectId) updateTaskRow(taskId, { description }).catch(notifySaveError)
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g
@@ -1747,14 +2815,14 @@ export default function ProjectDetailPage() {
   const toggleTaskSubtask = (groupId: string, taskId: string, subId: string) => {
     const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
     const sub = (task?.subtasks || []).find((s) => s.id === subId)
-    if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+    if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(notifySaveError)
     updateTask(groupId, taskId, {
       subtasks: (task?.subtasks || []).map((s) => (s.id === subId ? { ...s, done: !s.done } : s)),
     })
   }
 
   const deleteTaskSubtask = (groupId: string, taskId: string, subId: string) => {
-    if (projectId) deleteSubtaskRow(subId).catch(() => {})
+    if (projectId) deleteSubtaskRow(subId).catch(notifySaveError)
     const task = groups.find((g) => g.id === groupId)?.items.find((t) => t.id === taskId)
     const all = task?.subtasks || []
     // Buang subtask ini beserta seluruh turunannya (DB sudah cascade).
@@ -1786,6 +2854,23 @@ export default function ProjectDetailPage() {
     }>,
     dbPatch: Parameters<typeof updateSubtaskRow>[1],
   ) => {
+    // Kolom yang belum ada di database tidak boleh diubah di UI: kalau tetap
+    // diterapkan, perubahan akan hilang setelah refresh.
+    const columnFor: Record<string, string> = {
+      assigneeId: 'assignee_id',
+      statusId: 'status_id',
+      date: 'due_date',
+      priority: 'priority',
+    }
+    const missing = Object.keys(appPatch).filter(
+      (key) => subtaskColumns && !subtaskColumns.has(columnFor[key] ?? key),
+    )
+    if (missing.length > 0) {
+      setNotice(MISSING_SUBTASK_COLUMNS_MESSAGE)
+      setSubCellMenu(null)
+      return
+    }
+
     if (projectId)
       updateSubtaskRow(subId, dbPatch).catch((e: unknown) => {
         const msg =
@@ -1855,86 +2940,109 @@ export default function ProjectDetailPage() {
       // Sel meta subtask yang bisa diubah: Assignee, Status, Date, Priority.
       const assigneeMember = members.find((m) => m.id === s.assigneeId)
       const statusDef = statusList.find((st) => st.id === s.statusId)
-      const isMenuOpen = (field: string) => subCellMenu === `sub:${s.id}:${field}`
-      const toggleMenu = (field: string) =>
-        setSubCellMenu(isMenuOpen(field) ? null : `sub:${s.id}:${field}`)
-      const closeOverlay = (
-        <div className="fixed inset-0 z-20" onClick={() => setSubCellMenu(null)} />
-      )
+      const isMenuOpen = (field: string) => subCellMenu?.key === `sub:${s.id}:${field}`
+      const toggleMenu = (field: string, el: HTMLElement) => {
+        if (isMenuOpen(field)) {
+          setSubCellMenu(null)
+          return
+        }
+        closeAllCellPickers()
+        setSubCellMenu({ key: `sub:${s.id}:${field}`, ...rectToAnchor(el) })
+      }
       const metaCells = (
         <>
-          {/* Assignee */}
+          {/* Assignee subtask. Hanya PM yang boleh menetapkan; Member melihat. */}
           <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
-            <button
-              type="button"
-              onClick={() => toggleMenu('assignee')}
-              className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
-              title="Ubah assignee subtask"
-            >
-              {assigneeMember?.avatar ? (
-                <div className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700">
-                  <Image
-                    src={assigneeMember.avatar}
-                    alt={assigneeMember.name}
-                    width={24}
-                    height={24}
-                    className="w-full h-full object-cover"
+            {can.assignTasks ? (
+              <button
+                type="button"
+                onClick={(e) => toggleMenu('assignee', e.currentTarget)}
+                className="inline-flex items-center justify-center hover:opacity-80 transition cursor-pointer"
+                title="Ubah assignee subtask"
+              >
+                {assigneeMember ? (
+                  <PersonAvatar
+                    name={assigneeMember.name}
+                    avatar={assigneeMember.avatar}
+                    size={24}
+                    className="border border-neutral-800"
                   />
+                ) : (
+                  <UserIcon size={14} className="text-neutral-500" />
+                )}
+              </button>
+            ) : (
+              <span
+                className="inline-flex items-center justify-center"
+                title={assigneeMember ? `Penanggung jawab: ${assigneeMember.name}` : 'Belum ditugaskan'}
+              >
+                {assigneeMember ? (
+                  <PersonAvatar
+                    name={assigneeMember.name}
+                    avatar={assigneeMember.avatar}
+                    size={24}
+                    className="border border-neutral-800"
+                  />
+                ) : (
+                  <UserIcon size={14} className="text-neutral-600" />
+                )}
+              </span>
+            )}
+            {can.assignTasks && isMenuOpen('assignee') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={208}
+                estimatedHeight={Math.min(members.length, 6) * 34 + 56}
+                ariaLabel="Assign member subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                  Assign Member
                 </div>
-              ) : (
-                <UserIcon size={14} className="text-neutral-500" />
-              )}
-            </button>
-            {isMenuOpen('assignee') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                    Assign Member
-                  </div>
-                  <div className="space-y-1 max-h-56 overflow-y-auto no-scrollbar">
+                <div className="space-y-1 max-h-56 overflow-y-auto no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSubtaskField(groupId, task.id, s.id, { assigneeId: null }, { assignee_id: null })
+                      setSubCellMenu(null)
+                    }}
+                    className="w-full px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                  >
+                    — Tidak ada
+                  </button>
+                  {members.map((m) => (
                     <button
+                      key={m.id}
                       type="button"
-                      onClick={() =>
-                        updateSubtaskField(groupId, task.id, s.id, { assigneeId: null }, { assignee_id: null })
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                      onClick={() => {
+                        updateSubtaskField(
+                          groupId,
+                          task.id,
+                          s.id,
+                          { assigneeId: m.id },
+                          { assignee_id: m.id },
+                        )
+                        setSubCellMenu(null)
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
                     >
-                      — Tidak ada
+                      <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
+                        <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                      </div>
+                      <span className="text-neutral-200 text-xs">{m.name}</span>
+                      {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
                     </button>
-                    {members.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() =>
-                          updateSubtaskField(
-                            groupId,
-                            task.id,
-                            s.id,
-                            { assigneeId: m.id },
-                            { assignee_id: m.id },
-                          )
-                        }
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                      >
-                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                          <Image src={m.avatar} alt={m.name} width={20} height={20} className="w-full h-full object-cover" />
-                        </div>
-                        <span className="text-neutral-200 text-xs">{m.name}</span>
-                        {s.assigneeId === m.id && <Check size={12} className="ml-auto text-blue-400" />}
-                      </button>
-                    ))}
-                  </div>
+                  ))}
                 </div>
-              </>
+              </TablePopover>
             )}
           </td>
 
           {/* Status */}
-          <td className="p-0 border-r border-neutral-800/80 relative">
+          <td className="p-0 border-r border-neutral-800/80">
             <button
               type="button"
-              onClick={() => toggleMenu('status')}
+              onClick={(e) => toggleMenu('status', e.currentTarget)}
               className="w-full h-full py-2.5 px-3 text-center text-xs tracking-wide transition cursor-pointer flex items-center justify-center gap-1.5 hover:brightness-90"
               style={{
                 backgroundColor: statusDef?.colorCode || '#94a3b8',
@@ -1945,75 +3053,84 @@ export default function ProjectDetailPage() {
               <span>{statusDef?.label || '—'}</span>
               <ChevronDown size={12} className="opacity-70" />
             </button>
-            {isMenuOpen('status') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-44 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  {statusList.map((st) => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() =>
-                        updateSubtaskField(
-                          groupId,
-                          task.id,
-                          s.id,
-                          { statusId: statusIdByLabel(st.label) },
-                          { status_id: statusIdByLabel(st.label) },
-                        )
-                      }
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                    >
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.colorCode }} />
-                      <span className="text-neutral-200">{st.label}</span>
-                      {s.statusId === statusIdByLabel(st.label) && (
-                        <Check size={12} className="ml-auto text-blue-400" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </>
+            {isMenuOpen('status') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={176}
+                estimatedHeight={statusList.length * 32 + 20}
+                ariaLabel="Pilih status subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                {statusList.map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => {
+                      updateSubtaskField(
+                        groupId,
+                        task.id,
+                        s.id,
+                        { statusId: statusIdByLabel(st.label) },
+                        { status_id: statusIdByLabel(st.label) },
+                      )
+                      setSubCellMenu(null)
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.colorCode }} />
+                    <span className="text-neutral-200">{st.label}</span>
+                    {s.statusId === statusIdByLabel(st.label) && (
+                      <Check size={12} className="ml-auto text-blue-400" />
+                    )}
+                  </button>
+                ))}
+              </TablePopover>
             )}
           </td>
 
           {/* Date */}
-          <td className="px-4 py-2 border-r border-neutral-800/80 text-center relative">
+          <td className="px-4 py-2 border-r border-neutral-800/80 text-center">
             <button
               type="button"
-              onClick={() => toggleMenu('date')}
+              onClick={(e) => toggleMenu('date', e.currentTarget)}
               className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-200 transition cursor-pointer"
               title="Ubah tanggal subtask"
             >
               {s.date ? <span className="text-[11px]">{s.date}</span> : <CalendarDays size={14} className="text-neutral-500" />}
             </button>
-            {isMenuOpen('date') && (
-              <>
-                {closeOverlay}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 text-left">
-                  <input
-                    type="date"
-                    className="w-full bg-[#282a32] border border-neutral-700/60 rounded-md px-2 py-1 text-xs text-neutral-200 outline-none"
-                    onChange={(e) =>
-                      updateSubtaskField(
-                        groupId,
-                        task.id,
-                        s.id,
-                        { date: e.target.value ? fromISODate(e.target.value) : null },
-                        { due_date: e.target.value || null },
-                      )
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateSubtaskField(groupId, task.id, s.id, { date: null }, { due_date: null })
-                    }
-                    className="w-full mt-1 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
-                  >
-                    Hapus tanggal
-                  </button>
-                </div>
-              </>
+            {isMenuOpen('date') && subCellMenu && (
+              <TablePopover
+                anchor={subCellMenu}
+                width={192}
+                estimatedHeight={120}
+                ariaLabel="Pilih tanggal subtask"
+                onClose={() => setSubCellMenu(null)}
+              >
+                <input
+                  type="date"
+                  className="w-full bg-[#282a32] border border-neutral-700/60 rounded-md px-2 py-1 text-xs text-neutral-200 outline-none"
+                  onChange={(e) => {
+                    updateSubtaskField(
+                      groupId,
+                      task.id,
+                      s.id,
+                      { date: e.target.value ? fromISODate(e.target.value) : null },
+                      { due_date: e.target.value || null },
+                    )
+                    setSubCellMenu(null)
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSubtaskField(groupId, task.id, s.id, { date: null }, { due_date: null })
+                    setSubCellMenu(null)
+                  }}
+                  className="w-full mt-1 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800 transition cursor-pointer text-left"
+                >
+                  Hapus tanggal
+                </button>
+              </TablePopover>
             )}
           </td>
 
@@ -2147,23 +3264,44 @@ export default function ProjectDetailPage() {
   const selectedTasks = allTasks.filter((t) => t.checked)
 
   // Bulk delete
-  const handleBulkDelete = () => {
-    if (!confirm(`Delete ${selectedTasks.length} selected tasks?`)) return
-    if (projectId) deleteTasks(selectedTasks.map((t) => t.id)).catch(() => {})
+  const handleBulkDelete = async () => {
+    const ids = selectedTasks.map((t) => t.id)
+    if (projectId && ids.length) {
+      try {
+        await deleteTasks(ids)
+      } catch (err) {
+        setNotice(
+          `Gagal menghapus tugas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+      }
+    }
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
         items: g.items.filter((t) => !t.checked),
       }))
     )
+    setShowBulkDeleteModal(false)
   }
 
   // Bulk set status
   const handleBulkSetStatus = (status: string) => {
+    const statusId = statusIdByLabel(status)
+    // Samakan `checked` dengan status "Done", seperti setTaskStatus.
+    const isDone = status.trim().toLowerCase() === 'done'
+    if (projectId) {
+      selectedTasks.forEach((t) => {
+        updateTaskRow(t.id, { status_id: statusId, checked: isDone }).catch((err) => {
+          setNotice(
+            `Gagal menyimpan status: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+          )
+        })
+      })
+    }
     setGroups((prev) =>
       prev.map((g) => ({
         ...g,
-        items: g.items.map((t) => (t.checked ? { ...t, status } : t)),
+        items: g.items.map((t) => (t.checked ? { ...t, status, checked: isDone } : t)),
       }))
     )
   }
@@ -2181,13 +3319,19 @@ export default function ProjectDetailPage() {
 
   // Add new group
   const handleAddNewGroup = async () => {
-    const groupName = prompt('Enter new group name:', 'Tugas Baru')
+    const groupName = newGroupName.trim()
     if (!groupName) return
-    const colors = ['text-[#6c7ff5]', 'text-[#ea384c]', 'text-[#22c55e]', 'text-[#f59e0b]', 'text-[#ec4899]']
-    const color = colors[groups.length % colors.length]
+    // Warna dipilih PM pada modal; disimpan sebagai kelas teks Tailwind agar
+    // konsisten dengan cara grup yang sudah ada dirender.
+    const color = `text-[${newGroupColor}]`
     let id = `group-${Date.now()}`
     if (projectId) {
-      const row = await createGroup(projectId, groupName, color, groups.length).catch(() => null)
+      const row = await createGroup(projectId, groupName, color, groups.length).catch((err) => {
+        setNotice(
+          `Gagal membuat grup: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+        )
+        return null
+      })
       if (row) id = row.id
     }
     const newGroup: TaskGroup = {
@@ -2198,25 +3342,29 @@ export default function ProjectDetailPage() {
       dateRange: '',
       items: [],
     }
-    setGroups([...groups, newGroup])
+    setGroups((prev) => [...prev, newGroup])
+    setNewGroupName('')
+    setShowAddGroupModal(false)
     setShowMoreTableMenu(false)
   }
 
   // Export to CSV
   const exportToCSV = () => {
-    const rows = [['Group', 'Item', 'Assignees', 'Status', 'Date']]
+    const cell = (value: string) => `"${(value ?? '').replace(/"/g, '""')}"`
+    const rows: string[][] = [['Group', 'Item', 'Assignees', 'Status', 'Date']]
     groups.forEach((g) => {
       g.items.forEach((item) => {
         rows.push([
           g.title,
           item.title,
-          (item.personNames || ['George']).join('; '),
+          (item.personNames || []).join('; '),
           item.status,
           item.date,
         ])
       })
     })
-    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n')
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + rows.map((row) => row.map(cell).join(',')).join('\n')
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
@@ -2230,7 +3378,16 @@ export default function ProjectDetailPage() {
   // Add custom column
   const handleAddColumn = (colName: string) => {
     if (!extraColumns.includes(colName)) {
-      setExtraColumns([...extraColumns, colName])
+      const next = [...extraColumns, colName]
+      setExtraColumns(next)
+      // Simpan agar kolom (mis. Files, Notes) tetap ada setelah halaman dimuat ulang.
+      if (projectId) {
+        try {
+          localStorage.setItem(`invisual.table-columns.${projectId}`, JSON.stringify(next))
+        } catch {
+          // Penyimpanan lokal tidak tersedia: kolom tetap berlaku untuk sesi ini.
+        }
+      }
     }
     setShowAddColumnMenu(false)
   }
@@ -2249,7 +3406,7 @@ export default function ProjectDetailPage() {
         }
         // Person filter
         if (personFilter !== 'all') {
-          const names = item.personNames || ['George']
+          const names = item.personNames || []
           if (!names.includes(personFilter)) return false
         }
         // Status filter
@@ -2291,6 +3448,105 @@ export default function ProjectDetailPage() {
 
   const canUndo = historyIndex > 0
   const canRedo = historyIndex < history.length - 1
+
+  // Pilih gambar untuk blok `image`. Berkas diunggah ke Supabase Storage
+  // (bucket project-docs) dan blok menyimpan path-nya, sesuai Subbab 4.2.1.
+  const handleDocImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const targetId = imageTargetBlock
+    setImageTargetBlock(null)
+    if (!file || !targetId || !projectId) return
+    if (!file.type.startsWith('image/')) {
+      setNotice('File harus berupa gambar.')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setNotice('Ukuran gambar maksimal 2 MB.')
+      return
+    }
+    setDocUploading(true)
+    try {
+      const uploaded = await uploadDocFile(projectId, file)
+      commitBlocksChange(
+        docBlocks.map((b) => (b.id === targetId ? { ...b, imageUrl: uploaded.url } : b)),
+      )
+    } catch (err) {
+      setNotice(
+        `Gagal mengunggah gambar: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
+  // Unggah berkas untuk blok `file` pada tab Doc.
+  const handleDocFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const targetId = docFileTarget
+    setDocFileTarget(null)
+    if (!file || !targetId || !projectId) return
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice('Ukuran berkas maksimal 5 MB.')
+      return
+    }
+    setDocUploading(true)
+    try {
+      const uploaded = await uploadDocFile(projectId, file)
+      commitBlocksChange(
+        docBlocks.map((b) =>
+          b.id === targetId
+            ? {
+                ...b,
+                fileData: {
+                  name: uploaded.name,
+                  size: uploaded.size,
+                  icon: (uploaded.name.split('.').pop() || 'F').charAt(0).toUpperCase(),
+                  path: uploaded.url,
+                },
+              }
+            : b,
+        ),
+      )
+    } catch (err) {
+      setNotice(
+        `Gagal mengunggah berkas: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+      )
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
+  // Blok Doc menyimpan path Storage; URL bertanda tangan dibuat sekali per path.
+  useEffect(() => {
+    const paths = new Set<string>()
+    for (const b of docBlocks) {
+      if (b.type === 'image' && b.imageUrl && !/^(https?:|data:)/.test(b.imageUrl)) {
+        paths.add(b.imageUrl)
+      }
+      if (b.type === 'file' && b.fileData?.path) paths.add(b.fileData.path)
+    }
+    if (paths.size === 0) return
+
+    let alive = true
+    ;(async () => {
+      const entries = await Promise.all(
+        [...paths].map(async (path) => [path, await getDocFileUrl(path)] as const),
+      )
+      if (!alive) return
+      setDocFileUrls((prev) => {
+        const next = { ...prev }
+        for (const [path, url] of entries) {
+          if (url) next[path] = url
+        }
+        return next
+      })
+    })()
+    return () => {
+      alive = false
+    }
+  }, [docBlocks])
 
   const handleUndo = () => {
     if (!canUndo) return
@@ -2488,8 +3744,7 @@ export default function ProjectDetailPage() {
               .filter(Boolean)
               .map((txt, i) => ({ id: `it-${Date.now()}-${i}`, text: txt, checked: false }))
           : [
-              { id: `it-${Date.now()}-1`, text: 'Tentukan tujuan utama proyek', checked: false },
-              { id: `it-${Date.now()}-2`, text: 'Rancang wireframe & prototype awal', checked: false },
+              { id: `it-${Date.now()}-1`, text: '', checked: false },
             ])
       return { ...b, type, items: existingItems }
     })
@@ -2533,8 +3788,7 @@ export default function ProjectDetailPage() {
           type: 'bullet-list',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Item daftar pertama' },
-            { id: `it-${Date.now()}-2`, text: 'Item daftar kedua' },
+            { id: `it-${Date.now()}-1`, text: '' },
           ],
         }
         break
@@ -2544,8 +3798,7 @@ export default function ProjectDetailPage() {
           type: 'numbered-list',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Langkah pertama dalam brief' },
-            { id: `it-${Date.now()}-2`, text: 'Langkah kedua implementasi' },
+            { id: `it-${Date.now()}-1`, text: '' },
           ],
         }
         break
@@ -2555,8 +3808,7 @@ export default function ProjectDetailPage() {
           type: 'checklist',
           content: '',
           items: [
-            { id: `it-${Date.now()}-1`, text: 'Briefing awal dengan klien', checked: true },
-            { id: `it-${Date.now()}-2`, text: 'Penyusunan aset visual brand', checked: false },
+            { id: `it-${Date.now()}-1`, text: '', checked: false },
           ],
         }
         break
@@ -2566,9 +3818,9 @@ export default function ProjectDetailPage() {
           type: 'file',
           content: '',
           fileData: {
-            name: 'Dokumen-Spesifikasi-Project.docx',
-            size: '312 KB',
-            icon: 'W',
+            name: 'Dokumen baru',
+            size: '',
+            icon: 'F',
           },
         }
         break
@@ -2576,9 +3828,8 @@ export default function ProjectDetailPage() {
         newBlock = {
           id,
           type: 'image',
-          content: 'Visual mockup referensi proyek',
-          imageUrl:
-            'https://images.unsplash.com/photo-1542744094-3a31f272c490?w=600&auto=format&fit=crop&q=80',
+          content: '',
+          imageUrl: '',
         }
         break
       case 'divider':
@@ -2603,7 +3854,7 @@ export default function ProjectDetailPage() {
 
   const deleteBlock = (index: number) => {
     if (docBlocks.length <= 1) {
-      alert('Dokumen minimal memiliki satu blok konten.')
+      setNotice('Dokumen minimal memiliki satu blok konten.')
       return
     }
     const updated = docBlocks.filter((_, i) => i !== index)
@@ -2687,9 +3938,9 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#111214] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden w-full bg-[#111214] text-white flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header Bar */}
-      <header className="w-full h-16 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
+      <header className="w-full h-16 shrink-0 bg-[#111214] border-b border-neutral-800/80 px-6 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <Link href="/home" className="inline-flex items-center gap-2.5">
             <Image
@@ -2709,6 +3960,7 @@ export default function ProjectDetailPage() {
         <div className="flex items-center gap-4 text-neutral-400">
           <button
             type="button"
+            onClick={() => setShowNotifications(true)}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
             aria-label="Notifications"
           >
@@ -2716,35 +3968,104 @@ export default function ProjectDetailPage() {
           </button>
           <button
             type="button"
+            onClick={() =>
+              router.push(
+                `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
+              )
+            }
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
-            aria-label="Team group"
+            aria-label="Anggota project"
           >
             <Users size={18} strokeWidth={1.8} />
           </button>
           <button
             type="button"
+            onClick={() => {
+              setActiveTab('Main Table')
+              setShowSearchInput(true)
+            }}
             className="p-2 hover:text-white hover:bg-neutral-800/60 rounded-lg transition cursor-pointer"
             aria-label="Search"
           >
             <Search size={18} strokeWidth={1.8} />
           </button>
-          {/* Profile Avatar */}
-          <div className="w-8 h-8 rounded-full overflow-hidden border border-neutral-600/70 ml-1 cursor-pointer hover:border-neutral-400 transition shrink-0">
-            <Image
-              src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
-              alt="User Profile"
-              width={32}
-              height={32}
-              className="w-full h-full object-cover"
-            />
+          {/* Profile Avatar & menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsUserMenuOpen((v) => !v)}
+              className="w-8 h-8 rounded-full overflow-hidden border border-neutral-600/70 ml-1 hover:border-neutral-400 transition shrink-0 bg-neutral-800 flex items-center justify-center text-xs font-semibold text-neutral-200 cursor-pointer"
+              aria-label="User menu"
+            >
+              {me.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={me.avatar} alt={me.name || 'User'} className="w-full h-full object-cover" />
+              ) : (
+                <span>{(me.name || '?').charAt(0).toUpperCase()}</span>
+              )}
+            </button>
+            {isUserMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
+                <div className="absolute right-0 top-11 w-52 bg-[#1b1c20] border border-neutral-800/90 rounded-2xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex flex-col items-center text-center p-2 pb-3 border-b border-neutral-800/80">
+                    <div className="w-12 h-12 rounded-full border border-neutral-600 overflow-hidden bg-neutral-800 flex items-center justify-center mb-2">
+                      {me.avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={me.avatar} alt={me.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-base font-bold text-neutral-300">
+                          {(me.name || '?').charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white tracking-tight">
+                      {me.name || 'Pengguna'}
+                    </p>
+                  </div>
+                  <div className="pt-2 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false)
+                        router.push('/profile')
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-neutral-300 hover:text-white hover:bg-neutral-800/60 transition cursor-pointer text-left"
+                    >
+                      <UserIcon size={15} />
+                      <span>Profile Settings</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsUserMenuOpen(false)
+                        await signOut()
+                        router.push('/signin')
+                        router.refresh()
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left"
+                    >
+                      <LogOut size={15} />
+                      <span>Log out</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Main Layout: Left Sidebar + Content */}
-      <div className="flex-1 flex flex-col lg:flex-row">
-        {/* Left Sidebar */}
-        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:min-h-[calc(100vh-4rem)] flex flex-col justify-between shrink-0">
+      {/* Main Layout: Left Sidebar + Content.
+          Di layar besar tinggi dikunci (h-screen) dan hanya <main> yang
+          menggulir, sehingga sidebar kiri tetap di tempat — sama seperti Home. */}
+      <div className="flex-1 flex flex-col lg:flex-row lg:min-h-0">
+        {/* Left Sidebar.
+            `lg:sticky lg:top-16` + tinggi tetap: sidebar menempel di bawah header
+            dan punya scroll sendiri. Dua lapis pengaman — kalau konten hanya
+            digulir di <main> (h-screen), sticky tidak berpengaruh; kalau halaman
+            yang menggulir, sidebar tetap diam. */}
+        <aside className="w-full lg:w-64 bg-[#111214] border-r border-neutral-800/80 p-4 lg:sticky lg:top-16 lg:h-[calc(100dvh-4rem)] lg:self-start lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-contain flex flex-col justify-between shrink-0">
           <div className="space-y-6">
             <nav className="space-y-1">
               <button
@@ -2765,16 +4086,49 @@ export default function ProjectDetailPage() {
 
               <button
                 type="button"
-                onClick={() => setActiveNav('Favorites')}
+                onClick={() => setShowFavorites((v) => !v)}
                 className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
                   activeNav === 'Favorites'
                     ? 'text-white'
                     : 'text-neutral-400 hover:text-white hover:bg-neutral-800/40'
                 }`}
+                aria-expanded={showFavorites}
               >
                 <span>Favorites</span>
-                <ChevronDown size={15} strokeWidth={1.8} />
+                <ChevronDown
+                  size={15}
+                  strokeWidth={1.8}
+                  className={`transition-transform ${showFavorites ? '' : '-rotate-90'}`}
+                />
               </button>
+
+              {showFavorites && (
+                <div className="pl-3 space-y-0.5">
+                  {favorites.length === 0 ? (
+                    <p className="px-4 py-1.5 text-xs text-neutral-600">
+                      Belum ada favorit. Klik bintang pada proyek.
+                    </p>
+                  ) : (
+                    favorites.map((f) => (
+                      <Link
+                        key={f.id}
+                        href={`/project/${slugify(f.scope)}/${slugify(f.name)}`}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition ${
+                          f.id === projectId
+                            ? 'bg-neutral-800/60 text-white'
+                            : 'text-neutral-300 hover:text-white hover:bg-neutral-800/40'
+                        }`}
+                      >
+                        <Star size={13} fill="currentColor" className="text-yellow-400 shrink-0" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="ml-auto text-[10px] text-neutral-500 shrink-0">
+                          {f.scope ?? ''}
+                        </span>
+                      </Link>
+                    ))
+                  )}
+                </div>
+              )}
             </nav>
 
             <div className="pt-2">
@@ -2801,119 +4155,178 @@ export default function ProjectDetailPage() {
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <button
+                    ref={workspaceTriggerRef}
                     type="button"
-                    onClick={() => setShowWorkspaceMenu((v) => !v)}
+                    onClick={() => {
+                      if (showWorkspaceMenu) {
+                        setShowWorkspaceMenu(false)
+                        setWorkspaceAnchor(null)
+                        return
+                      }
+                      const rect = workspaceTriggerRef.current?.getBoundingClientRect()
+                      if (rect) {
+                        const width = Math.min(286, window.innerWidth - 16)
+                        setWorkspaceAnchor({
+                          top: Math.min(rect.bottom + 6, window.innerHeight - 16),
+                          left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+                        })
+                      }
+                      setShowWorkspaceMenu(true)
+                    }}
+                    aria-expanded={showWorkspaceMenu}
                     className="w-full flex items-center justify-between bg-[#191a1e] border border-neutral-700/80 rounded-xl px-3 py-2 text-sm cursor-pointer hover:border-neutral-600 transition"
                   >
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                        I
-                      </span>
-                      <span className="text-xs font-semibold text-white truncate">
-                        {selectedWorkspace}
-                      </span>
+                      {selectedWorkspace ? (
+                        <>
+                          <span className="w-5 h-5 rounded bg-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                            {selectedWorkspace.charAt(0).toUpperCase()}
+                          </span>
+                          <span className="text-xs font-semibold text-white truncate">
+                            {selectedWorkspace}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-neutral-500 truncate">
+                          Belum ada workspace
+                        </span>
+                      )}
                     </div>
                     <ChevronDown size={15} className="text-neutral-400 shrink-0" />
                   </button>
 
-                  {showWorkspaceMenu && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setShowWorkspaceMenu(false)} />
-                      <div className="absolute left-0 top-full mt-1.5 z-30 w-[286px] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100">
-                        {/* Search */}
-                        <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
-                          <Search size={15} className="text-neutral-400 shrink-0" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={workspaceSearch}
-                            onChange={(e) => setWorkspaceSearch(e.target.value)}
-                            placeholder="Search for a workspace"
-                            className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
-                          />
-                        </div>
+                  {showWorkspaceMenu &&
+                    workspaceAnchor &&
+                    createPortal(
+                      <>
+                        <div
+                          className="fixed inset-0 z-[130]"
+                          onClick={() => {
+                            setShowWorkspaceMenu(false)
+                            setWorkspaceAnchor(null)
+                          }}
+                        />
+                        <div
+                          className="fixed z-[131] bg-[#191a1e] border border-neutral-700/80 rounded-xl shadow-2xl p-2.5 animate-in fade-in zoom-in-95 duration-100"
+                          style={{
+                            top: workspaceAnchor.top,
+                            left: workspaceAnchor.left,
+                            width: Math.min(286, typeof window === 'undefined' ? 286 : window.innerWidth - 16),
+                          }}
+                        >
+                          {/* Search */}
+                          <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-neutral-700 bg-[#111214]">
+                            <Search size={15} className="text-neutral-400 shrink-0" />
+                            <input
+                              type="text"
+                              autoFocus
+                              value={workspaceSearch}
+                              onChange={(e) => setWorkspaceSearch(e.target.value)}
+                              placeholder="Search for a workspace"
+                              className="bg-transparent text-sm text-white placeholder:text-neutral-500 outline-none w-full"
+                            />
+                          </div>
 
-                        {/* Recent workspace */}
-                        <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
-                          Recent workspace
-                        </p>
-                        <div className="space-y-0.5 max-h-56 overflow-y-auto">
-                          {workspaces
-                            .filter((ws) =>
+                          {/* Recent workspace */}
+                          <p className="text-xs font-semibold text-neutral-300 mt-3 mb-1 px-1">
+                            Recent workspace
+                          </p>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            {workspaces
+                              .filter((ws) =>
+                                ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
+                              )
+                              .map((ws) => (
+                                <button
+                                  key={ws.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedWorkspace(ws.name)
+                                    setShowWorkspaceMenu(false)
+                                    setWorkspaceAnchor(null)
+                                    setWorkspaceSearch('')
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
+                                    ws.name === selectedWorkspace
+                                      ? 'bg-blue-600 text-white font-semibold'
+                                      : 'text-neutral-200 hover:bg-neutral-800'
+                                  }`}
+                                >
+                                  {ws.name}
+                                </button>
+                              ))}
+                            {workspaces.filter((ws) =>
                               ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
-                            )
-                            .map((ws) => (
+                            ).length === 0 && (
+                              <p className="px-3 py-2 text-xs text-neutral-500">
+                                Workspace tidak ditemukan.
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Footer */}
+                          <div className="flex items-center justify-between gap-1 mt-1.5 pt-2 border-t border-neutral-800">
+                            {canManageWorkspace ? (
                               <button
-                                key={ws.id}
                                 type="button"
                                 onClick={() => {
-                                  setSelectedWorkspace(ws.name)
                                   setShowWorkspaceMenu(false)
-                                  setWorkspaceSearch('')
+                                  setWorkspaceAnchor(null)
+                                  setNewWorkspaceName('')
+                                  setShowAddWorkspaceModal(true)
                                 }}
-                                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
-                                  ws.name === selectedWorkspace
-                                    ? 'bg-blue-600 text-white font-semibold'
-                                    : 'text-neutral-200 hover:bg-neutral-800'
-                                }`}
+                                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
                               >
-                                {ws.name}
+                                <Plus size={14} className="shrink-0" />
+                                <span>Add Workspace</span>
                               </button>
-                            ))}
-                          {workspaces.filter((ws) =>
-                            ws.name.toLowerCase().includes(workspaceSearch.toLowerCase())
-                          ).length === 0 && (
-                            <p className="px-3 py-2 text-xs text-neutral-500">
-                              Workspace tidak ditemukan.
-                            </p>
-                          )}
+                            ) : (
+                              <span
+                                className="px-2 py-1.5 text-[11px] text-neutral-600 whitespace-nowrap"
+                                title="Hanya Project Manager yang dapat membuat atau mengubah workspace"
+                              >
+                                Hanya PM
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowWorkspaceMenu(false)
+                                setWorkspaceAnchor(null)
+                                router.push('/home')
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer whitespace-nowrap"
+                            >
+                              <LayoutGrid size={13} className="shrink-0" />
+                              <span>Browse All</span>
+                            </button>
+                          </div>
                         </div>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-800">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowWorkspaceMenu(false)
-                              setNewWorkspaceName('')
-                              setShowAddWorkspaceModal(true)
-                            }}
-                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <Plus size={14} />
-                            <span>Add Workspace</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowWorkspaceMenu(false)}
-                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <LayoutGrid size={13} />
-                            <span>Browse All</span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                      </>,
+                      document.body,
+                    )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewWorkspaceName('')
-                    setShowAddWorkspaceModal(true)
-                  }}
-                  className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
-                  aria-label="Add workspace"
-                >
-                  <Plus size={18} strokeWidth={2.5} />
-                </button>
+                {canManageWorkspace && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewWorkspaceName('')
+                      setShowAddWorkspaceModal(true)
+                    }}
+                    className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition shadow-sm cursor-pointer"
+                    aria-label="Add workspace"
+                    title="Tambah workspace (Project Manager)"
+                  >
+                    <Plus size={18} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </aside>
 
         {/* Main Content Pane */}
-        <main className="flex-1 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11] relative">
+        <main className="flex-1 lg:min-h-0 p-4 lg:p-6 overflow-y-auto bg-[#0d0e11] relative">
           {/* Outer Rounded Board Card */}
           <div className="w-full bg-[#141517] border border-neutral-800/80 rounded-2xl p-6 lg:p-8 min-h-[calc(100vh-7rem)] flex flex-col shadow-2xl">
             {/* Breadcrumb Header */}
@@ -2930,8 +4343,59 @@ export default function ProjectDetailPage() {
                 <span className="text-neutral-400">{scopeTitle}</span>
                 <span className="text-neutral-600">/</span>
                 <span className="text-white font-bold tracking-tight">{cardTitle}</span>
+                {!permissions.loading && permissions.role && (
+                  <span
+                    className={`ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${
+                      permissions.isManager
+                        ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                        : 'bg-neutral-700/40 text-neutral-300 border-neutral-600/60'
+                    }`}
+                    title={`Peran Anda pada project ini: ${roleLabel(permissions.role)}`}
+                  >
+                    {permissions.isManager ? <ShieldCheck size={11} /> : <UserIcon size={11} />}
+                    {roleLabel(permissions.role)}
+                  </span>
+                )}
+                {/* Bintangi project ini (masuk ke Favorites) */}
+                <button
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  disabled={!projectId || favoriteBusy}
+                  className={`ml-1 p-1.5 rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+                    isFavorite
+                      ? 'text-yellow-400 hover:bg-yellow-400/10'
+                      : 'text-neutral-500 hover:text-yellow-400 hover:bg-neutral-800/60'
+                  }`}
+                  aria-pressed={isFavorite}
+                  aria-label={isFavorite ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                  title={isFavorite ? 'Hapus dari favorit' : 'Jadikan favorit'}
+                >
+                  <Star size={16} strokeWidth={1.8} fill={isFavorite ? 'currentColor' : 'none'} />
+                </button>
               </div>
             </div>
+
+            {loadingBoard && (
+              <div className="mb-4 flex items-center gap-2 text-sm text-neutral-400">
+                <Loader2 size={15} className="animate-spin" /> Memuat board…
+              </div>
+            )}
+
+            {boardError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <p>{boardError}</p>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/home')}
+                    className="mt-2 text-xs font-semibold text-red-200 underline hover:text-white"
+                  >
+                    Kembali ke Home
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* View Tabs */}
             <div className="flex items-center justify-between border-b border-neutral-800/80 mb-6">
@@ -2984,6 +4448,22 @@ export default function ProjectDetailPage() {
                   )}
                 </button>
 
+                {/* Kanban Tab */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('Kanban')}
+                  className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition cursor-pointer ${
+                    activeTab === 'Kanban'
+                      ? 'border-white text-white font-semibold'
+                      : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  <span>Kanban</span>
+                  {activeTab === 'Kanban' && (
+                    <MoreHorizontal size={14} className="text-neutral-500" />
+                  )}
+                </button>
+
                 {/* Custom view tabs */}
                 {customViews.map((cv) => (
                   <button
@@ -3002,79 +4482,42 @@ export default function ProjectDetailPage() {
                     )}
                   </button>
                 ))}
-
-                {/* Add Tab */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddViewMenu((v) => !v)}
-                    className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
-                    aria-label="Add tab"
-                  >
-                    <Plus size={16} />
-                  </button>
-                  {showAddViewMenu && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setShowAddViewMenu(false)} />
-                      <div className="absolute left-0 top-full mt-1 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1 z-30 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
-                          Add View
-                        </div>
-                        {([
-                          { name: 'Gantt', type: 'gantt' as const },
-                          { name: 'Chart', type: 'chart' as const },
-                        ] as const).map((opt) => (
-                          <button
-                            key={opt.name}
-                            type="button"
-                            onClick={() => {
-                              if (customViews.some((v) => v.name === opt.name)) {
-                                setActiveTab(opt.name)
-                              } else {
-                                setCustomViews((prev) => [
-                                  ...prev,
-                                  { id: `view-${Date.now()}`, name: opt.name, type: opt.type },
-                                ])
-                                setActiveTab(opt.name)
-                              }
-                              setShowAddViewMenu(false)
-                            }}
-                            className="w-full px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 rounded transition cursor-pointer text-left"
-                          >
-                            + {opt.name} view
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
               </div>
             </div>
 
             {/* TAB 1: MAIN TABLE */}
             {activeTab === 'Main Table' && (
               <>
+                {/* Input tersembunyi untuk "Unggah berkas" pada kolom Files */}
+                <input
+                  ref={quickFileRef}
+                  type="file"
+                  onChange={handleQuickFilePick}
+                  className="hidden"
+                />
                 {/* Action Toolbar for Main Table */}
                 <div className="flex flex-wrap items-center gap-3 mb-6">
-                  {/* + New item button with split options */}
-                  <div className="inline-flex rounded-md shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => setShowNewItemModal(true)}
-                      className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
-                    >
-                      <Plus size={14} strokeWidth={2.5} />
-                      <span>New item</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowNewItemModal(true)}
-                      className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
-                      aria-label="More new item options"
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
+                  {/* + New item — hanya Project Manager (UC-03) */}
+                  {can.createTasks && (
+                    <div className="inline-flex rounded-md shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => openNewItemModal()}
+                        className="inline-flex items-center gap-1.5 h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold rounded-l-md transition cursor-pointer"
+                      >
+                        <Plus size={14} strokeWidth={2.5} />
+                        <span>New item</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openNewItemModal()}
+                        className="inline-flex items-center px-1.5 h-8 bg-blue-600 hover:bg-blue-500 border-l border-blue-700 active:scale-95 text-white text-xs rounded-r-md transition cursor-pointer"
+                        aria-label="More new item options"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Search Input / Toggle */}
                   <div className="relative">
@@ -3176,13 +4619,7 @@ export default function ProjectDetailPage() {
                               >
                                 <div className="flex items-center gap-2">
                                   <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                    <Image
-                                      src={m.avatar}
-                                      alt={m.name}
-                                      width={20}
-                                      height={20}
-                                      className="w-full h-full object-cover"
-                                    />
+                                    <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
                                   </div>
                                   <span>{m.name}</span>
                                 </div>
@@ -3357,14 +4794,21 @@ export default function ProjectDetailPage() {
                             <ChevronRight size={14} />
                             <span>Collapse All Groups</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={handleAddNewGroup}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
-                          >
-                            <Plus size={14} />
-                            <span>Add New Group</span>
-                          </button>
+                          {can.manageGroups && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMoreTableMenu(false)
+                                setNewGroupName('')
+                                setNewGroupColor('#6c7ff5')
+                                setShowAddGroupModal(true)
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
+                            >
+                              <Plus size={14} />
+                              <span>Add New Group</span>
+                            </button>
+                          )}
                           <div className="w-full h-px bg-neutral-800 my-1" />
                           <button
                             type="button"
@@ -3423,22 +4867,95 @@ export default function ProjectDetailPage() {
 
                       <div className="w-px h-4 bg-neutral-700 mx-2" />
 
-                      <button
-                        type="button"
-                        onClick={handleBulkDelete}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
-                      >
-                        <Trash2 size={13} />
-                        <span>Delete</span>
-                      </button>
+                      {can.deleteTasks ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowBulkDeleteModal(true)}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-neutral-800 hover:bg-rose-900/60 text-rose-300 text-xs rounded transition cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete</span>
+                        </button>
+                      ) : (
+                        <span
+                          className="text-[11px] text-neutral-500"
+                          title="Hanya Project Manager yang boleh menghapus tugas"
+                        >
+                          Hapus tugas: khusus Project Manager
+                        </span>
+                      )}
                     </div>
+                  </div>
+                )}
+
+                {/* Peringatan migrasi: kolom meta subtask belum ada di database. */}
+                {subtaskColumns && !subtaskColumns.has('status_id') && (
+                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                    <span>
+                      Kolom status / penanggung jawab / tenggat / prioritas pada subtask belum ada
+                      di database, jadi perubahannya belum bisa disimpan. Jalankan{' '}
+                      <code className="rounded bg-amber-500/15 px-1 py-0.5">
+                        supabase/migrations/20261113000000_subtask_meta.sql
+                      </code>{' '}
+                      di Supabase → SQL Editor.
+                    </span>
                   </div>
                 )}
 
                 {/* Task Groups Table Container */}
                 <div className="space-y-8 flex-1">
+                  {!loadingBoard && !groups.some((g) => g.items.length > 0) && (
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-neutral-700/80 bg-[#191a1e] px-6 py-14 text-center">
+                      <p className="text-sm text-neutral-400">
+                        {groups.length === 0
+                          ? 'Belum ada grup tugas di board ini.'
+                          : 'Board ini masih kosong. Isi dengan contoh tugas atau buat grup sendiri.'}
+                      </p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleFillTemplate}
+                          disabled={fillingTemplate || !projectId}
+                          className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition cursor-pointer"
+                        >
+                          {fillingTemplate ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={14} />
+                          )}
+                          <span>{fillingTemplate ? 'Mengisi…' : 'Isi contoh tugas'}</span>
+                        </button>
+                        {can.manageGroups && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGroupName('')
+                              setNewGroupColor('#6c7ff5')
+                              setShowAddGroupModal(true)
+                            }}
+                            className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-semibold text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-md transition cursor-pointer"
+                          >
+                            <Plus size={14} strokeWidth={2.5} />
+                            <span>Add New Group</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {processedGroups.map((group) => {
                     const totalItems = group.items.length || 1
+                    // Rentang tanggal grup dihitung dari tugas nyata (bukan nilai statis).
+                    const dateTimes = group.items
+                      .map((i) => new Date(i.date).getTime())
+                      .filter((n) => !Number.isNaN(n))
+                    const groupDateRange = dateTimes.length
+                      ? `${fromISODate(
+                          new Date(Math.min(...dateTimes)).toISOString().slice(0, 10),
+                        )} – ${fromISODate(
+                          new Date(Math.max(...dateTimes)).toISOString().slice(0, 10),
+                        )}`
+                      : ''
                     // Dynamic progress bar: compute per-status counts
                     const statusCounts = statusList.map((s) => ({
                       ...s,
@@ -3483,19 +5000,25 @@ export default function ProjectDetailPage() {
                           <span className="text-[11px] text-neutral-500 font-normal ml-1">
                             ({group.items.length})
                           </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setNewTaskGroup(group.id)
-                              setShowNewItemModal(true)
-                            }}
-                            className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
-                            title="Tambah task"
-                            aria-label="Tambah task"
-                          >
-                            <Plus size={14} strokeWidth={2.5} />
-                          </button>
+                          {can.createTasks && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setNewTaskGroup(group.id)
+                                setShowGroupDropdown(false)
+                                setShowPersonDropdown(false)
+                                setShowStatusDropdown(false)
+                                setShowDateDropdown(false)
+                                setShowNewItemModal(true)
+                              }}
+                              className="p-0.5 rounded text-neutral-500 hover:text-blue-400 hover:bg-neutral-800/60 transition cursor-pointer"
+                              title="Tambah task"
+                              aria-label="Tambah task"
+                            >
+                              <Plus size={14} strokeWidth={2.5} />
+                            </button>
+                          )}
                         </div>
 
                         {/* Table View (When Expanded) */}
@@ -3527,7 +5050,20 @@ export default function ProjectDetailPage() {
                                     Person
                                   </th>
                                   <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
-                                    Status
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <span>Status</span>
+                                      {can.manageLabels && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setShowManageLabels(true)}
+                                          className="p-0.5 rounded text-neutral-500 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                                          title="Atur kolom status (UC-05)"
+                                          aria-label="Atur kolom status"
+                                        >
+                                          <Settings size={12} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </th>
                                   <th className="w-44 px-4 py-2 border-r border-neutral-800/80 font-normal text-center">
                                     Date
@@ -3540,9 +5076,11 @@ export default function ProjectDetailPage() {
                                       {col}
                                     </th>
                                   ))}
-                                  {/* Add Column Button */}
+                                  {/* Add Column Button — hanya Project Manager */}
                                   <th className="w-12 px-2 py-2 text-center relative">
-                                    <button
+                                    {can.manageColumns && (
+                                      <>
+                                        <button
                                       type="button"
                                       onClick={() => setShowAddColumnMenu(!showAddColumnMenu)}
                                       className="p-1 hover:text-white rounded transition cursor-pointer"
@@ -3572,6 +5110,8 @@ export default function ProjectDetailPage() {
                                             </button>
                                           ))}
                                         </div>
+                                      </>
+                                    )}
                                       </>
                                     )}
                                   </th>
@@ -3670,106 +5210,112 @@ export default function ProjectDetailPage() {
 
                                       </td>
 
-                                      {/* Person Avatars (Interactive Assignee Picker) */}
-                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center relative">
-                                        <div
-                                          onClick={() =>
-                                            setActiveAssigneePicker(
-                                              isAssigneePickerOpen
-                                                ? null
-                                                : { groupId: group.id, taskId: item.id }
-                                            )
-                                          }
-                                          className="flex items-center justify-center -space-x-1.5 cursor-pointer hover:opacity-80 transition"
-                                          title="Click to change assignee"
-                                        >
-                                          {item.personAvatars.map((av, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="w-6 h-6 rounded-full overflow-hidden border border-neutral-800 bg-neutral-700 shrink-0"
-                                            >
-                                              <Image
-                                                src={av}
-                                                alt="Assignee"
-                                                width={24}
-                                                height={24}
-                                                className="w-full h-full object-cover"
-                                              />
-                                            </div>
-                                          ))}
-                                        </div>
+                                      {/* Person: penanggung jawab tugas.
+                                          Hanya Project Manager yang bisa mengubah;
+                                          Member hanya melihat. */}
+                                      <td className="px-2 py-2.5 border-r border-neutral-800/80 text-center relative">
+                                        {can.assignTasks ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              if (isAssigneePickerOpen) {
+                                                setActiveAssigneePicker(null)
+                                                return
+                                              }
+                                              closeAllCellPickers()
+                                              setActiveAssigneePicker({
+                                                groupId: group.id,
+                                                taskId: item.id,
+                                                ...rectToAnchor(e.currentTarget),
+                                              })
+                                            }}
+                                            className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                              item.personNames?.[0]
+                                                ? 'hover:bg-neutral-800/70'
+                                                : 'hover:bg-neutral-800/70 text-neutral-500'
+                                            }`}
+                                            title={
+                                              item.personNames?.[0]
+                                                ? `Penanggung jawab: ${item.personNames[0]} — klik untuk ubah`
+                                                : 'Klik untuk menugaskan anggota'
+                                            }
+                                          >
+                                            {item.personNames?.[0] ? (
+                                              <>
+                                                <PersonAvatar
+                                                  name={item.personNames[0]}
+                                                  avatar={item.personAvatars?.[0]}
+                                                  size={22}
+                                                />
+                                                <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
+                                                  {item.personNames[0]}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <span className="w-[22px] h-[22px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center shrink-0">
+                                                  <Plus size={11} strokeWidth={2.5} />
+                                                </span>
+                                                <span className="text-[11px]">Tugaskan</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        ) : (
+                                          <span
+                                            className="w-full inline-flex items-center justify-center gap-1.5 px-1.5 py-1"
+                                            title={
+                                              item.personNames?.[0]
+                                                ? `Penanggung jawab: ${item.personNames[0]}`
+                                                : 'Belum ditugaskan'
+                                            }
+                                          >
+                                            {item.personNames?.[0] ? (
+                                              <>
+                                                <PersonAvatar
+                                                  name={item.personNames[0]}
+                                                  avatar={item.personAvatars?.[0]}
+                                                  size={22}
+                                                />
+                                                <span className="truncate max-w-[78px] text-[11px] text-neutral-300">
+                                                  {item.personNames[0]}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="text-[11px] text-neutral-600">—</span>
+                                            )}
+                                          </span>
+                                        )}
 
-                                        {/* Assignee Popover */}
-                                        {isAssigneePickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveAssigneePicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                                                Assign Members
-                                              </div>
-                                              <div className="space-y-1">
-                                                {members.map((m) => {
-                                                  const isAssigned = (item.personNames || []).includes(
-                                                    m.name
-                                                  )
-                                                  return (
-                                                    <button
-                                                      key={m.id}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        toggleTaskAssignee(group.id, item.id, m)
-                                                      }
-                                                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer text-left"
-                                                    >
-                                                      <div className="flex items-center gap-2">
-                                                        <div className="w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                                          <Image
-                                                            src={m.avatar}
-                                                            alt={m.name}
-                                                            width={20}
-                                                            height={20}
-                                                            className="w-full h-full object-cover"
-                                                          />
-                                                        </div>
-                                                        <span className="text-neutral-200 text-xs">
-                                                          {m.name}
-                                                        </span>
-                                                      </div>
-                                                      <div
-                                                        className={`w-4 h-4 rounded border flex items-center justify-center ${
-                                                          isAssigned
-                                                            ? 'bg-blue-600 border-blue-500 text-white'
-                                                            : 'border-neutral-600'
-                                                        }`}
-                                                      >
-                                                        {isAssigned && (
-                                                          <Check size={11} strokeWidth={3} />
-                                                        )}
-                                                      </div>
-                                                    </button>
-                                                  )
-                                                })}
-                                              </div>
-                                            </div>
-                                          </>
+                                        {can.assignTasks && isAssigneePickerOpen && (
+                                          <AssigneeMenu
+                                            members={members}
+                                            assignedNames={item.personNames || []}
+                                            anchor={activeAssigneePicker}
+                                            onPick={(m) => toggleTaskAssignee(group.id, item.id, m)}
+                                            onClear={() => clearTaskAssignee(group.id, item.id)}
+                                            onClose={() => setActiveAssigneePicker(null)}
+                                          />
                                         )}
                                       </td>
 
-                                      {/* Status Badge with ORDERED STATUS DROPDOWN PICKER */}
-                                      <td className="p-0 border-r border-neutral-800/80 relative">
+                                      {/* Status Badge — popover lewat portal agar
+                                          tidak tertimpa sel lain dan tidak terpotong tabel */}
+                                      <td className="p-0 border-r border-neutral-800/80">
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setActiveStatusPicker(
-                                              isStatusPickerOpen
-                                                ? null
-                                                : { groupId: group.id, taskId: item.id }
-                                            )
-                                          }
-                                          title="Click to select status"
+                                          onClick={(e) => {
+                                            if (isStatusPickerOpen) {
+                                              setActiveStatusPicker(null)
+                                              return
+                                            }
+                                            closeAllCellPickers()
+                                            setActiveStatusPicker({
+                                              groupId: group.id,
+                                              taskId: item.id,
+                                              ...rectToAnchor(e.currentTarget),
+                                            })
+                                          }}
+                                          title={`Status: ${item.status} — klik untuk ubah`}
                                           style={{
                                             backgroundColor: currentStatusDef.colorCode,
                                             color: getContrastText(currentStatusDef.colorCode),
@@ -3780,131 +5326,352 @@ export default function ProjectDetailPage() {
                                           <ChevronDown size={12} className="opacity-70" />
                                         </button>
 
-                                        {/* Status Picker Popover */}
-                                        {isStatusPickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveStatusPicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-52 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
-                                                Select Status
-                                              </div>
-
-                                              <div className="space-y-1">
-                                                {statusList.map((st) => {
-                                                  const isSelected = item.status === st.label
-                                                  return (
-                                                    <button
-                                                      key={st.id}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        setTaskStatus(group.id, item.id, st.label)
-                                                      }
-                                                      style={{
-                                                        backgroundColor: st.colorCode,
-                                                        color: getContrastText(st.colorCode),
-                                                      }}
-                                                      className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm hover:brightness-90"
-                                                    >
-                                                      <span>{st.label}</span>
-                                                      {isSelected && (
-                                                        <Check size={14} strokeWidth={2.5} />
-                                                      )}
-                                                    </button>
-                                                  )
-                                                })}
-                                              </div>
-
-                                              {/* Add New Label */}
-                                              <div className="mt-2 pt-2 border-t border-neutral-800/80">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setActiveStatusPicker(null)
-                                                    setShowManageLabels(true)
-                                                  }}
-                                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 transition cursor-pointer"
-                                                >
-                                                  <Plus size={13} strokeWidth={2.5} />
-                                                  <span>Add New Label</span>
-                                                </button>
-                                              </div>
+                                        {isStatusPickerOpen && activeStatusPicker && (
+                                          <TablePopover
+                                            anchor={activeStatusPicker}
+                                            width={208}
+                                            estimatedHeight={4 * 38 + 92}
+                                            ariaLabel="Pilih status"
+                                            onClose={() => setActiveStatusPicker(null)}
+                                          >
+                                            <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                              Select Status
                                             </div>
-                                          </>
+
+                                            <div className="space-y-1">
+                                              {statusList.map((st) => {
+                                                const isSelected = item.status === st.label
+                                                return (
+                                                  <button
+                                                    key={st.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setTaskStatus(group.id, item.id, st.label)
+                                                      setActiveStatusPicker(null)
+                                                    }}
+                                                    style={{
+                                                      backgroundColor: st.colorCode,
+                                                      color: getContrastText(st.colorCode),
+                                                    }}
+                                                    className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center transition cursor-pointer flex items-center justify-between shadow-sm hover:brightness-90"
+                                                  >
+                                                    <span>{st.label}</span>
+                                                    {isSelected && (
+                                                      <Check size={14} strokeWidth={2.5} />
+                                                    )}
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
+
+                                            {/* Add New Label */}
+                                            <div className="mt-2 pt-2 border-t border-neutral-800/80">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setActiveStatusPicker(null)
+                                                  setShowManageLabels(true)
+                                                }}
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 transition cursor-pointer"
+                                              >
+                                                <Plus size={13} strokeWidth={2.5} />
+                                                <span>Add New Label</span>
+                                              </button>
+                                            </div>
+                                          </TablePopover>
                                         )}
                                       </td>
 
-                                      {/* Date (Interactive Date Picker) */}
-                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300 relative">
+                                      {/* Date — popover lewat portal (lihat Status) */}
+                                      <td className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-300">
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setActiveDatePicker(
-                                              isDatePickerOpen
-                                                ? null
-                                                : { groupId: group.id, taskId: item.id }
-                                            )
-                                          }
+                                          onClick={(e) => {
+                                            if (isDatePickerOpen) {
+                                              setActiveDatePicker(null)
+                                              return
+                                            }
+                                            closeAllCellPickers()
+                                            setActiveDatePicker({
+                                              groupId: group.id,
+                                              taskId: item.id,
+                                              ...rectToAnchor(e.currentTarget),
+                                            })
+                                          }}
                                           className="hover:text-white hover:underline transition cursor-pointer"
-                                          title="Click to change date"
+                                          title={`Tanggal: ${item.date} — klik untuk ubah`}
                                         >
                                           {item.date}
                                         </button>
 
-                                        {isDatePickerOpen && (
-                                          <>
-                                            <div
-                                              className="fixed inset-0 z-20"
-                                              onClick={() => setActiveDatePicker(null)}
-                                            />
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 z-30 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                              <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
-                                                Select Date
-                                              </div>
-                                              <div className="space-y-1">
-                                                {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map(
-                                                  (d) => (
-                                                    <button
-                                                      key={d}
-                                                      type="button"
-                                                      onClick={() =>
-                                                        setTaskDate(group.id, item.id, d)
-                                                      }
-                                                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer ${
-                                                        item.date === d
-                                                          ? 'bg-blue-600/15 text-blue-400 font-semibold'
-                                                          : 'text-neutral-200'
-                                                      }`}
-                                                    >
-                                                      <span>{d}</span>
-                                                      {item.date === d && <Check size={13} />}
-                                                    </button>
-                                                  )
-                                                )}
-                                              </div>
+                                        {isDatePickerOpen && activeDatePicker && (
+                                          <TablePopover
+                                            anchor={activeDatePicker}
+                                            width={192}
+                                            estimatedHeight={4 * 30 + 56}
+                                            ariaLabel="Pilih tanggal"
+                                            onClose={() => setActiveDatePicker(null)}
+                                          >
+                                            <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1">
+                                              Select Date
                                             </div>
-                                          </>
+                                            <div className="space-y-1">
+                                              {['Mar 28, 2025', 'Mar 29, 2025', 'Mar 30, 2025', 'Apr 02, 2025'].map(
+                                                (d) => (
+                                                  <button
+                                                    key={d}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setTaskDate(group.id, item.id, d)
+                                                      setActiveDatePicker(null)
+                                                    }}
+                                                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer ${
+                                                      item.date === d
+                                                        ? 'bg-blue-600/15 text-blue-400 font-semibold'
+                                                        : 'text-neutral-200'
+                                                    }`}
+                                                  >
+                                                    <span>{d}</span>
+                                                    {item.date === d && <Check size={13} />}
+                                                  </button>
+                                                )
+                                              )}
+                                            </div>
+                                          </TablePopover>
                                         )}
                                       </td>
 
                                       {/* Extra Columns Values */}
-                                      {extraColumns.map((col) => (
-                                        <td
-                                          key={col}
-                                          className="px-4 py-2.5 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
-                                        >
-                                          {col === 'Priority' ? (
-                                            <PriorityMenu
-                                              value={item.priority ?? 'medium'}
-                                              onSelect={(p) => setTaskPriority(group.id, item.id, p)}
-                                            />
-                                          ) : (
-                                            '-'
-                                          )}
-                                        </td>
-                                      ))}
+                                      {extraColumns.map((col) => {
+                                        const isFilesOpen =
+                                          cellPanel?.groupId === group.id &&
+                                          cellPanel?.taskId === item.id &&
+                                          cellPanel?.kind === 'files'
+                                        const isNotesOpen =
+                                          cellPanel?.groupId === group.id &&
+                                          cellPanel?.taskId === item.id &&
+                                          cellPanel?.kind === 'notes'
+                                        const files = item.attachments ?? []
+                                        return (
+                                          <td
+                                            key={col}
+                                            className="px-2 py-2 border-r border-neutral-800/80 text-center text-xs text-neutral-400"
+                                          >
+                                            {col === 'Priority' ? (
+                                              <div className="py-0.5">
+                                                <PriorityMenu
+                                                  value={item.priority ?? 'medium'}
+                                                  onSelect={(p) => setTaskPriority(group.id, item.id, p)}
+                                                />
+                                              </div>
+                                            ) : col === 'Timeline' ? (
+                                              item.date || '—'
+                                            ) : col === 'Files' ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => openCellPanel(group.id, item.id, 'files', e.currentTarget)}
+                                                  className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                                    files.length > 0
+                                                      ? 'text-neutral-300 hover:bg-neutral-800/70'
+                                                      : 'text-neutral-500 hover:bg-neutral-800/70'
+                                                  }`}
+                                                  title={
+                                                    files.length > 0
+                                                      ? `${files.length} berkas/tautan — klik untuk kelola`
+                                                      : 'Klik untuk menambah berkas atau tautan'
+                                                  }
+                                                  aria-label="Kelola berkas dan tautan"
+                                                >
+                                                  <Paperclip size={13} className="shrink-0" />
+                                                  <span className="text-[11px]">
+                                                    {files.length > 0 ? `${files.length} berkas` : 'Tambah'}
+                                                  </span>
+                                                </button>
+
+                                                {isFilesOpen && cellPanel && (
+                                                  <TablePopover
+                                                    anchor={cellPanel}
+                                                    width={320}
+                                                    estimatedHeight={300}
+                                                    ariaLabel="Berkas dan tautan tugas"
+                                                    onClose={() => setCellPanel(null)}
+                                                  >
+                                                    <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                                      Berkas &amp; Tautan
+                                                    </div>
+
+                                                    {files.length === 0 ? (
+                                                      <p className="px-2 py-2 text-[11px] text-neutral-500">
+                                                        Belum ada berkas. Unggah berkas atau tempel tautan
+                                                        Google Drive di bawah.
+                                                      </p>
+                                                    ) : (
+                                                      <ul className="space-y-0.5 max-h-40 overflow-y-auto">
+                                                        {files.map((a) => (
+                                                          <li key={a.id} className="flex items-center gap-1.5">
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleOpenAttachment(a)}
+                                                              className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer text-left"
+                                                              title={a.url ?? a.name}
+                                                            >
+                                                              {a.url ? (
+                                                                <Link2 size={13} className="text-blue-400 shrink-0" />
+                                                              ) : (
+                                                                <FileText size={13} className="text-neutral-400 shrink-0" />
+                                                              )}
+                                                              <span className="truncate">{a.name}</span>
+                                                            </button>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleRemoveAttachment(group.id, item.id, a)}
+                                                              className="p-1 rounded text-neutral-600 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
+                                                              title="Hapus lampiran"
+                                                              aria-label={`Hapus ${a.name}`}
+                                                            >
+                                                              <Trash2 size={12} />
+                                                            </button>
+                                                          </li>
+                                                        ))}
+                                                      </ul>
+                                                    )}
+
+                                                    <div className="mt-2 pt-2 border-t border-neutral-800/80 space-y-2">
+                                                      <button
+                                                        type="button"
+                                                        disabled={fileBusy}
+                                                        onClick={() => {
+                                                          setFilePickTask({ groupId: group.id, taskId: item.id })
+                                                          quickFileRef.current?.click()
+                                                        }}
+                                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                                                      >
+                                                        {fileBusy ? (
+                                                          <Loader2 size={13} className="animate-spin shrink-0" />
+                                                        ) : (
+                                                          <Upload size={13} className="shrink-0" />
+                                                        )}
+                                                        <span>{fileBusy ? 'Mengunggah…' : 'Unggah berkas'}</span>
+                                                      </button>
+
+                                                      <div className="space-y-1.5">
+                                                        <div className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                                                          <Link2 size={11} />
+                                                          <span>Tautan (Google Drive)</span>
+                                                        </div>
+                                                        <input
+                                                          type="text"
+                                                          value={linkName}
+                                                          onChange={(e) => setLinkName(e.target.value)}
+                                                          placeholder="Nama tautan (opsional)"
+                                                          className="w-full h-8 px-2.5 bg-[#111214] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                                                        />
+                                                        <input
+                                                          type="text"
+                                                          value={linkUrl}
+                                                          onChange={(e) => setLinkUrl(e.target.value)}
+                                                          onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                              e.preventDefault()
+                                                              handleAddLink()
+                                                            }
+                                                          }}
+                                                          placeholder="https://drive.google.com/..."
+                                                          className="w-full h-8 px-2.5 bg-[#111214] border border-neutral-700 rounded-lg text-xs text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+                                                        />
+                                                        <button
+                                                          type="button"
+                                                          disabled={linkBusy || !linkUrl.trim()}
+                                                          onClick={handleAddLink}
+                                                          className="w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                                                        >
+                                                          {linkBusy && <Loader2 size={12} className="animate-spin" />}
+                                                          <span>{linkBusy ? 'Menyimpan…' : 'Tambah tautan'}</span>
+                                                        </button>
+                                                        {linkError && (
+                                                          <p className="px-1 text-[11px] leading-snug text-rose-300">
+                                                            {linkError}
+                                                          </p>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  </TablePopover>
+                                                )}
+                                              </>
+                                            ) : col === 'Notes' ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => openCellPanel(group.id, item.id, 'notes', e.currentTarget)}
+                                                  className={`w-full rounded-md px-1.5 py-1 transition cursor-pointer ${
+                                                    item.description
+                                                      ? 'text-neutral-300 hover:bg-neutral-800/70'
+                                                      : 'text-neutral-500 hover:bg-neutral-800/70'
+                                                  }`}
+                                                  title={item.description || 'Klik untuk menambah catatan'}
+                                                  aria-label="Kelola catatan tugas"
+                                                >
+                                                  <span className="block max-w-[10rem] truncate mx-auto text-[11px] text-left">
+                                                    {item.description || '+ Catatan'}
+                                                  </span>
+                                                </button>
+
+                                                {isNotesOpen && cellPanel && (
+                                                  <TablePopover
+                                                    anchor={cellPanel}
+                                                    width={300}
+                                                    estimatedHeight={250}
+                                                    ariaLabel="Catatan tugas"
+                                                    onClose={() => setCellPanel(null)}
+                                                  >
+                                                    <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80 mb-1.5">
+                                                      Catatan Tugas
+                                                    </div>
+                                                    <textarea
+                                                      value={noteDraft}
+                                                      onChange={(e) => setNoteDraft(e.target.value)}
+                                                      rows={5}
+                                                      autoFocus
+                                                      placeholder="Tulis catatan untuk tugas ini…"
+                                                      className="w-full bg-[#111214] border border-neutral-700 rounded-lg p-2 text-xs text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-blue-500 transition resize-y"
+                                                    />
+                                                    <p className="mt-1 px-1 text-[10px] text-neutral-500">
+                                                      Tersimpan sebagai deskripsi tugas (kolom Description
+                                                      pada panel detail).
+                                                    </p>
+                                                    {noteError && (
+                                                      <p className="mt-1 px-1 text-[11px] leading-snug text-rose-300">
+                                                        {noteError}
+                                                      </p>
+                                                    )}
+                                                    <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-neutral-800/80">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => setCellPanel(null)}
+                                                        className="px-2.5 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                                                      >
+                                                        Batal
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        disabled={noteBusy}
+                                                        onClick={handleSaveNote}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-wait transition cursor-pointer"
+                                                      >
+                                                        {noteBusy && <Loader2 size={12} className="animate-spin" />}
+                                                        <span>{noteBusy ? 'Menyimpan…' : 'Simpan'}</span>
+                                                      </button>
+                                                    </div>
+                                                  </TablePopover>
+                                                )}
+                                              </>
+                                            ) : (
+                                              '—'
+                                            )}
+                                          </td>
+                                        )
+                                      })}
 
                                       {/* Extra Column cell */}
                                       <td className="px-2 py-2.5 text-center text-neutral-600"></td>
@@ -3969,7 +5736,7 @@ export default function ProjectDetailPage() {
                                   <td className="px-4 py-2 border-r border-neutral-800/80">
                                     <button
                                       type="button"
-                                      onClick={() => setShowNewItemModal(true)}
+                                      onClick={() => openNewItemModal()}
                                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-blue-400 transition cursor-pointer"
                                     >
                                       <Plus size={13} strokeWidth={2.5} />
@@ -4014,7 +5781,7 @@ export default function ProjectDetailPage() {
                                   {/* Date range pill */}
                                   <td className="py-1 px-3 border-r border-neutral-800/80 text-center">
                                     <div className="inline-block px-3 py-1 bg-[#1e2025] border border-neutral-700/60 rounded text-[11px] text-neutral-300 font-normal">
-                                      {group.dateRange}
+                                      {groupDateRange || '—'}
                                     </div>
                                   </td>
 
@@ -4038,7 +5805,19 @@ export default function ProjectDetailPage() {
               </>
             )}
 
-            {/* TAB 2: DOC (CLIENT BRIEF) */}
+            {/* TAB 2: KANBAN */}
+            {activeTab === 'Kanban' && (
+              <KanbanView
+                groups={groups}
+                statusList={statusList}
+                onMove={setTaskStatus}
+                onOpen={openTaskDetail}
+                onAdd={(statusLabel) => openNewItemModal(undefined, statusLabel)}
+                canAdd={can.createTasks}
+              />
+            )}
+
+            {/* TAB 3: DOC (CLIENT BRIEF) */}
             {activeTab === 'Doc' && (
               <div className="flex-1 flex flex-col">
                 {/* Real Docs Full Feature Toolbar */}
@@ -4552,13 +6331,7 @@ export default function ProjectDetailPage() {
                                 className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left text-xs text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
                               >
                                 <div className="w-6 h-6 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                  <Image
-                                    src={member.avatar}
-                                    alt={member.name}
-                                    width={24}
-                                    height={24}
-                                    className="w-full h-full object-cover"
-                                  />
+                                  <PersonAvatar name={member.name} avatar={member.avatar} size={24} />
                                 </div>
                                 <div className="overflow-hidden">
                                   <p className="font-semibold text-xs leading-none truncate">
@@ -4579,6 +6352,19 @@ export default function ProjectDetailPage() {
 
                 {/* Doc Content Area */}
                 <div className="max-w-4xl space-y-6">
+                  <input
+                    ref={docImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDocImagePick}
+                    className="hidden"
+                  />
+                  <input
+                    ref={docFileInputRef}
+                    type="file"
+                    onChange={handleDocFilePick}
+                    className="hidden"
+                  />
                   {/* Doc Title Heading & Metadata Header */}
                   <div>
                     <h1 className="text-2xl font-bold text-white tracking-tight mb-3">
@@ -4589,19 +6375,17 @@ export default function ProjectDetailPage() {
                       <div className="flex items-center gap-1.5">
                         <Clock size={13} className="text-neutral-500" />
                         <span>
-                          Creator <strong className="text-white font-semibold">George</strong>
+                          Creator{' '}
+                          <strong className="text-white font-semibold">
+                            {me.name || 'Pengguna'}
+                          </strong>
                         </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 text-neutral-400">
-                        <span>Created</span>
-                        <span className="text-neutral-200">Apr 13,2026, 20:56</span>
                       </div>
 
                       <div className="flex items-center gap-1.5 text-neutral-400">
                         <Clock size={13} className="text-neutral-500" />
                         <span>Last updated</span>
-                        <span className="text-neutral-200">{lastUpdated}</span>
+                        <span className="text-neutral-200">{lastUpdated || '—'}</span>
                       </div>
                     </div>
                   </div>
@@ -4804,50 +6588,82 @@ export default function ProjectDetailPage() {
                                 <span className="text-4xl font-extrabold text-white font-serif tracking-tighter drop-shadow-sm select-none">
                                   {block.fileData.icon}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    const name = block.fileData?.name || 'dokumen.txt'
-                                    const blob = new Blob(
-                                      [`${name}\nUkuran: ${block.fileData?.size || '-'}\n\n(Contoh berkas dari tab Doc.)`],
-                                      { type: 'text/plain' }
-                                    )
-                                    const url = URL.createObjectURL(blob)
-                                    const a = document.createElement('a')
-                                    a.href = url
-                                    a.download = name
-                                    document.body.appendChild(a)
-                                    a.click()
-                                    document.body.removeChild(a)
-                                    URL.revokeObjectURL(url)
-                                  }}
-                                  className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                                  title="Download document"
-                                >
-                                  <Download size={14} />
-                                </button>
+                                {block.fileData.path ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const url = docFileUrls[block.fileData!.path!]
+                                      if (!url) {
+                                        setNotice('Berkas sedang disiapkan, coba lagi sebentar.')
+                                        return
+                                      }
+                                      window.open(url, '_blank', 'noopener,noreferrer')
+                                    }}
+                                    className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/30 hover:bg-black/50 text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                    title="Unduh berkas"
+                                  >
+                                    <Download size={14} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setDocFileTarget(block.id)
+                                      docFileInputRef.current?.click()
+                                    }}
+                                    className="absolute inset-0 flex items-center justify-center bg-black/40 text-[11px] font-semibold text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                  >
+                                    {docUploading ? 'Mengunggah…' : 'Pilih berkas'}
+                                  </button>
+                                )}
                               </div>
 
                               <div className="px-2.5 py-2 bg-[#141517] border-t border-neutral-800/80">
                                 <p className="text-[11px] text-neutral-300 font-medium truncate group-hover:text-blue-400 transition">
                                   {block.fileData.name}
                                 </p>
+                                {block.fileData.size && (
+                                  <p className="text-[10px] text-neutral-500">
+                                    {block.fileData.size}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           )}
 
-                          {block.type === 'image' && block.imageUrl && (
+                          {block.type === 'image' && (
                             <div className="space-y-1.5">
-                              <div className="w-40 h-28 rounded-lg overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-neutral-700 transition">
-                                <Image
-                                  src={block.imageUrl}
-                                  alt={block.content || 'Image preview'}
-                                  width={160}
-                                  height={112}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setImageTargetBlock(block.id)
+                                  docImageInputRef.current?.click()
+                                }}
+                                className="w-40 h-28 rounded-lg overflow-hidden border border-neutral-800/80 relative shadow-md group cursor-pointer hover:border-blue-500/60 transition bg-[#191a1e] flex items-center justify-center"
+                                title={block.imageUrl ? 'Ganti gambar' : 'Pilih gambar'}
+                              >
+                                {block.imageUrl ? (
+                                  <Image
+                                    src={
+                                      /^(https?:|data:)/.test(block.imageUrl)
+                                        ? block.imageUrl
+                                        : (docFileUrls[block.imageUrl] ?? '')
+                                    }
+                                    alt={block.content || 'Image preview'}
+                                    width={160}
+                                    height={112}
+                                    unoptimized
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                ) : (
+                                  <span className="flex flex-col items-center gap-1.5 text-[11px] text-neutral-500 group-hover:text-neutral-300 transition">
+                                    <ImageIcon size={18} />
+                                    Pilih gambar
+                                  </span>
+                                )}
+                              </button>
                               {block.content && (
                                 <p className="text-[11px] text-neutral-500 italic pl-1">
                                   {block.content}
@@ -4901,30 +6717,15 @@ export default function ProjectDetailPage() {
                       setDatePickerYear(parsed.getFullYear())
                     }
                   } catch {}
-                  setNewTaskDate(date ? `${date}, 12:00 AM` : 'Feb 4, 2026, 12:00 AM')
-                  setShowNewItemModal(true)
-                  setShowGroupDropdown(false)
-                  setShowPersonDropdown(false)
-                  setShowStatusDropdown(false)
-                  setShowDateDropdown(false)
+                  openNewItemModal(date)
                 }}
               />
             )}
 
-            {/* CUSTOM VIEWS (Gantt / Chart) */}
-            {(() => {
-              const cv = customViews.find((v) => v.name === activeTab)
-              if (!cv) return null
-              return (
-                <div className="flex-1">
-                  {cv.type === 'gantt' ? (
-                    <GanttView groups={groups} statusList={statusList} />
-                  ) : (
-                    <ChartView groups={groups} statusList={statusList} />
-                  )}
-                </div>
-              )
-            })()}
+            {/* TAB: GANTT & CHART (distribusi status + timeline pengerjaan) */}
+            {activeTab === 'Gantt & Chart' && (
+              <GanttChartView groups={groups} statusList={statusList} />
+            )}
           </div>
         </main>
       </div>
@@ -5104,84 +6905,93 @@ export default function ProjectDetailPage() {
                     <span className="text-xs text-neutral-300 font-medium">Person</span>
                   </div>
                   <div className="relative flex-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowPersonDropdown(!showPersonDropdown)
-                        setShowGroupDropdown(false)
-                        setShowStatusDropdown(false)
-                      }}
-                      className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
-                    >
-                      {selectedAssigneeMember ? (
-                        <div className="flex items-center gap-2">
-                          <img
-                            src={selectedAssigneeMember.avatar}
-                            alt={selectedAssigneeMember.name}
-                            className="w-5 h-5 rounded-full object-cover shrink-0"
-                          />
-                          <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
-                        </div>
-                      ) : (
-                        <div className="w-full flex items-center justify-center text-neutral-500">
-                          <div className="w-5 h-5 rounded-full border border-neutral-600 flex items-center justify-center">
-                            <UserIcon size={11} className="text-neutral-400" />
-                          </div>
-                        </div>
-                      )}
-                    </button>
-
-                    {/* Person Dropdown Popover (Slide 3) */}
-                    {showPersonDropdown && (
-                      <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
-                          <Search size={13} className="text-neutral-400 shrink-0" />
-                          <input
-                            type="text"
-                            placeholder="Search group"
-                            value={searchPersonQuery}
-                            onChange={(e) => setSearchPersonQuery(e.target.value)}
-                            autoFocus
-                            className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
-                          />
-                        </div>
-                        <p className="text-[11px] font-semibold text-neutral-400 px-2 py-1">Suggested Users</p>
-                        <div className="space-y-0.5 max-h-44 overflow-y-auto">
-                          {filteredMembers.map((m) => (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => {
-                                setNewTaskAssignee(m.name)
-                                setShowPersonDropdown(false)
-                              }}
-                              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-left transition cursor-pointer ${
-                                newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
-                              }`}
-                            >
-                              <img src={m.avatar} alt={m.name} className="w-5 h-5 rounded-full object-cover shrink-0" />
-                              <span className="text-xs text-neutral-200">{m.name}</span>
-                            </button>
-                          ))}
-                        </div>
+                    {can.assignTasks ? (
+                      <>
                         <button
                           type="button"
-                          onClick={async () => {
-                            const email = prompt('Enter email address to invite:')
-                            if (!email || !projectId) return
-                            try {
-                              await addMemberByEmail(projectId, email.trim())
-                              await refreshMembers()
-                            } catch (err) {
-                              alert(err instanceof Error ? err.message : 'Failed to invite member')
-                            }
-                            setShowPersonDropdown(false)
+                          onClick={() => {
+                            setShowPersonDropdown(!showPersonDropdown)
+                            setShowGroupDropdown(false)
+                            setShowStatusDropdown(false)
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                          className="w-full h-9 px-3 rounded-md bg-[#282a32] hover:bg-[#2f323c] border border-neutral-700/60 flex items-center justify-between cursor-pointer transition text-left"
                         >
-                          <Mail size={13} />
-                          <span>Email an invite to a new member</span>
+                          {selectedAssigneeMember ? (
+                            <div className="flex items-center gap-2">
+                              <PersonAvatar
+                                name={selectedAssigneeMember.name}
+                                avatar={selectedAssigneeMember.avatar}
+                                size={20}
+                              />
+                              <span className="text-xs text-neutral-200">{selectedAssigneeMember.name}</span>
+                            </div>
+                          ) : (
+                            <div className="w-full flex items-center justify-center text-neutral-500">
+                              <div className="w-5 h-5 rounded-full border border-neutral-600 flex items-center justify-center">
+                                <UserIcon size={11} className="text-neutral-400" />
+                              </div>
+                            </div>
+                          )}
                         </button>
+
+                        {/* Person Dropdown Popover (Slide 3) */}
+                        {showPersonDropdown && (
+                          <div className="absolute left-0 top-full mt-1.5 w-full bg-[#1e2025] border border-neutral-700 rounded-lg shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 duration-100">
+                            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#16171b] border border-blue-500 rounded-md mb-2">
+                              <Search size={13} className="text-neutral-400 shrink-0" />
+                              <input
+                                type="text"
+                                placeholder="Search group"
+                                value={searchPersonQuery}
+                                onChange={(e) => setSearchPersonQuery(e.target.value)}
+                                autoFocus
+                                className="bg-transparent text-xs text-white placeholder:text-neutral-500 outline-none w-full"
+                              />
+                            </div>
+                            <p className="text-[11px] font-semibold text-neutral-400 px-2 py-1">Suggested Users</p>
+                            <div className="space-y-0.5 max-h-44 overflow-y-auto">
+                              {filteredMembers.map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewTaskAssignee(m.name)
+                                    setShowPersonDropdown(false)
+                                  }}
+                                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-left transition cursor-pointer ${
+                                    newTaskAssignee === m.name ? 'bg-blue-600/20' : 'hover:bg-neutral-800'
+                                  }`}
+                                >
+                                  <PersonAvatar name={m.name} avatar={m.avatar} size={20} />
+                                  <span className="text-xs text-neutral-200">{m.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                            {can.inviteMembers && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowPersonDropdown(false)
+                                  router.push(
+                                    `/project/${slugify(scopeTitle)}/${slugify(cardTitle)}/members`,
+                                  )
+                                }}
+                                className="w-full flex items-center gap-2 px-2.5 py-2 mt-1.5 border-t border-neutral-800 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
+                              >
+                                <Mail size={13} />
+                                <span>Kelola anggota &amp; undang lewat email</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div
+                        className="w-full h-9 px-3 rounded-md bg-[#22242b] border border-neutral-700/40 flex items-center gap-2 text-xs text-neutral-500"
+                        title="Penanggung jawab ditetapkan oleh Project Manager"
+                      >
+                        <UserIcon size={12} />
+                        <span>Ditetapkan oleh Project Manager</span>
                       </div>
                     )}
                   </div>
@@ -5759,7 +7569,7 @@ export default function ProjectDetailPage() {
       )}
 
       {/* ======================== ADD WORKSPACE MODAL ======================== */}
-      {showAddWorkspaceModal && (
+      {showAddWorkspaceModal && canManageWorkspace && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -5770,11 +7580,18 @@ export default function ProjectDetailPage() {
               e.preventDefault()
               const name = newWorkspaceName.trim()
               if (!name) return
-              const created = await createWorkspace(name).catch(() => null)
-              if (created) setWorkspaces((prev) => [...prev, created])
-              setSelectedWorkspace(name)
-              setNewWorkspaceName('')
-              setShowAddWorkspaceModal(false)
+              const created = await createWorkspace(name).catch((err) => {
+                setNotice(
+                  `Gagal membuat workspace: ${err instanceof Error ? err.message : 'penyimpanan tidak tersedia'}`,
+                )
+                return null
+              })
+              if (created) {
+                setWorkspaces((prev) => [...prev, created])
+                setSelectedWorkspace(created.name)
+                setNewWorkspaceName('')
+                setShowAddWorkspaceModal(false)
+              }
             }}
             className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6 animate-in fade-in zoom-in-95 duration-150"
           >
@@ -5852,7 +7669,7 @@ export default function ProjectDetailPage() {
 
         const toggleSubtask = (subId: string) => {
           const sub = (task.subtasks || []).find((s) => s.id === subId)
-          if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(() => {})
+          if (projectId && sub) setSubtaskDone(subId, !sub.done).catch(notifySaveError)
           updateTask(group.id, task.id, {
             subtasks: (task.subtasks || []).map((s) =>
               s.id === subId ? { ...s, done: !s.done } : s
@@ -5861,24 +7678,59 @@ export default function ProjectDetailPage() {
         }
 
         const deleteSubtask = (subId: string) => {
-          if (projectId) deleteSubtaskRow(subId).catch(() => {})
+          if (projectId) deleteSubtaskRow(subId).catch(notifySaveError)
           updateTask(group.id, task.id, {
             subtasks: (task.subtasks || []).filter((s) => s.id !== subId),
           })
         }
 
-        const addAttachment = (name: string) =>
-          updateTask(group.id, task.id, {
-            attachments: [
-              ...(task.attachments || []),
-              { id: `att-${Date.now()}`, name, owner: me.name, avatar: me.avatar },
-            ],
-          })
+        // Unggah berkas sungguhan ke Supabase Storage lalu catat metadatanya (F-12).
+        const addAttachment = async (file: File) => {
+          setAttachmentBusy(true)
+          try {
+            const row = await uploadAttachment(task.id, file)
+            updateTask(group.id, task.id, {
+              attachments: [
+                ...(task.attachments || []),
+                {
+                  id: row.id,
+                  name: row.name,
+                  owner: me.name,
+                  avatar: me.avatar,
+                  storagePath: row.storage_path ?? null,
+                },
+              ],
+            })
+          } catch (err) {
+            notifySaveError(err)
+          } finally {
+            setAttachmentBusy(false)
+          }
+        }
 
-        const deleteAttachment = (attId: string) =>
-          updateTask(group.id, task.id, {
-            attachments: (task.attachments || []).filter((a) => a.id !== attId),
-          })
+        const openAttachment = async (storagePath: string | null) => {
+          if (!storagePath) {
+            setNotice('Berkas ini hanya tercatat namanya (diunggah sebelum fitur unggah aktif).')
+            return
+          }
+          const url = await getAttachmentUrl(storagePath)
+          if (!url) {
+            setNotice('Gagal membuka lampiran.')
+            return
+          }
+          window.open(url, '_blank', 'noopener,noreferrer')
+        }
+
+        const deleteAttachment = async (attId: string, storagePath: string | null) => {
+          try {
+            await deleteAttachmentWithFile(attId, storagePath)
+            updateTask(group.id, task.id, {
+              attachments: (task.attachments || []).filter((a) => a.id !== attId),
+            })
+          } catch (err) {
+            notifySaveError(err)
+          }
+        }
 
         const postComment = async () => {
           const text = detailComment.trim()
@@ -5907,20 +7759,13 @@ export default function ProjectDetailPage() {
 
         const toggleCommentLike = (commentId: string) => {
           const current = (task.comments || []).find((c) => c.id === commentId)
-          if (projectId && current) likeComment(commentId, (current.likes || 0) + 1).catch(() => {})
+          if (projectId && current) likeComment(commentId, (current.likes || 0) + 1).catch(notifySaveError)
           updateTask(group.id, task.id, {
             comments: (task.comments || []).map((c) =>
               c.id === commentId ? { ...c, likes: (c.likes || 0) + 1 } : c
             ),
           })
         }
-
-        const toggleCommentReaction = (commentId: string) =>
-          updateTask(group.id, task.id, {
-            comments: (task.comments || []).map((c) =>
-              c.id === commentId ? { ...c, reactions: (c.reactions || 0) + 1 } : c
-            ),
-          })
 
         const addReply = async (commentId: string, text: string) => {
           const trimmed = text.trim()
@@ -6106,68 +7951,76 @@ export default function ProjectDetailPage() {
                     <div className="flex items-center gap-4 relative">
                       <UserIcon size={17} className="text-neutral-400 shrink-0" />
                       <span className="w-24 shrink-0 text-sm text-neutral-400">Person</span>
-                      <div className="flex items-center gap-2">
-                        {task.personAvatars.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setDetailPersonOpen((v) => !v)}
-                            className="flex items-center -space-x-2 cursor-pointer hover:opacity-80 transition"
-                            title="Ubah penanggung jawab"
-                          >
-                            {task.personAvatars.map((av, i) => (
-                              <span
-                                key={i}
-                                className="relative w-7 h-7 rounded-full border-2 border-[#0d0e10] overflow-hidden bg-neutral-700"
-                              >
-                                <Image src={av} alt="Assignee" fill sizes="28px" className="object-cover" />
+                      {can.assignTasks ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            if (detailPersonAnchor) {
+                              setDetailPersonAnchor(null)
+                              return
+                            }
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setDetailPersonAnchor({
+                              top: rect.top,
+                              left: rect.left,
+                              width: rect.width,
+                              height: rect.height,
+                            })
+                          }}
+                          className="flex items-center gap-2 rounded-lg px-1.5 py-1 -ml-1.5 hover:bg-neutral-800/70 transition cursor-pointer"
+                          title="Klik untuk mengubah penanggung jawab"
+                        >
+                          {task.personNames?.[0] ? (
+                            <>
+                              <PersonAvatar
+                                name={task.personNames[0]}
+                                avatar={task.personAvatars?.[0]}
+                                size={26}
+                              />
+                              <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="w-[26px] h-[26px] rounded-full border border-dashed border-neutral-600 flex items-center justify-center text-neutral-500 shrink-0">
+                                <Plus size={13} strokeWidth={2.5} />
                               </span>
-                            ))}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setDetailPersonOpen((v) => !v)}
-                            className="text-xs text-neutral-500 hover:text-white transition cursor-pointer"
-                          >
-                            + Add person
-                          </button>
-                        )}
-                        <span className="text-sm text-neutral-300">
-                          {(task.personNames || []).join(', ')}
+                              <span className="text-sm text-neutral-500">Tugaskan anggota</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span
+                          className="flex items-center gap-2 px-1.5 py-1 -ml-1.5"
+                          title={
+                            task.personNames?.[0]
+                              ? `Penanggung jawab: ${task.personNames[0]}`
+                              : 'Belum ditugaskan'
+                          }
+                        >
+                          {task.personNames?.[0] ? (
+                            <>
+                              <PersonAvatar
+                                name={task.personNames[0]}
+                                avatar={task.personAvatars?.[0]}
+                                size={26}
+                              />
+                              <span className="text-sm text-neutral-200">{task.personNames[0]}</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-neutral-600">Belum ditugaskan</span>
+                          )}
                         </span>
-                      </div>
+                      )}
 
-                      {detailPersonOpen && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setDetailPersonOpen(false)} />
-                          <div className="absolute left-32 top-10 z-20 w-56 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-100">
-                            {members.map((m) => {
-                              const isAssigned = (task.personNames || []).includes(m.name)
-                              return (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  onClick={() => toggleTaskAssignee(group.id, task.id, m)}
-                                  className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs hover:bg-neutral-800 transition cursor-pointer"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="relative w-5 h-5 rounded-full overflow-hidden border border-neutral-700 shrink-0">
-                                      <Image src={m.avatar} alt={m.name} fill sizes="20px" className="object-cover" />
-                                    </span>
-                                    <span className="text-neutral-200 text-xs">{m.name}</span>
-                                  </div>
-                                  <span
-                                    className={`w-4 h-4 rounded border flex items-center justify-center ${
-                                      isAssigned ? 'bg-blue-600 border-blue-500 text-white' : 'border-neutral-600'
-                                    }`}
-                                  >
-                                    {isAssigned && <Check size={11} strokeWidth={3} />}
-                                  </span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </>
+                      {can.assignTasks && detailPersonAnchor && (
+                        <AssigneeMenu
+                          members={members}
+                          assignedNames={task.personNames || []}
+                          anchor={detailPersonAnchor}
+                          onPick={(m) => toggleTaskAssignee(group.id, task.id, m)}
+                          onClear={() => clearTaskAssignee(group.id, task.id)}
+                          onClose={() => setDetailPersonAnchor(null)}
+                        />
                       )}
                     </div>
 
@@ -6303,17 +8156,20 @@ export default function ProjectDetailPage() {
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
                             e.preventDefault()
-                            Array.from(e.dataTransfer.files).forEach((f) => addAttachment(f.name))
+                            Array.from(e.dataTransfer.files).forEach((f) => addAttachment(f))
                           }}
                           className="flex items-center justify-center h-14 rounded-lg border border-dashed border-neutral-700 bg-[#141518]/60 hover:border-neutral-500 hover:bg-[#16171b] transition cursor-pointer"
                         >
-                          <span className="text-sm text-neutral-400">Drop or browse file here</span>
+                          <span className="text-sm text-neutral-400">
+                            {attachmentBusy ? 'Mengunggah…' : 'Drop or browse file here'}
+                          </span>
                           <input
                             type="file"
                             multiple
+                            disabled={attachmentBusy}
                             className="hidden"
                             onChange={(e) => {
-                              Array.from(e.target.files || []).forEach((f) => addAttachment(f.name))
+                              Array.from(e.target.files || []).forEach((f) => addAttachment(f))
                               e.target.value = ''
                             }}
                           />
@@ -6327,7 +8183,11 @@ export default function ProjectDetailPage() {
                                 key={a.id}
                                 className="relative w-[210px] rounded-xl border border-[#24262c] bg-[#181a1d] group/att hover:border-neutral-600 transition"
                               >
-                                <div className="h-[118px] flex items-center justify-center">
+                                <div
+                                  className="h-[118px] flex items-center justify-center cursor-pointer"
+                                  onClick={() => openAttachment(a.storagePath ?? null)}
+                                  title="Buka lampiran"
+                                >
                                   <FileText size={40} strokeWidth={1.4} className="text-[#3b82f6]" />
                                 </div>
                                 <div className="flex items-center justify-between px-3 pb-3">
@@ -6346,7 +8206,7 @@ export default function ProjectDetailPage() {
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => deleteAttachment(a.id)}
+                                  onClick={() => deleteAttachment(a.id, a.storagePath ?? null)}
                                   className="absolute top-2 right-2 p-1 rounded-md bg-black/40 text-neutral-300 hover:text-rose-400 hover:bg-black/60 opacity-0 group-hover/att:opacity-100 transition cursor-pointer"
                                   title="Hapus lampiran"
                                 >
@@ -6496,15 +8356,6 @@ export default function ProjectDetailPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => toggleCommentReaction(c.id)}
-                                  className="flex items-center gap-1 text-[11px] hover:text-white transition cursor-pointer"
-                                  title="Emoji"
-                                >
-                                  <Smile size={13} />
-                                  {(c.reactions || 0) > 0 && <span>{c.reactions}</span>}
-                                </button>
-                                <button
-                                  type="button"
                                   onClick={() => {
                                     setDetailReplyTo((v) => (v === c.id ? null : c.id))
                                     setDetailReplyText('')
@@ -6578,7 +8429,7 @@ export default function ProjectDetailPage() {
                               className="hidden"
                               onChange={(e) => {
                                 const f = e.target.files?.[0]
-                                if (f) addAttachment(f.name)
+                                if (f) addAttachment(f)
                                 e.target.value = ''
                               }}
                             />
@@ -6627,6 +8478,141 @@ export default function ProjectDetailPage() {
           </button>
         </div>
       )}
+
+      {/* ======================== BULK DELETE CONFIRM ======================== */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowBulkDeleteModal(false)}
+          />
+          <div className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-white">Hapus Tugas Terpilih</h2>
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-neutral-300">
+              Hapus <span className="font-semibold text-white">{selectedTasks.length} tugas</span>{' '}
+              yang dipilih? Tindakan ini tidak bisa dibatalkan.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="h-8 px-4 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================== ADD GROUP MODAL ======================== */}
+      {showAddGroupModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowAddGroupModal(false)}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleAddNewGroup()
+            }}
+            className="relative w-full max-w-sm bg-[#1e2025] border border-[#343740] rounded-xl shadow-2xl z-10 p-6"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white">Tambah Grup Tugas</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddGroupModal(false)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-neutral-400 mb-1.5">
+              Nama Grup
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              placeholder="mis. Desain Logo"
+              className="w-full h-10 px-3 bg-[#16171b] border border-neutral-700 rounded-lg text-sm text-white placeholder:text-neutral-500 outline-none focus:border-blue-500 transition"
+            />
+
+            {/* Penanda warna grup (dipilih Project Manager) */}
+            <label className="block text-xs font-medium text-neutral-400 mt-4 mb-2">
+              Warna Grup
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {COLOR_PALETTE.map((hex) => {
+                const active = newGroupColor.toLowerCase() === hex.toLowerCase()
+                return (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => setNewGroupColor(hex)}
+                    style={{ backgroundColor: hex }}
+                    className={`w-7 h-7 rounded-full border-2 transition cursor-pointer ${
+                      active
+                        ? 'border-white scale-110 shadow-lg'
+                        : 'border-transparent hover:scale-105'
+                    }`}
+                    aria-label={`Warna ${hex}`}
+                    aria-pressed={active}
+                    title={hex}
+                  />
+                )
+              })}
+            </div>
+            <p className="mt-2 flex items-center gap-2 text-[11px] text-neutral-500">
+              <span
+                className="inline-block w-3 h-3 rounded-full"
+                style={{ backgroundColor: newGroupColor }}
+              />
+              Pratinjau: <span style={{ color: newGroupColor }}>{newGroupName || 'Nama Grup'}</span>
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setShowAddGroupModal(false)}
+                className="text-xs text-neutral-400 hover:text-white transition px-3 py-1.5 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!newGroupName.trim()}
+                className="h-8 px-4 text-xs font-semibold text-white bg-[#0073ea] hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-md shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Tambah
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+
+
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
     </div>
   )
 }

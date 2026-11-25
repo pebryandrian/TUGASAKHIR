@@ -1,0 +1,957 @@
+{
+  "template": {
+    "groups": [
+      {
+        "title": "Riset & Konsep",
+        "color": "#6c7ff5",
+        "tasks": [
+          {
+            "title": "Kumpulkan brief dari klien",
+            "description": "Catat tujuan project, target audiens, dan batasan dari klien.",
+            "status": "Done",
+            "priority": "high",
+            "due": -10,
+            "checked": true,
+            "assignee": true,
+            "subtasks": [
+              { "text": "Catat tujuan & target audiens", "done": true },
+              { "text": "Kumpulkan referensi visual", "done": true }
+            ],
+            "comments": [
+              { "body": "Brief sudah lengkap, lanjut ke moodboard.", "likes": 2 }
+            ]
+          },
+          {
+            "title": "Susun moodboard & referensi visual",
+            "description": "Kumpulkan arah visual yang disepakati bersama klien.",
+            "status": "In Progress",
+            "priority": "medium",
+            "due": 2,
+            "assignee": true,
+            "subtasks": [
+              { "text": "Pilih 10 referensi utama", "done": true },
+              { "text": "Susun palet warna", "done": false },
+              { "text": "Tentukan tipografi", "done": false }
+            ]
+          },
+          {
+            "title": "Presentasi konsep ke klien",
+            "description": "Bahas moodboard dan minta persetujuan sebelum produksi.",
+            "status": "To Do",
+            "priority": "high",
+            "due": 5
+          }
+        ]
+      },
+      {
+        "title": "Desain & Produksi",
+        "color": "#ea384c",
+        "tasks": [
+          {
+            "title": "Eksplorasi 3 alternatif desain",
+            "description": "Buat tiga arah desain berbeda untuk dipilih klien.",
+            "status": "In Progress",
+            "priority": "high",
+            "due": 4,
+            "assignee": true,
+            "subtasks": [
+              { "text": "Alternatif A selesai", "done": true },
+              { "text": "Alternatif B selesai", "done": false },
+              { "text": "Alternatif C selesai", "done": false }
+            ]
+          },
+          {
+            "title": "Revisi desain terpilih",
+            "description": "Perbaikan berdasarkan catatan klien pada desain terpilih.",
+            "status": "To Do",
+            "priority": "medium",
+            "due": 8
+          },
+          {
+            "title": "Siapkan aset final",
+            "description": "Ekspor file kerja dan aset siap pakai.",
+            "status": "To Do",
+            "priority": "low",
+            "due": 12
+          }
+        ]
+      },
+      {
+        "title": "Review & Serah Terima",
+        "color": "#22c55e",
+        "tasks": [
+          {
+            "title": "Review internal tim",
+            "description": "Cek konsistensi visual sebelum dikirim ke klien.",
+            "status": "Review",
+            "priority": "medium",
+            "due": 6,
+            "assignee": true,
+            "comments": [
+              { "body": "Bagian tipografi masih perlu dirapikan.", "likes": 1 }
+            ]
+          },
+          {
+            "title": "Serah terima & panduan brand",
+            "description": "Kirim aset final beserta panduan penggunaan.",
+            "status": "To Do",
+            "priority": "high",
+            "due": 14
+          }
+        ]
+      }
+    ],
+    "doc": [
+      {
+        "id": "tpl-doc-1",
+        "type": "h2",
+        "content": "Ringkasan Project",
+        "align": "left",
+        "styles": {}
+      },
+      {
+        "id": "tpl-doc-2",
+        "type": "paragraph",
+        "content": "Dokumen ini dipakai sebagai catatan kerja project: latar belakang, lingkup pekerjaan, dan hal-hal yang disepakati bersama klien. Perbarui setiap ada keputusan baru.",
+        "align": "left",
+        "styles": {}
+      },
+      {
+        "id": "tpl-doc-3",
+        "type": "h2",
+        "content": "Lingkup Pekerjaan",
+        "align": "left",
+        "styles": {}
+      },
+      {
+        "id": "tpl-doc-4",
+        "type": "bullet-list",
+        "content": "",
+        "items": [
+          { "id": "tpl-doc-4-1", "text": "Riset kebutuhan dan referensi visual" },
+          { "id": "tpl-doc-4-2", "text": "Eksplorasi desain dan revisi" },
+          { "id": "tpl-doc-4-3", "text": "Serah terima aset final" }
+        ]
+      },
+      {
+        "id": "tpl-doc-5",
+        "type": "h2",
+        "content": "Checklist Serah Terima",
+        "align": "left",
+        "styles": {}
+      },
+      {
+        "id": "tpl-doc-6",
+        "type": "checklist",
+        "content": "",
+        "items": [
+          { "id": "tpl-doc-6-1", "text": "Aset final dalam format yang disepakati", "checked": false },
+          { "id": "tpl-doc-6-2", "text": "Panduan penggunaan warna & tipografi", "checked": false },
+          { "id": "tpl-doc-6-3", "text": "Konfirmasi persetujuan klien", "checked": false }
+        ]
+      }
+    ]
+  },
+  "demoProjects": [
+    {
+      "name": "Aqua",
+      "scope": "Client",
+      "description": "Rebranding kemasan Aqua: logo, label, dan panduan visual untuk peluncuran kuartal 4.",
+      "progress": 45,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Wawancara stakeholder Aqua",
+              "description": "Gali kebutuhan brand dari tim marketing dan product owner.",
+              "status": "Done",
+              "priority": "high",
+              "due": -12,
+              "checked": true,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Susun daftar pertanyaan", "done": true },
+                { "text": "Rekam & rangkum hasil wawancara", "done": true }
+              ],
+              "comments": [
+                { "body": "Hasil wawancara sudah dirangkum, siap dipakai untuk moodboard.", "likes": 3 }
+              ]
+            },
+            {
+              "title": "Analisis kompetitor kemasan air mineral",
+              "description": "Bandingkan visual kompetitor di kategori yang sama.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -8,
+              "checked": true
+            },
+            {
+              "title": "Moodboard arah visual baru",
+              "description": "Kumpulkan referensi warna, bentuk, dan tipografi.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 2,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Kumpulkan 12 referensi", "done": true },
+                { "text": "Susun palet biru & putih", "done": false }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Desain & Produksi",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Redesain logo Aqua",
+              "description": "Penyederhanaan bentuk logo agar lebih terbaca di kemasan kecil.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 4,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Sketsa 5 alternatif", "done": true },
+                { "text": "Vektorisasi 2 alternatif terbaik", "done": true },
+                { "text": "Uji keterbacaan ukuran kecil", "done": false }
+              ],
+              "comments": [
+                { "body": "Alternatif kedua paling kuat, lanjut ke tahap vektor.", "likes": 2 }
+              ]
+            },
+            {
+              "title": "Label kemasan 600ml",
+              "description": "Terapkan logo baru ke label botol 600ml.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 7
+            },
+            {
+              "title": "Ilustrasi maskot untuk edisi terbatas",
+              "description": "Ilustrasi pendukung untuk kemasan edisi terbatas.",
+              "status": "To Do",
+              "priority": "low",
+              "due": 11
+            }
+          ]
+        },
+        {
+          "title": "Review & Serah Terima",
+          "color": "#22c55e",
+          "tasks": [
+            {
+              "title": "Review internal desain kemasan",
+              "description": "Cek konsistensi logo, warna, dan hierarki informasi.",
+              "status": "Review",
+              "priority": "medium",
+              "due": 6,
+              "assignee": true
+            },
+            {
+              "title": "Serah terima aset & brand guideline",
+              "description": "Kirim file final beserta panduan penggunaan logo.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 14
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Glowup",
+      "scope": "Marketplace",
+      "description": "Aset visual untuk peluncuran produk skincare Glowup di marketplace.",
+      "progress": 30,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset tren visual skincare",
+              "description": "Pelajari gaya visual brand skincare yang sedang naik.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -6,
+              "checked": true
+            },
+            {
+              "title": "Konsep foto produk",
+              "description": "Tentukan properti, latar, dan pencahayaan.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 3,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Pilih properti & latar", "done": true },
+                { "text": "Susun shot list", "done": false }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Desain & Produksi",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Banner marketplace 1200x628",
+              "description": "Banner utama untuk halaman toko di marketplace.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 5,
+              "assignee": true
+            },
+            {
+              "title": "Foto produk 5 varian",
+              "description": "Sesi foto untuk lima varian produk.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 9
+            },
+            {
+              "title": "Copy visual & tipografi banner",
+              "description": "Susun headline dan penempatan teks pada banner.",
+              "status": "To Do",
+              "priority": "low",
+              "due": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Nusantara",
+      "scope": "Mockup",
+      "description": "Mockup kemasan kopi Nusantara untuk presentasi ke klien.",
+      "progress": 60,
+      "groups": [
+        {
+          "title": "Desain & Produksi",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Mockup pouch kopi",
+              "description": "Mockup kemasan pouch 250 gram.",
+              "status": "Done",
+              "priority": "high",
+              "due": -4,
+              "checked": true,
+              "assignee": true
+            },
+            {
+              "title": "Mockup box hampers",
+              "description": "Kemasan box untuk paket hampers akhir tahun.",
+              "status": "In Progress",
+              "priority": "medium",
+              "due": 2,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Ukuran box final", "done": true },
+                { "text": "Terapkan artwork", "done": false }
+              ]
+            },
+            {
+              "title": "Render 3D kemasan",
+              "description": "Render untuk kebutuhan presentasi.",
+              "status": "Review",
+              "priority": "high",
+              "due": 6
+            }
+          ]
+        },
+        {
+          "title": "Review & Serah Terima",
+          "color": "#22c55e",
+          "tasks": [
+            {
+              "title": "Presentasi mockup ke klien",
+              "description": "Bahas hasil mockup dan minta persetujuan akhir.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Arunika",
+      "scope": "Studio Project",
+      "description": "Company profile deck untuk Arunika Studio.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Kumpulkan materi company profile",
+              "description": "Kumpulkan data perusahaan, portofolio, dan foto tim.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -5,
+              "checked": true
+            },
+            {
+              "title": "Susun struktur deck",
+              "description": "Tentukan urutan slide dan pesan utama.",
+              "status": "In Progress",
+              "priority": "medium",
+              "due": 2,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Desain & Produksi",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Desain 12 slide presentasi",
+              "description": "Eksekusi visual seluruh slide sesuai struktur.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 6,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Slide 1-4", "done": true },
+                { "text": "Slide 5-8", "done": false },
+                { "text": "Slide 9-12", "done": false }
+              ]
+            },
+            {
+              "title": "Ilustrasi & ikon pendukung",
+              "description": "Ikon garis untuk memperkuat pesan tiap slide.",
+              "status": "To Do",
+              "priority": "low",
+              "due": 9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Grotesk",
+      "scope": "Font",
+      "description": "Perancangan typeface kustom Grotesk untuk identitas visual.",
+      "progress": 15,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset referensi typeface",
+              "description": "Kumpulkan referensi grotesque sebagai acuan bentuk.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -7,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf dasar",
+              "description": "Sketsa manual bentuk huruf inti sebelum digitalisasi.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 4,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Sketsa huruf kecil", "done": true },
+                { "text": "Sketsa huruf besar", "done": false }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Desain & Produksi",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph A-Z",
+              "description": "Gambar ulang glyph ke perangkat lunak font.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 12
+            },
+            {
+              "title": "Kerning & testing",
+              "description": "Rapikan jarak antar huruf dan uji pada teks panjang.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 16
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Come the Hour",
+      "scope": "Font",
+      "description": "Typeface display bold berkontras tebal untuk judul acara dan poster.",
+      "progress": 50,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset referensi display bold",
+              "description": "Kumpulkan poster dan judul film era 70-an sebagai acuan bentuk.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -9,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf A-Z",
+              "description": "Sketsa manual seluruh huruf besar sebelum digitalisasi.",
+              "status": "Done",
+              "priority": "high",
+              "due": -3,
+              "checked": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & ligatur",
+              "description": "Gambar ulang glyph ke perangkat lunak font, termasuk ligatur.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 6,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Huruf besar", "done": true },
+                { "text": "Huruf kecil", "done": false },
+                { "text": "Ligatur", "done": false }
+              ]
+            },
+            {
+              "title": "Susun specimen sheet",
+              "description": "Siapkan contoh pemakaian font untuk halaman penjualan.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 14
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bright Charms",
+      "scope": "Font",
+      "description": "Typeface serif retro bernuansa hangat untuk kemasan dan editorial.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset referensi serif retro",
+              "description": "Kumpulkan sampel serif dari kemasan dan majalah lawas.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -8,
+              "checked": true
+            },
+            {
+              "title": "Uji keterbacaan ukuran kecil",
+              "description": "Pastikan serif tetap terbaca pada ukuran teks 8-10 pt.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 5,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & italic",
+              "description": "Gambar ulang glyph reguler dan versi miringnya.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 12
+            },
+            {
+              "title": "Susun specimen & mockup kemasan",
+              "description": "Terapkan font pada kemasan contoh untuk halaman penjualan.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 20
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dawn Style",
+      "scope": "Font",
+      "description": "Typeface display groovy 70-an untuk kampanye musik dan poster.",
+      "progress": 50,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset tipografi groovy 70-an",
+              "description": "Kumpulkan poster konser dan album sebagai acuan gaya.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -10,
+              "checked": true
+            },
+            {
+              "title": "Eksplorasi bentuk melengkung",
+              "description": "Uji variasi lengkung dan tetesan pada huruf utama.",
+              "status": "Done",
+              "priority": "high",
+              "due": -4,
+              "checked": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & ornamen",
+              "description": "Gambar glyph beserta ornamen bintang dan kilau pendukung.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 4,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Glyph utama", "done": true },
+                { "text": "Ornamen", "done": false }
+              ]
+            },
+            {
+              "title": "Rilis di marketplace font",
+              "description": "Siapkan berkas font, lisensi, dan halaman produk.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 22
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sugar Zesty",
+      "scope": "Font",
+      "description": "Typeface rounded bold yang ramah untuk kemasan makanan dan minuman.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset kemasan F&B",
+              "description": "Kumpulkan referensi label makanan dan minuman manis.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -7,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf rounded",
+              "description": "Sketsa bentuk huruf dengan sudut membulat tebal.",
+              "status": "In Progress",
+              "priority": "medium",
+              "due": 3,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph A-Z",
+              "description": "Gambar ulang seluruh glyph ke perangkat lunak font.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 11
+            },
+            {
+              "title": "Uji cetak pada kemasan",
+              "description": "Cetak contoh label untuk memeriksa ketebalan huruf.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 17
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Gather Friends",
+      "scope": "Font",
+      "description": "Typeface rounded bold untuk brand komunitas dan acara kumpul.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset identitas komunitas",
+              "description": "Pelajari gaya visual komunitas dan acara yang ramah.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -6,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf rounded",
+              "description": "Sketsa huruf gemuk membulat dengan ritme rapat.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 2,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & angka",
+              "description": "Gambar ulang glyph serta angka untuk kebutuhan tanggal acara.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 9
+            },
+            {
+              "title": "Susun specimen sheet",
+              "description": "Siapkan contoh pemakaian pada poster dan merchandise.",
+              "status": "To Do",
+              "priority": "low",
+              "due": 15
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Voyage Haven",
+      "scope": "Font",
+      "description": "Typeface display chunky rounded untuk brand travel dan hospitality.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset brand travel & hospitality",
+              "description": "Kumpulkan referensi signage hotel dan resor.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -9,
+              "checked": true
+            },
+            {
+              "title": "Eksplorasi bobot chunky",
+              "description": "Uji variasi bobot tebal dan bentuk huruf yang padat.",
+              "status": "In Progress",
+              "priority": "medium",
+              "due": 4,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & simbol",
+              "description": "Gambar glyph beserta simbol pendukung seperti matahari dan ombak.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 12
+            },
+            {
+              "title": "Uji pada signage",
+              "description": "Terapkan font pada papan nama untuk menguji jarak baca.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 20
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Coast Royale",
+      "scope": "Font",
+      "description": "Typeface display retro bold untuk brand premium dan kemasan.",
+      "progress": 50,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset brand premium",
+              "description": "Kumpulkan referensi identitas premium bergaya retro.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -11,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf kontras tinggi",
+              "description": "Sketsa huruf dengan perbedaan tebal-tipis yang tegas.",
+              "status": "Done",
+              "priority": "high",
+              "due": -2,
+              "checked": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph & small caps",
+              "description": "Gambar glyph utama beserta versi huruf kapital kecil.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 7,
+              "assignee": true,
+              "subtasks": [
+                { "text": "Glyph utama", "done": true },
+                { "text": "Small caps", "done": false }
+              ]
+            },
+            {
+              "title": "Susun specimen & mockup",
+              "description": "Terapkan font pada kemasan premium untuk halaman produk.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 16
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Muffin Crush",
+      "scope": "Font",
+      "description": "Typeface display rounded bold untuk brand F&B dan dessert.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset brand dessert",
+              "description": "Kumpulkan referensi kemasan kue dan toko roti.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -5,
+              "checked": true
+            },
+            {
+              "title": "Sketsa huruf gemuk rounded",
+              "description": "Sketsa huruf gemuk membulat dengan ujung lembut.",
+              "status": "In Progress",
+              "priority": "high",
+              "due": 5,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph A-Z",
+              "description": "Gambar ulang glyph ke perangkat lunak font.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 13
+            },
+            {
+              "title": "Uji cetak label",
+              "description": "Cetak label produk untuk memeriksa keterbacaan.",
+              "status": "To Do",
+              "priority": "low",
+              "due": 19
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Felty Drops",
+      "scope": "Font",
+      "description": "Typeface display rough bertekstur untuk poster dan merchandise.",
+      "progress": 25,
+      "groups": [
+        {
+          "title": "Riset & Konsep",
+          "color": "#6c7ff5",
+          "tasks": [
+            {
+              "title": "Riset tekstur cetak manual",
+              "description": "Kumpulkan cetakan sablon dan letterpress sebagai acuan tekstur.",
+              "status": "Done",
+              "priority": "medium",
+              "due": -8,
+              "checked": true
+            },
+            {
+              "title": "Eksplorasi tepi huruf kasar",
+              "description": "Uji variasi tepi berbulu dan bercak tinta pada huruf.",
+              "status": "In Progress",
+              "priority": "medium",
+              "due": 6,
+              "assignee": true
+            }
+          ]
+        },
+        {
+          "title": "Produksi & Rilis",
+          "color": "#ea384c",
+          "tasks": [
+            {
+              "title": "Digitalisasi glyph + tekstur",
+              "description": "Gambar glyph lalu tambahkan tekstur hasil pindaian.",
+              "status": "To Do",
+              "priority": "high",
+              "due": 15
+            },
+            {
+              "title": "Rilis di marketplace font",
+              "description": "Siapkan berkas font, lisensi, dan halaman produk.",
+              "status": "To Do",
+              "priority": "medium",
+              "due": 24
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
