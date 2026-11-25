@@ -26,6 +26,8 @@ import {
   Trash2,
   Flag,
   ListTodo,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react'
 import { WorkspaceSelector } from '@/components/workspace-selector'
 import { NotificationPanel } from '@/components/notification-panel'
@@ -51,6 +53,7 @@ import {
   listProjectMemberChips,
   listTeamRoles,
   setProjectFavorite,
+  setProjectArchived,
   updateProject,
   updateTeamMemberRole,
   type MyTaskItem,
@@ -76,6 +79,7 @@ interface ProjectCard {
   description: string
   done: number
   total: number
+  archived: boolean
 }
 
 type MemberSort = 'name-asc' | 'name-desc' | 'email-asc'
@@ -311,6 +315,10 @@ export default function DashboardPage() {
   // Modal state
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null)
   const [modalSearch, setModalSearch] = useState('')
+  // Arsip proyek: proyek selesai disembunyikan dari daftar utama dan dapat
+  // ditampilkan kembali lewat tombol "Arsip".
+  const [showArchived, setShowArchived] = useState(false)
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null)
   const [favorites, setFavorites] = useState<{ id: string; name: string; scope: string | null }[]>([])
   const [showFavorites, setShowFavorites] = useState(true)
 
@@ -475,6 +483,7 @@ export default function DashboardPage() {
             description: p.description ?? '',
             done: stat.done,
             total: stat.total,
+            archived: p.archived === true,
           }
         }),
     [projects, taskStats],
@@ -483,6 +492,27 @@ export default function DashboardPage() {
   const openScopeModal = (item: ScopeItem) => {
     setSelectedScope(item)
     setModalSearch('')
+    setShowArchived(false)
+  }
+
+  // Arsipkan / keluarkan proyek dari arsip (khusus Project Manager).
+  const handleToggleArchive = async (card: ProjectCard) => {
+    if (archiveBusyId) return
+    if (!canManageProject(card.id)) {
+      setError('Hanya Project Manager yang dapat mengarsipkan project ini.')
+      return
+    }
+    setArchiveBusyId(card.id)
+    setError('')
+    try {
+      await setProjectArchived(card.id, !card.archived)
+      await refreshProjects()
+      setProjectActionError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengubah arsip project.')
+    } finally {
+      setArchiveBusyId(null)
+    }
   }
 
   // Hanya Project Manager (atau pemilik) yang boleh mengubah/menghapus project.
@@ -710,11 +740,19 @@ export default function DashboardPage() {
 
   const modalCards = selectedScope ? cardsFrom(selectedScope.title) : []
 
-  const filteredModalCards = modalCards.filter(
-    (c) =>
-      c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
-      c.description.toLowerCase().includes(modalSearch.toLowerCase()),
-  )
+  // Proyek aktif dan proyek yang sudah diarsipkan dipisah agar daftar utama
+  // tetap ringkas. Arsip hanya ditampilkan bila tombolnya dinyalakan.
+  const modalActiveCards = modalCards.filter((c) => !c.archived)
+  const modalArchivedCards = modalCards.filter((c) => c.archived)
+
+  const filterCards = (cards: ProjectCard[]) =>
+    cards.filter(
+      (c) =>
+        c.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
+        c.description.toLowerCase().includes(modalSearch.toLowerCase()),
+    )
+
+  const filteredModalCards = filterCards(showArchived ? modalArchivedCards : modalActiveCards)
 
   const filteredMembers = useMemo(() => {
     const term = searchMember.trim().toLowerCase()
@@ -1282,12 +1320,24 @@ export default function DashboardPage() {
                         className="object-cover object-center grayscale contrast-110 group-hover:scale-105 group-hover:grayscale-0 transition-all duration-300"
                       />
                     </div>
-                    <div className="px-4 py-3 bg-[#191a1e] flex items-center justify-between">
+                    <div className="px-4 py-3 bg-[#191a1e] flex items-center justify-between gap-2">
                       <h3 className="text-sm font-medium text-neutral-200 group-hover:text-white transition truncate">
                         {item.title}
                       </h3>
                       <span className="text-[10px] text-neutral-500 shrink-0">
-                        {cardsFrom(item.title).length} card
+                        {(() => {
+                          const all = cardsFrom(item.title)
+                          const active = all.filter((c) => !c.archived).length
+                          const archived = all.length - active
+                          return (
+                            <>
+                              {active} card
+                              {archived > 0 && (
+                                <span className="ml-1 text-amber-400/80">· {archived} arsip</span>
+                              )}
+                            </>
+                          )
+                        })()}
                       </span>
                     </div>
                   </div>
@@ -1605,16 +1655,48 @@ export default function DashboardPage() {
                   className="w-full h-9 pl-9 pr-4 bg-[#1b1c20] border border-neutral-700/70 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
                 />
               </div>
-              {canCreate && (
+              <div className="flex items-center gap-2 ml-auto">
+                {/* Tombol arsip: menampilkan proyek yang sudah selesai */}
                 <button
                   type="button"
-                  onClick={openNewCardModal}
-                  className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
+                  onClick={() => {
+                    setShowArchived((v) => !v)
+                    setModalSearch('')
+                  }}
+                  className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium transition cursor-pointer shrink-0 border ${
+                    showArchived
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                      : 'bg-[#1b1c20] text-neutral-300 border-neutral-700/70 hover:text-white hover:border-neutral-600'
+                  }`}
+                  aria-pressed={showArchived}
+                  title={
+                    showArchived
+                      ? 'Kembali ke daftar proyek aktif'
+                      : 'Lihat proyek yang sudah diarsipkan'
+                  }
                 >
-                  <Plus size={15} strokeWidth={2.5} />
-                  <span>New Card</span>
+                  <Archive size={15} />
+                  <span>{showArchived ? 'Proyek Aktif' : 'Arsip'}</span>
+                  <span
+                    className={`rounded-full px-1.5 text-[10px] font-semibold ${
+                      showArchived ? 'bg-amber-500/25 text-amber-200' : 'bg-neutral-700/70 text-neutral-300'
+                    }`}
+                  >
+                    {showArchived ? modalArchivedCards.length : modalArchivedCards.length}
+                  </span>
                 </button>
-              )}
+
+                {canCreate && !showArchived && (
+                  <button
+                    type="button"
+                    onClick={openNewCardModal}
+                    className="inline-flex items-center gap-1.5 h-9 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-lg transition-all duration-150 cursor-pointer shrink-0"
+                  >
+                    <Plus size={15} strokeWidth={2.5} />
+                    <span>New Card</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Modal Cards Grid */}
@@ -1622,11 +1704,13 @@ export default function DashboardPage() {
               {filteredModalCards.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 gap-3 text-neutral-500 text-sm">
                   <span>
-                    {modalCards.length === 0
-                      ? 'Belum ada card di scope ini.'
-                      : `No cards found matching "${modalSearch}"`}
+                    {showArchived
+                      ? 'Belum ada proyek yang diarsipkan pada scope ini.'
+                      : modalActiveCards.length === 0
+                        ? 'Belum ada card di scope ini.'
+                        : `No cards found matching "${modalSearch}"`}
                   </span>
-                  {modalCards.length === 0 && canCreate && (
+                  {!showArchived && modalActiveCards.length === 0 && canCreate && (
                     <button
                       type="button"
                       onClick={openNewCardModal}
@@ -1651,7 +1735,11 @@ export default function DashboardPage() {
                             `/project/${slugify(selectedScope.title)}/${slugify(card.name)}`,
                           )
                         }
-                        className="group bg-[#1b1c20] border border-neutral-800/70 rounded-xl p-4 hover:border-blue-500/40 hover:shadow-blue-500/5 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3"
+                        className={`group bg-[#1b1c20] border rounded-xl p-4 hover:border-blue-500/40 hover:shadow-blue-500/5 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3 ${
+                          card.archived
+                            ? 'border-amber-500/30 bg-[#1b1a17]'
+                            : 'border-neutral-800/70'
+                        }`}
                       >
                         {/* Card Top Row */}
                         <div className="flex items-start justify-between gap-2">
@@ -1673,6 +1761,27 @@ export default function DashboardPage() {
                                   title="Ubah project"
                                 >
                                   <Pencil size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handleToggleArchive(card)
+                                  }}
+                                  disabled={archiveBusyId === card.id}
+                                  className="p-1 rounded text-neutral-500 hover:text-amber-400 hover:bg-amber-500/10 transition cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                                  aria-label={
+                                    card.archived
+                                      ? `Keluarkan ${card.name} dari arsip`
+                                      : `Arsipkan project ${card.name}`
+                                  }
+                                  title={card.archived ? 'Keluarkan dari arsip' : 'Arsipkan project'}
+                                >
+                                  {card.archived ? (
+                                    <ArchiveRestore size={13} />
+                                  ) : (
+                                    <Archive size={13} />
+                                  )}
                                 </button>
                                 <button
                                   type="button"
@@ -1716,6 +1825,13 @@ export default function DashboardPage() {
                         <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3 flex-1">
                           {card.description || 'Belum ada deskripsi.'}
                         </p>
+
+                        {card.archived && (
+                          <span className="inline-flex w-fit items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                            <Archive size={10} />
+                            Diarsipkan
+                          </span>
+                        )}
 
                         {/* Ikon orang: siapa saja yang mengerjakan project ini */}
                         <div className="flex items-center justify-between gap-2">
