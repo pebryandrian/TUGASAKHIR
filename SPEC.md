@@ -153,6 +153,17 @@ skenario Black Box (Tabel 3.5) ke kondisi nyata kode beserta bukti teknis.
 
 ## 7. Riwayat perubahan
 
+- **2026-11-25** – **Gambar Scope of Work bertema studio desain** + **kartu scope dirapikan**.
+  (a) Kelima gambar kartu scope (`public/images/scope/*.jpg`) diganti agar sesuai tema INVISUAL
+  Studio — studio identitas visual, ilustrasi, dan desain kemasan: *Client* (eksplorasi palet warna
+  & identitas merek), *Font* (buku specimen tipografi + sketsa huruf), *Mockup* (mockup perangkat
+  dengan pencahayaan dramatis), *Marketplace* (rak retail fashion), *Studio Project* (meja kerja
+  desain). Semua dipotong 16:10 (1400×875), JPEG kualitas 82, sumber Unsplash.
+  (b) Kartu scope: gradasi bawah + vignette tipis agar foto menyatu dengan latar gelap, gambar
+  diredupkan (`brightness-90`) dan tampil penuh warna saat disorot (transisi 500ms), jumlah proyek
+  dipindah menjadi badge kaca di atas gambar, dan baris judul menampilkan tautan **"Buka →"**.
+  Verifikasi: kelima gambar termuat (`naturalWidth` 1400), `tsc --noEmit` bersih.
+
 - **2026-11-25** – **Progres proyek menghitung tugas berstatus Done** + **arsip proyek selesai**.
   (a) **Bug progres**: seluruh tugas Aqua sudah berstatus *Done* tetapi kartu di Home tetap
   menampilkan "0/8 tugas selesai", karena progres hanya menghitung `tasks.checked` sementara
