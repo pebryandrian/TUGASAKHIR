@@ -584,85 +584,400 @@ function TablePopover({
   )
 }
 
-// ======================== CUSTOM VIEWS (Gantt / Chart) ========================
+// ======================== CUSTOM VIEW: GANTT & CHART ========================
+// Satu tab berisi ringkasan distribusi status (Chart) dan timeline pengerjaan
+// (Gantt) dengan daftar tugas di sisi kiri, mengikuti tata letak pada laporan:
+// kolom nomor, Task Name, WBS, Planned Start, Planned Finish, lalu batang waktu.
 interface CustomView {
   id: string
   name: string
-  type: 'gantt' | 'chart'
+  type: 'timeline'
 }
 
-function GanttView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
-  const tasks = groups.flatMap((g) => g.items.map((t) => ({ task: t, group: g })))
-  const dates = tasks
-    .map((t) => new Date(t.task.date).getTime())
-    .filter((n) => !Number.isNaN(n))
-  if (tasks.length === 0) {
-    return <p className="text-sm text-neutral-500 py-10 text-center">Belum ada tugas untuk ditampilkan.</p>
+const DAY_MS = 86_400_000
+const DAY_WIDTH = 32
+
+function startOfDay(value: string | null | undefined): number | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function hexOf(color: string | null | undefined, fallback = '#6c7ff5'): string {
+  return color?.match(/#[0-9a-fA-F]{6}/)?.[0] ?? fallback
+}
+
+function shortDate(ts: number | null): string {
+  if (ts === null) return '—'
+  return new Date(ts).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: '2-digit',
+  })
+}
+
+function GanttChartView({
+  groups,
+  statusList,
+}: {
+  groups: TaskGroup[]
+  statusList: StatusDef[]
+}) {
+  type Row = {
+    kind: 'group' | 'task'
+    id: string
+    title: string
+    wbs: string
+    color: string
+    start: number | null
+    end: number | null
+    status?: string
+    assignee?: string | null
+    progress: number
+    done: number
+    total: number
   }
-  if (dates.length === 0) {
+
+  const rows: Row[] = []
+  let grandDone = 0
+  let grandTotal = 0
+
+  groups.forEach((group, gi) => {
+    const groupColor = hexOf(group.color)
+    const taskRows: Row[] = group.items.map((task, ti) => {
+      const start = startOfDay(task.date)
+      // Tanpa tanggal selesai terpisah, tugas dianggap berlangsung satu hari.
+      const end = start
+      const subs = task.subtasks ?? []
+      const done = subs.length
+        ? subs.filter((s) => s.done).length
+        : task.checked
+          ? 1
+          : 0
+      const total = subs.length || 1
+      const statusDef = statusList.find((s) => s.label === task.status)
+      return {
+        kind: 'task',
+        id: task.id,
+        title: task.title,
+        wbs: `${gi + 1}.${ti + 1}`,
+        color: statusDef?.colorCode ?? '#64748b',
+        start,
+        end,
+        status: task.status,
+        assignee: task.personNames?.[0] ?? null,
+        progress: total ? done / total : 0,
+        done,
+        total,
+      }
+    })
+
+    const starts = taskRows.map((t) => t.start).filter((v): v is number => v !== null)
+    const ends = taskRows.map((t) => t.end).filter((v): v is number => v !== null)
+    const gDone = taskRows.reduce((a, t) => a + t.done, 0)
+    const gTotal = taskRows.reduce((a, t) => a + t.total, 0)
+    grandDone += gDone
+    grandTotal += gTotal
+
+    rows.push({
+      kind: 'group',
+      id: group.id,
+      title: group.title,
+      wbs: String(gi + 1),
+      color: groupColor,
+      start: starts.length ? Math.min(...starts) : null,
+      end: ends.length ? Math.max(...ends) : null,
+      progress: gTotal ? gDone / gTotal : 0,
+      done: gDone,
+      total: gTotal,
+    })
+    rows.push(...taskRows)
+  })
+
+  const allTasks = groups.flatMap((g) => g.items)
+  if (allTasks.length === 0) {
     return (
       <p className="text-sm text-neutral-500 py-10 text-center">
-        Tugas belum punya tanggal, jadi timeline belum bisa digambar.
+        Belum ada tugas untuk ditampilkan.
       </p>
     )
   }
-  const min = Math.min(...dates)
-  const max = Math.max(...dates)
-  const span = Math.max(max - min, 86400000) // minimal 1 hari
-  return (
-    <div className="space-y-2">
-      {tasks.map(({ task, group }) => {
-        const d = new Date(task.date).getTime()
-        const left = Number.isNaN(d) ? 0 : ((d - min) / span) * 100
-        const sd = statusList.find((s) => s.label === task.status)
-        return (
-          <div key={task.id} className="flex items-center gap-3">
-            <div className="w-52 shrink-0 min-w-0">
-              <p className="text-xs font-medium text-white truncate">{task.title}</p>
-              <p className="text-[10px] text-neutral-500 truncate">{group.title}</p>
-            </div>
-            <div className="relative flex-1 h-7 bg-[#191a1e] rounded-md border border-neutral-800/70">
-              <div
-                className="absolute top-1/2 -translate-y-1/2 h-4 rounded-full min-w-[42px] flex items-center px-2 text-[10px] font-semibold text-white truncate"
-                style={{ left: `calc(${left}% - 0px)`, backgroundColor: sd?.colorCode || '#3b82f6' }}
-                title={task.date}
-              >
-                {task.date}
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
-function ChartView({ groups, statusList }: { groups: TaskGroup[]; statusList: StatusDef[] }) {
-  const allTasks = groups.flatMap((g) => g.items)
-  const total = allTasks.length || 1
+  // Rentang tanggal: dari tanggal paling awal sampai paling akhir, lalu diberi
+  // ruang sebelum dan sesudah agar batang tidak menempel di tepi.
+  const stamps = rows
+    .flatMap((r) => [r.start, r.end])
+    .filter((v): v is number => v !== null)
+  const today = startOfDay(new Date().toISOString().slice(0, 10)) as number
+
+  const rawMin = stamps.length ? Math.min(...stamps, today) : today
+  const rawMax = stamps.length ? Math.max(...stamps, today) : today
+  const first = new Date(rawMin)
+  // Mulai dari hari Senin agar kolom mingguan rapi.
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7) - 2)
+  const last = new Date(rawMax)
+  last.setDate(last.getDate() + 9)
+
+  const totalDays = Math.round((last.getTime() - first.getTime()) / DAY_MS) + 1
+  const days = Array.from(
+    { length: totalDays },
+    (_, i) => new Date(first.getTime() + i * DAY_MS),
+  )
+
+  // Header bulan: setiap bulan menjadi satu sel selebar jumlah harinya.
+  const months: { label: string; span: number }[] = []
+  for (const d of days) {
+    const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    const prev = months[months.length - 1]
+    if (prev && prev.label === label) prev.span += 1
+    else months.push({ label, span: 1 })
+  }
+
+  const offsetOf = (ts: number) => Math.round((ts - first.getTime()) / DAY_MS) * DAY_WIDTH
+  const widthOf = (start: number, end: number) =>
+    Math.max(1, Math.round((end - start) / DAY_MS) + 1) * DAY_WIDTH
+  const todayLeft = offsetOf(today) + DAY_WIDTH / 2
+
+  const total = allTasks.length
+  const overallPct = grandTotal ? Math.round((grandDone / grandTotal) * 100) : 0
+
   return (
-    <div className="space-y-4 max-w-xl">
-      <p className="text-xs text-neutral-400">Distribusi status ({allTasks.length} tugas)</p>
-      {statusList.map((s) => {
-        const count = allTasks.filter((t) => t.status === s.label).length
-        const pct = (count / total) * 100
-        return (
-          <div key={s.id} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-300">{s.label}</span>
-              <span className="text-neutral-500">
-                {count} ({Math.round(pct)}%)
-              </span>
-            </div>
-            <div className="h-6 bg-[#191a1e] rounded-md overflow-hidden border border-neutral-800/70">
+    <div className="flex-1 min-h-0 flex flex-col gap-5">
+      {/* ---------- Chart: distribusi jumlah tugas per status ---------- */}
+      <section className="rounded-xl border border-neutral-800/80 bg-[#191a1e] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-white">
+            Distribusi Status
+            <span className="ml-2 text-xs font-normal text-neutral-500">
+              {total} tugas
+            </span>
+          </h3>
+          <span className="text-xs text-neutral-400">
+            Progres keseluruhan <span className="font-semibold text-white">{overallPct}%</span>
+          </span>
+        </div>
+
+        <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-800">
+          {statusList.map((s) => {
+            const count = allTasks.filter((t) => t.status === s.label).length
+            const pct = total ? (count / total) * 100 : 0
+            if (count === 0) return null
+            return (
               <div
-                className="h-full transition-all duration-300"
+                key={s.id}
                 style={{ width: `${pct}%`, backgroundColor: s.colorCode }}
+                title={`${s.label}: ${count} tugas (${Math.round(pct)}%)`}
               />
+            )
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {statusList.map((s) => {
+            const count = allTasks.filter((t) => t.status === s.label).length
+            const pct = total ? Math.round((count / total) * 100) : 0
+            return (
+              <span key={s.id} className="inline-flex items-center gap-1.5 text-[11px] text-neutral-300">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
+                  style={{ backgroundColor: s.colorCode }}
+                />
+                {s.label}
+                <span className="text-neutral-500">
+                  {count} ({pct}%)
+                </span>
+              </span>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ---------- Gantt: daftar tugas + batang waktu ---------- */}
+      <section className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-neutral-800/80 bg-[#141517]">
+        {/* Kiri: kolom informasi tugas (tidak ikut digulir horizontal) */}
+        <div className="w-[440px] shrink-0 border-r border-neutral-800/80">
+          <div className="flex h-14 items-end border-b border-neutral-800/80 bg-[#191a1e] text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+            <div className="w-10 shrink-0 px-2 pb-2 text-center">#</div>
+            <div className="min-w-0 flex-1 px-3 pb-2">Task Name</div>
+            <div className="w-14 shrink-0 px-2 pb-2 text-center">WBS</div>
+            <div className="w-[84px] shrink-0 px-2 pb-2 text-center">Start</div>
+            <div className="w-[84px] shrink-0 px-2 pb-2 text-center">Finish</div>
+          </div>
+          <div>
+            {rows.map((r) => (
+              <div
+                key={`l-${r.kind}-${r.id}`}
+                className={`flex h-9 items-center border-b border-neutral-800/60 text-xs ${
+                  r.kind === 'group' ? 'bg-[#1b1c20] font-semibold' : 'hover:bg-white/[0.02]'
+                }`}
+              >
+                <div className="w-10 shrink-0 px-2 text-center text-[10px] text-neutral-600">
+                  {r.kind === 'group' ? '' : r.wbs}
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+                  {r.kind === 'group' ? (
+                    <>
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: r.color }}
+                      />
+                      <span className="truncate text-neutral-100">{r.title}</span>
+                      <span className="shrink-0 text-[10px] font-normal text-neutral-500">
+                        {Math.round(r.progress * 100)}%
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: r.color }}
+                      />
+                      <span className="truncate text-neutral-300" title={r.title}>
+                        {r.title}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="w-14 shrink-0 px-2 text-center text-[10px] text-neutral-500">
+                  {r.wbs}
+                </div>
+                <div className="w-[84px] shrink-0 px-2 text-center text-[10px] text-neutral-400">
+                  {shortDate(r.start)}
+                </div>
+                <div className="w-[84px] shrink-0 px-2 text-center text-[10px] text-neutral-400">
+                  {shortDate(r.end)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Kanan: timeline (dapat digulir horizontal) */}
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div style={{ width: totalDays * DAY_WIDTH }}>
+            {/* Header: bulan + hari */}
+            <div className="flex h-7 border-b border-neutral-800/80 bg-[#191a1e]">
+              {months.map((m) => (
+                <div
+                  key={`${m.label}-${m.span}`}
+                  className="shrink-0 border-r border-neutral-800/60 px-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400 flex items-center"
+                  style={{ width: m.span * DAY_WIDTH }}
+                >
+                  <span className="truncate">{m.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex h-7 border-b border-neutral-800/80 bg-[#191a1e]">
+              {days.map((d) => {
+                const weekend = d.getDay() === 0 || d.getDay() === 6
+                const isToday = d.getTime() === today
+                return (
+                  <div
+                    key={d.toISOString()}
+                    className={`shrink-0 border-r border-neutral-800/40 text-center leading-tight ${
+                      weekend ? 'bg-neutral-900/60' : ''
+                    }`}
+                    style={{ width: DAY_WIDTH }}
+                  >
+                    <div className="text-[9px] text-neutral-500">
+                      {d.toLocaleDateString('en-US', { weekday: 'narrow' })}
+                    </div>
+                    <div
+                      className={`text-[10px] ${
+                        isToday ? 'font-bold text-blue-400' : 'text-neutral-400'
+                      }`}
+                    >
+                      {d.getDate()}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Baris timeline */}
+            <div className="relative">
+              {/* Latar kolom (garis hari & akhir pekan) */}
+              <div className="pointer-events-none absolute inset-0 flex">
+                {days.map((d) => {
+                  const weekend = d.getDay() === 0 || d.getDay() === 6
+                  return (
+                    <div
+                      key={`bg-${d.toISOString()}`}
+                      className={`h-full shrink-0 border-r border-neutral-800/30 ${
+                        weekend ? 'bg-neutral-900/40' : ''
+                      }`}
+                      style={{ width: DAY_WIDTH }}
+                    />
+                  )
+                })}
+              </div>
+
+              {/* Garis "hari ini" */}
+              <div
+                className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-blue-500/60"
+                style={{ left: todayLeft }}
+              />
+
+              {rows.map((r) => (
+                <div
+                  key={`t-${r.kind}-${r.id}`}
+                  className={`relative h-9 border-b border-neutral-800/60 ${
+                    r.kind === 'group' ? 'bg-[#1b1c20]/70' : ''
+                  }`}
+                >
+                  {r.start !== null && r.end !== null && (
+                    <>
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 overflow-hidden rounded"
+                        style={{
+                          left: offsetOf(r.start),
+                          width: widthOf(r.start, r.end),
+                          height: r.kind === 'group' ? 8 : 20,
+                          backgroundColor: `${r.color}33`,
+                          border: `1px solid ${r.color}80`,
+                        }}
+                        title={`${r.title} • ${Math.round(r.progress * 100)}%`}
+                      >
+                        <div
+                          className="h-full"
+                          style={{
+                            width: `${Math.round(r.progress * 100)}%`,
+                            backgroundColor: r.color,
+                          }}
+                        />
+                      </div>
+
+                      {/* Label di kanan batang */}
+                      <div
+                        className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap pl-2 text-[10px] text-neutral-300"
+                        style={{
+                          left: offsetOf(r.start) + widthOf(r.start, r.end),
+                        }}
+                      >
+                        {r.kind === 'group' ? (
+                          <>
+                            {r.title}{' '}
+                            <span className="text-neutral-500">
+                              {Math.round(r.progress * 100)}%
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {Math.round(r.progress * 100)}%{' '}
+                            {r.assignee && <span className="text-neutral-500">{r.assignee}</span>}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
-        )
-      })}
+        </div>
+      </section>
     </div>
   )
 }
@@ -1449,14 +1764,12 @@ export default function ProjectDetailPage() {
     }
   }, [showWorkspaceMenu])
   const [members, setMembers] = useState<Member[]>([])
-  // Gantt dan Chart adalah tab tetap, sesuai Tabel 3.5 skenario 12
-  // ("Pengguna membuka tab Gantt dan Chart"). Sebelumnya keduanya harus
-  // ditambahkan manual lewat tombol "+".
-  const [customViews, setCustomViews] = useState<CustomView[]>([
-    { id: 'view-gantt', name: 'Gantt', type: 'gantt' },
-    { id: 'view-chart', name: 'Chart', type: 'chart' },
+  // Gantt dan Chart digabung menjadi satu tab, sesuai Tabel 3.5 skenario 12
+  // ("Pengguna membuka tab Gantt dan Chart"). Tab ini tetap, tidak perlu
+  // ditambahkan manual.
+  const [customViews] = useState<CustomView[]>([
+    { id: 'view-timeline', name: 'Gantt & Chart', type: 'timeline' },
   ])
-  const [showAddViewMenu, setShowAddViewMenu] = useState(false)
 
   // ======================== DYNAMIC STATUS LIST ========================
   const [statusList, setStatusList] = useState<StatusDef[]>(initialStatusList)
@@ -4153,52 +4466,6 @@ export default function ProjectDetailPage() {
                     )}
                   </button>
                 ))}
-
-                {/* Add Tab */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddViewMenu((v) => !v)}
-                    className="pb-3 text-neutral-400 hover:text-white transition cursor-pointer p-0.5"
-                    aria-label="Add tab"
-                  >
-                    <Plus size={16} />
-                  </button>
-                  {showAddViewMenu && (
-                    <>
-                      <div className="fixed inset-0 z-20" onClick={() => setShowAddViewMenu(false)} />
-                      <div className="absolute left-0 top-full mt-1 w-48 bg-[#1a1b1f] border border-neutral-700/80 rounded-xl shadow-2xl p-1 z-30 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="px-2.5 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800/80">
-                          Add View
-                        </div>
-                        {([
-                          { name: 'Gantt', type: 'gantt' as const },
-                          { name: 'Chart', type: 'chart' as const },
-                        ] as const).map((opt) => (
-                          <button
-                            key={opt.name}
-                            type="button"
-                            onClick={() => {
-                              if (customViews.some((v) => v.name === opt.name)) {
-                                setActiveTab(opt.name)
-                              } else {
-                                setCustomViews((prev) => [
-                                  ...prev,
-                                  { id: `view-${Date.now()}`, name: opt.name, type: opt.type },
-                                ])
-                                setActiveTab(opt.name)
-                              }
-                              setShowAddViewMenu(false)
-                            }}
-                            className="w-full px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 rounded transition cursor-pointer text-left"
-                          >
-                            + {opt.name} view
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
               </div>
             </div>
 
@@ -6439,20 +6706,10 @@ export default function ProjectDetailPage() {
               />
             )}
 
-            {/* CUSTOM VIEWS (Gantt / Chart) */}
-            {(() => {
-              const cv = customViews.find((v) => v.name === activeTab)
-              if (!cv) return null
-              return (
-                <div className="flex-1">
-                  {cv.type === 'gantt' ? (
-                    <GanttView groups={groups} statusList={statusList} />
-                  ) : (
-                    <ChartView groups={groups} statusList={statusList} />
-                  )}
-                </div>
-              )
-            })()}
+            {/* TAB: GANTT & CHART (distribusi status + timeline pengerjaan) */}
+            {activeTab === 'Gantt & Chart' && (
+              <GanttChartView groups={groups} statusList={statusList} />
+            )}
           </div>
         </main>
       </div>
